@@ -1,0 +1,39 @@
+name: recon
+channels:
+  - nvidia
+  - astra-toolbox
+  - conda-forge
+  - defaults
+dependencies:
+  - scikit-image
+  - sortedcontainers
+  - tifffile
+  - ipyslurm
+  - tomopy
+  - paramiko
+  - flake8
+  - ftputil
+  - ipykernel
+  - colorama
+  - psutil
+  - ipython
+  - click
+  - ruamel.yaml
+  - astra-toolbox
+  - google-auth-oauthlib
+  - keyrings.alt
+  - opencv
+  - dxchange
+  - keyring
+  - google-auth-httplib2
+  - scipy
+  - viztracer
+  - numpy[version='>=1.23']
+  - google-api-python-client
+  - bdbag
+  - python=3.10
+  - cudatoolkit=10.2
+  - torchvision==0.13.1
+  - pytorch==1.12.1
+  - torchaudio==0.12.1
+prefix: /gpfs/Home/den5123/.conda/envs/recon

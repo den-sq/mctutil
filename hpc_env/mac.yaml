@@ -1,0 +1,13 @@
+storage:
+  drive: "/gpfs/Labs/Cheng/phenome"
+  alt_project: scans
+
+processing:
+  threads: 32
+
+libraries:
+  ESP_301: "C:\\Users\\RecQuisition1\\Documents\\Newport\\MotionControl\\ESP301\\Bin"
+
+  # Linux: /opt/euresys/coaxlink/lib/x86_64/coaxlink.cti
+  # Darwin: /usr/local/opt/euresys/coaxlink/lib/x86_64/coaxlink.cti
+  CTI: "C:\\Program Files\\Euresys\\eGrabber\\cti\\x86_64\\coaxlink.cti"
