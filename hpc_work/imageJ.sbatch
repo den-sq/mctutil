@@ -6,4 +6,4 @@
 #SBATCH --exclusive
 #SBATCH --extra-node-info=48:1:1
 
-../Fiji.app/ImageJ-linux64 &
+../Fiji.app/ImageJ-linux64
