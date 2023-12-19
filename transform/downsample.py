@@ -17,12 +17,15 @@ from shared import log
 @click.option('-t', "--out-dtype", type=cli.NUMPYTYPE, default=np.uint8, help="Datatype of Output.")
 def downsample(data_dir, output_dir, out_dtype):
 	log.start()
-	out = Path(output_dir)
-	out.mkdir(parents=True, exist_ok=True)
+	out_dir = Path(output_dir)
+	out_dir.mkdir(parents=True, exist_ok=True)
+	dtype = out_dtype.nptype
 	for path in Path(data_dir).iterdir():
-		infile = tf.imread(path)
-		outfile = infile[:].astype(out_dtype.nptype)
-		tf.imwrite(Path(out, path.name), outfile)
+		in_img = tf.imread(path)
+		# Assumes matching signed or unsigned should fix
+		source_range = np.max(in_img) - np.min(in_img)
+		target_range = np.iinfo(dtype).max - np.iinfo(dtype).min
+		tf.imwrite(Path(out_dir, path.name), (in_img * target_range / source_range).astype(dtype), dtype=dtype)
 		log.log("File Written", path.name)
 
 if __name__ == "__main__":
