@@ -56,7 +56,7 @@ def memreader(mem, i, path):
 		mem_array[i] = tf.imread(path)
 
 
-def mem_write(mem: SharedNP, path: PathLike, i):
+def mem_write(mem: SharedNP, path: PathLike, i, dtype):
 	""" Writes to disk in distributed fashion
 
 		:param mem: Metadata for reconstruction shared memory.
@@ -64,7 +64,7 @@ def mem_write(mem: SharedNP, path: PathLike, i):
 		:param i: Vertical slice(s) (y) of reconstruction to write.
 	"""
 	with mem[i] as out_data:
-		tf.imwrite(path, out_data)
+		tf.imwrite(path, out_data.astype(dtype), dtype=dtype)
 
 
 @click.command()
@@ -85,6 +85,7 @@ def norm(normalize_over, data_dir, output_dir, processes):
 
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes, tif.pages[0].shape[0], tif.pages[0].shape[1])
+		dtype = tif.pages[0].dtype
 	 
 	log.log("Initialize", "Tiff Dimensions Fetched")
 
@@ -96,7 +97,7 @@ def norm(normalize_over, data_dir, output_dir, processes):
 			normalize(norm_mem, indices, normalize_over.start, normalize_over.stop, processes)
 			# log.log("Image Normalization", f"{len(indices)} Images Normalized")
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i) for i in indices])
+				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, dtype) for i in indices])
 			log.log("Image Writing", f"{len(indices)} Images Written")
 		
 
