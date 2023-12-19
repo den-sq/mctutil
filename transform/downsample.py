@@ -1,5 +1,5 @@
 import sys
-from pathlib import Path # if you haven't already done so
+from pathlib import Path 	# if you haven't already done so
 
 import click
 import numpy as np
@@ -8,8 +8,9 @@ import tifffile as tf
 # Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from shared import cli
-from shared import log
+from shared import cli 	# noqa::E402
+from shared import log 	# noqa::E402
+
 
 @click.command
 @click.option('-d', '--data-dir', type=click.Path(exists=True), help='Input path for original dataset.')
@@ -27,6 +28,7 @@ def downsample(data_dir, output_dir, out_dtype):
 		target_range = np.iinfo(dtype).max - np.iinfo(dtype).min
 		tf.imwrite(Path(out_dir, path.name), (in_img * target_range / source_range).astype(dtype), dtype=dtype)
 		log.log("File Written", path.name)
+
 
 if __name__ == "__main__":
 	downsample()
