@@ -1,51 +1,73 @@
-import glob
-import os
-import sys
+from pathlib import Path
 
+from neuroglancer_scripts.scripts.generate_scales_info import generate_scales_info
+from neuroglancer_scripts.scripts.slices_to_precomputed import convert_slices_in_directory
+from neuroglancer_scripts.scripts.compute_scales import compute_scales
 import json
 import tifffile
+import click
 
 
-def write_json_file(data, filename):
-	filepath = os.path.join(os.path.dirname(__file__), filename)
+@click.command()
+@click.option('-c', '--chunk-size', type=click.INT, default=128,
+				help="Chunk size.  Smaller values faster loads but more files; Larger values have slower but load less files.")
+@click.option('-r', '--resolution', type=click.INT, default=1400, help="Dataset Resolution, in nanometers")
+@click.option('--segmentation/--raw_data', type=click.BOOL, default=False,
+				help="Whether we are writing segmentations or raw image data.")
+@click.option('-i', '--input-path', type=click.Path(), required=True, help="Path to input files.")
+@click.option('-m', '--metadata-info', type=click.Path(dir_okay=False, writable=True), required=True,
+				help="Location for the Neuroglancer Metadata Info File.")
+@click.option('-o', '--output-location', type=click.STRING, required=True)
+def neuroglance(chunk_size, resolution, segmentation, input_path, metadata_info, output_location):
+	print(f'input folder: {input_path}')
+	image_paths = Path(input_path).glob("**/*.tif")
 
-	with open(filepath, 'w') as file:
-		json.dump(data, file)
+	memmap_ = tifffile.memmap(image_paths[0])
+	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
+	dtype_ = str(memmap_.dtype)
 
+	print(f'volume size is :{size} datatype is {dtype_}')
 
-def get_image_paths(folder):
-	return sorted(glob.glob(os.path.join(folder, '*.tif*')))
-
-
-proj_dir = os.path.dirname(sys.argv[0])
-input_path = sys.argv[1]
-resolution = int(sys.argv[2])
-
-print(f'input folder: {input_path}')
-image_paths = get_image_paths(input_path)
-
-memmap_ = tifffile.memmap(image_paths[0])
-z = len(image_paths)
-y = memmap_.shape[0]
-x = memmap_.shape[1]
-dtype_ = str(memmap_.dtype)
-
-print(f'volume size is :{x},{y},{z} datatype is {dtype_}')
-info_file = {
-	"type": "image",
-	"data_type": dtype_,
-	"num_channels": 1,
-	"scales":
-	[
-		{
-			"size": [x, y, z],
-			"encoding": 'raw',
-			"resolution": [resolution, resolution, resolution],
-			"voxel_offset": [0, 0, 0]
+	if segmentation:
+		json_metadata = {
+			"type": "segmentation",
+			"mesh": "mesh",
+			"encoding": 'compressed_segmentation',
+			"data_type": "uint64",
+			"num_channels": 1,
+			"compressed_segmentation_block_size": [8, 8, 8],
+			"scales":
+			[
+				{
+					"size": size,
+					"resolution": [resolution, resolution, resolution],
+					"voxel_offset": [0, 0, 0]
+				}
+			]
 		}
-	]
-}
+	else:
+		json_metadata = {
+			"type": "image",
+			"data_type": dtype_,
+			"num_channels": 1,
+			"scales":
+			[
+				{
+					"size": size,
+					"encoding": 'raw',
+					"resolution": [resolution, resolution, resolution],
+					"voxel_offset": [0, 0, 0]
+				}
+			]
+		}
 
-filename = "info_MI"
-write_json_file(info_file, filename)
-print("JSON file created: ", filename)
+	with open(metadata_info) as handle:
+		json.dump(json_metadata, handle)
+
+	generate_scales_info(metadata_info, output_location, chunk_size)
+	convert_slices_in_directory(input_path, output_location, options={"flat": True})
+	compute_scales(output_location, "stride" if segmentation else "average", options={"flat": True})
+
+
+if __name__ == '__main__':
+	neuroglance()
