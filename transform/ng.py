@@ -20,7 +20,7 @@ import click
 @click.option('-o', '--output-location', type=click.STRING, required=True)
 def neuroglance(chunk_size, resolution, segmentation, input_path, metadata_info, output_location):
 	print(f'input folder: {input_path}')
-	image_paths = Path(input_path).glob("**/*.tif")
+	image_paths = list(Path(input_path).glob("**/*.tif"))
 
 	memmap_ = tifffile.memmap(image_paths[0])
 	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
@@ -61,11 +61,11 @@ def neuroglance(chunk_size, resolution, segmentation, input_path, metadata_info,
 			]
 		}
 
-	with open(metadata_info) as handle:
+	with open(metadata_info, 'w') as handle:
 		json.dump(json_metadata, handle)
 
 	generate_scales_info(metadata_info, output_location, chunk_size)
-	convert_slices_in_directory(input_path, output_location, options={"flat": True})
+	convert_slices_in_directory([Path(input_path)], output_location, options={"flat": True})
 	compute_scales(output_location, "stride" if segmentation else "average", options={"flat": True})
 
 
