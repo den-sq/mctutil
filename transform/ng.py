@@ -17,8 +17,10 @@ import click
 @click.option('-i', '--input-path', type=click.Path(), required=True, help="Path to input files.")
 @click.option('-m', '--metadata-info', type=click.Path(dir_okay=False, writable=True), required=True,
 				help="Location for the Neuroglancer Metadata Info File.")
+@click.option("--strip-gz/--keep-gz", type=click.BOOL, default=False,
+				help="Whether to strip gz extennsions from filenames, as they can confuse neuroglancer.")
 @click.option('-o', '--output-location', type=click.STRING, required=True)
-def neuroglance(chunk_size, resolution, segmentation, input_path, metadata_info, output_location):
+def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, metadata_info, output_location):
 	print(f'input folder: {input_path}')
 	image_paths = list(Path(input_path).glob("**/*.tif"))
 
@@ -67,6 +69,10 @@ def neuroglance(chunk_size, resolution, segmentation, input_path, metadata_info,
 	generate_scales_info(metadata_info, output_location, chunk_size)
 	convert_slices_in_directory([Path(input_path)], output_location, options={"flat": True})
 	compute_scales(output_location, "stride" if segmentation else "average", options={"flat": True})
+
+	if strip_gz:
+		for out_file in Path(output_location).glob("**/*.gz"):
+			out_file.rename(out_file.with_suffix(""))
 
 
 if __name__ == '__main__':
