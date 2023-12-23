@@ -74,10 +74,10 @@ def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
 @click.option('-n', '--normalize-over', type=FRANGE, help="Range of retained values to normalize over, by percentiles.")
 @click.option('-d', '--data-dir', type=click.Path(exists=True), help='Input path for noisy dataset')
 @click.option('-o', '--output-dir', type=click.Path(), help='Output path for cleaned images', default='data/clean/')
-@click.option('-v', '--vertical-trim', type=click.FLOAT, default=0.0,
-				help='Vertical trim (top and bottom) as a percent')
-@click.option('-h', '--horizontal-trim', type=click.FLOAT, default=0.0,
-				help='Horizontal trim (top and bottom) as a percent')
+@click.option('-v', '--vertical-trim', type=click.STRING, default=0.0,
+				help='Vertical trim as a percent (0.0-1.0).  One # defines both, two is top/bottom.')
+@click.option('-h', '--horizontal-trim', type=click.STRING, default=0.0,
+				help='Horizontal trim as a percent (0.0-1.0).  One # defines both, two is left/right.')
 @click.option('-t', "--out-dtype", type=cli.NUMPYTYPE, default=np.uint8, help="Datatype of Output.")
 @click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
@@ -87,6 +87,16 @@ def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
 def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype, processes, mips,
 			circ_mask_ratio):
 	log.start()
+
+	try:
+		top_trim = bottom_trim = float(vertical_trim)
+	except ValueError:
+		top_trim, bottom_trim = [float(x) for x in vertical_trim.split(",")]
+
+	try:
+		left_trim = right_trim = float(horizontal_trim)
+	except ValueError:
+		left_trim, right_trim = [float(x) for x in horizontal_trim.split(",")]
 
 	mips_offset = max(mips, 1) - 1
 	indices = list(range(0, mips_offset + processes))
@@ -105,8 +115,8 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes + mips_offset, tif.pages[0].shape[0], tif.pages[0].shape[1])
 		dim = tif.pages[0].shape
-		out_dim = np.s_[int(dim[0] * horizontal_trim):int(dim[0] * (1 - horizontal_trim)),
-						int(dim[1] * vertical_trim):int(dim[1] * (1 - vertical_trim))]
+		out_dim = np.s_[int(dim[0] * left_trim):int(dim[0] * (1 - right_trim)),
+						int(dim[1] * top_trim):int(dim[1] * (1 - bottom_trim))]
 		log.log("Dimensions", f"{dim}-{out_dim}")
 
 	log.log("Initialize", "Tiff Dimensions Fetched")
@@ -119,7 +129,7 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 		with Pool(processes) as pool:
 			image_count = len(inputs) // normalize_interval
 			log.log("Image Load", f"{len(inputs)}:{normalize_interval}:{processes}:{len(inputs) // normalize_interval}")
-			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i,j in enumerate(range(0, len(inputs), image_count))])
+			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i, j in enumerate(range(0, len(inputs), image_count))])
 			log.log("Image Load",
 					f"{len(range(0, len(inputs), len(inputs) % normalize_interval))}|{normalize_interval}"
 					" Images Loaded For Normalization")
@@ -129,7 +139,7 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio, val=np.min(mips_mem[0:image_count]))
 				log.log("Image Masking", f"Images Masked at {circ_mask_ratio}")
 
-			floor, ceiling = normalize_calc(norm_mem, np.s_[0:image_count], actual_start, normalize_over.stop, np.s_[:,:])
+			floor, ceiling = normalize_calc(norm_mem, np.s_[0:image_count], actual_start, normalize_over.stop, np.s_[:, :])
 
 		for input_set in batched_input:
 			indices = [i for i in indices if i < len(input_set)]
@@ -155,10 +165,12 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 			with Pool(processes) as pool:
 				pool.starmap(normalize, [(norm_mem, i, floor, ceiling) for i in indices[mips_offset:]])
 
-			log.log("Image Normalization", f"{len(indices[mips_offset:])} Images Normalized at {floor:.4g} to {ceiling:.4g} over {(ceiling - floor):.4g}")
+			log.log("Image Normalization",
+					f"{len(indices[mips_offset:])} Images Normalized at {floor:.4g} to {ceiling:.4g} over {(ceiling - floor):.4g}")
 
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype) for i in indices[mips_offset:]])
+				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype)
+								for i in indices[mips_offset:]])
 
 			log.log("Image Writing", f"{len([i for i in indices[mips_offset:]])} Images Written")
 	log.log("Complete")
