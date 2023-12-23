@@ -64,7 +64,10 @@ def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
 		:param i: Vertical slice(s) (y) of reconstruction to write.
 	"""
 	with mem[i] as out_data:
-		tf.imwrite(path, np.multiply(out_data[slice], 256).astype(dtype), dtype=dtype)
+		if np.issubdtype(dtype, np.integer):
+			tf.imwrite(path, np.multiply(out_data[slice], np.iinfo(dtype).max).astype(dtype), dtype=dtype)
+		else:
+			tf.imwrite(path, out_data[slice].astype(dtype), dtype=dtype)
 
 
 @click.command()
@@ -93,9 +96,9 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 	# Because samples vary over rage, we want to normalize across the range.
 	# Interval is calculated so size of normalize dataset is one batch.
-	normalize_interval = len(inputs) / processes
+	normalize_interval = int(np.ceil(len(inputs) / processes))
 
-	batched_input = list(batch(inputs), processes, mips_offset)
+	batched_input = list(batch(inputs, processes, mips_offset))
 
 	log.log("Initialize", "Inputs Batched")
 
@@ -108,29 +111,36 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 	log.log("Initialize", "Tiff Dimensions Fetched")
 
+	if circ_mask_ratio:
+		actual_start = normalize_over.start + 100 * (1.0 - np.pi * ((circ_mask_ratio / 2) ** 2))
+
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:
 		# Normalization calculation
 		with Pool(processes) as pool:
-			pool.starmap(memreader, [(norm_mem, i, inputs[i]) for i in range(0, len(inputs), len(inputs) % normalize_interval)])
+			image_count = len(inputs) // normalize_interval
+			log.log("Image Load", f"{len(inputs)}:{normalize_interval}:{processes}:{len(inputs) // normalize_interval}")
+			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i,j in enumerate(range(0, len(inputs), image_count))])
 			log.log("Image Load",
 					f"{len(range(0, len(inputs), len(inputs) % normalize_interval))}|{normalize_interval}"
 					" Images Loaded For Normalization")
 
 			if circ_mask_ratio:
 				with norm_mem as mips_mem:
-					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio)
+					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio, val=np.min(mips_mem[0:image_count]))
 				log.log("Image Masking", f"Images Masked at {circ_mask_ratio}")
 
-			floor, ceiling = normalize(norm_mem, indices[mips_offset:], normalize_over.start, normalize_over.stop, out_dim)
+			floor, ceiling = normalize_calc(norm_mem, np.s_[0:image_count], actual_start, normalize_over.stop, np.s_[:,:])
 
 		for input_set in batched_input:
+			indices = [i for i in indices if i < len(input_set)]
+
 			with Pool(processes) as pool:
-				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices if i < len(input_set)])
+				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
 			log.log("Image Load", f"{len(indices)}|{len(input_set)} Images Loaded")
 
 			if circ_mask_ratio:
 				with norm_mem as mips_mem:
-					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio)
+					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio, val=floor)
 				log.log("Image Masking", f"Images Masked at {circ_mask_ratio}")
 
 			if mips > 1:
@@ -143,16 +153,15 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 						# 			log_level=log.DEBUG.INFO)
 
 			with Pool(processes) as pool:
-				pool.starmap(normalize, [(norm_mem, i, floor, ceiling) for i in input_set])
+				pool.starmap(normalize, [(norm_mem, i, floor, ceiling) for i in indices[mips_offset:]])
 
-			log.log('Normalization', f"{floor:.4g} to {ceiling:.4g} {(ceiling - floor):.4g}", log_level=log.DEBUG.INFO)
+			log.log("Image Normalization", f"{len(indices[mips_offset:])} Images Normalized at {floor:.4g} to {ceiling:.4g} over {(ceiling - floor):.4g}")
 
-			# log.log("Image Normalization", f"{len(indices[mips_offset:])} Images Normalized")
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype)
-											for i in indices[mips_offset:]])
+				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype) for i in indices[mips_offset:]])
 
-			log.log("Image Writing", f"{len(indices[mips_offset:])} Images Written")
+			log.log("Image Writing", f"{len([i for i in indices[mips_offset:]])} Images Written")
+	log.log("Complete")
 
 
 if __name__ == '__main__':

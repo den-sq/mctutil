@@ -3,7 +3,7 @@ from pathlib import Path
 import click
 
 
-@click.commmand()
+@click.command()
 @click.argument("root_path", type=click.Path(exists=True))
 def stripgz(root_path):
     for fname in Path(root_path).glob("**/*.gz"):
