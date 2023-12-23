@@ -115,8 +115,8 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes + mips_offset, tif.pages[0].shape[0], tif.pages[0].shape[1])
 		dim = tif.pages[0].shape
-		out_dim = np.s_[int(dim[0] * left_trim):int(dim[0] * (1 - right_trim)),
-						int(dim[1] * top_trim):int(dim[1] * (1 - bottom_trim))]
+		out_dim = np.s_[int(dim[0] * top_trim):int(dim[0] * (1 - bottom_trim)),
+						int(dim[1] * left_trim):int(dim[1] * (1 - right_trim))]
 		log.log("Dimensions", f"{dim}-{out_dim}")
 
 	log.log("Initialize", "Tiff Dimensions Fetched")
