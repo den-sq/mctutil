@@ -7,6 +7,7 @@ import click
 import numpy as np
 import psutil
 import tifffile as tf
+from tomopy import circ_mask
 
 # Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -85,7 +86,10 @@ def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
 @click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
 @click.option('-m', '--mips', type=click.INT, help='# of projections to take maximum intensity from.', default=0)
-def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype, processes, mips):
+@click.option("-c", "--circ-mask-ratio", type=click.FLOAT, default=None,
+				help="Circular Mask Ratio, if wanted.")
+def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype, processes, mips,
+			circ_mask_ratio):
 	log.start()
 
 	mips_offset = max(mips, 1) - 1
@@ -122,6 +126,8 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 			normalize(norm_mem, indices[mips_offset:], normalize_over.start, normalize_over.stop, processes, out_dim)
 			# log.log("Image Normalization", f"{len(indices[mips_offset:])} Images Normalized")
+			with norm_mem as mips_mem:
+				circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio)
 			with Pool(processes) as pool:
 				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype)
 											for i in indices[mips_offset:]])
