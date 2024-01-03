@@ -1,9 +1,16 @@
-from multiprocessing import Pool
+from multiprocessing import Pool, shared_memory
 from pathlib import Path
+import sys
 
 import click
 import numpy as np
 import tifffile as tf
+
+# Needed to run script from subfolder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared import log 	# noqa::E402
+from shared.mem import SharedNP, ProjOrder 	# noqa::E402
 
 
 class SampleParameter(click.ParamType):
@@ -12,19 +19,20 @@ class SampleParameter(click.ParamType):
 	def convert(self, value, param, ctx):
 		values = value.split(",")
 		proj_folder = Path(values[0])
-		flat_folder = None if len(values) < 2 else values[1]
-		center = None if len(values) < 3 else values[2]
-		tilt = None if len(values) < 4 else values[3]
+		pre_flat = None if len(values) < 2 else values[1]
+		post_flat = None if len(values) < 3 else values[2]
+		center = None if len(values) < 4 else values[3]
+		tilt = None if len(values) < 5 else values[4]
 
-		return SampleSet(proj_folder, flat_folder, center, tilt)
+		return SampleSet(proj_folder, pre_flat, post_flat, center, tilt)
 
 
 class SampleSet():
-	def __init__(self, proj_folder, flat_folder=None, center=None, tilt=None):
+	def __init__(self, proj_folder, pre_flat=None, post_flat=None, center=None, tilt=None):
 		self.projs = sorted(list(Path(proj_folder).iterdir()))
 		temp_proj = tf.imread(self.projs[0])
-		if flat_folder is not None:
-			flatset = np.stack([tf.memmap(flat) for flat in Path(flat_folder).iterdir() if flat.suffix[:4] == '.tif'], axis=0)
+		if pre_flat is not None:
+			flatset = np.stack([tf.memmap(flat) for flat in Path(pre_flat).iterdir() if flat.suffix[:4] == '.tif'], axis=0)
 			self._proj = np.divide(temp_proj, np.median(flatset, axis=0).astype(temp_proj.dtype))
 		self._center = center if center is not None else self._proj.shape[1] // 2
 		self._half_width = min(self._center, self._proj.shape[1] - self._center)
@@ -65,11 +73,11 @@ def stitch_single(samples, overlaps, new_dim, stitch_output, x):
 
 	for i, overlap in enumerate(overlaps):
 		non_overlap = samples[i + 1].proj.shape[0] - overlap
+		# print(f"{offset}|{overlap}|{non_overlap}")
 
 		# Proj Merge
 		np.median([stitched[offset - overlap:offset, :], samples[i + 1].proj_top(overlap)], axis=0,
 					out=stitched[offset - overlap:offset, :])
-
 
 		# Next section.
 		stitched[offset: offset + non_overlap, :] = samples[i + 1].proj_bot(non_overlap)
@@ -80,16 +88,21 @@ def stitch_single(samples, overlaps, new_dim, stitch_output, x):
 
 
 def stitch_samples(samples, overlaps, stitch_output):
-	print(overlaps)
 	new_dim = (np.sum([s.proj.shape[0] for s in samples]) - np.sum(overlaps), samples[0].half_width * 2)
-	print(new_dim)
+
 	for s in samples:
 		s.del_proj()
 
+	log.log("Dimension", new_dim)
+
 	Path(stitch_output).mkdir(parents=True, exist_ok=True)
 
+	log.log("Output Dir", stitch_output)
+
 	with Pool(50) as pool:
-		pool.starmap(stitch_single, [(samples, overlaps, new_dim, stitch_output, x) for x in range(0, len(samples[0].projs))])
+		pool.starmap(stitch_single, [(samples, overlaps, new_dim, stitch_output, x) for x in range(len(samples[0].projs))])
+
+	log.log("Stitching Complete", f"{len(samples[0].projs)} Projections Stitched")
 
 
 @click.command()
@@ -106,18 +119,20 @@ def stitch(sample, top_stitch, stitch_range, stitch_output):
 
 	for s in sample:
 		s.half_width = target_width
-		print(s.proj.shape)
+
+	log.log("Proj Shape", f"HW: {target_width}; P: {[s.proj.shape for s in sample]}")
 
 	# Stich the samples in reverse order if we're stitching starting at the top; simpler this way.
 	if top_stitch:
 		sample.reverse()
+		log.log("Reverse", "Reversed to handle top/bottom stitching.")
 
 	overlaps = []
 	stitch_scope = range(20, int(sample[0].proj.shape[0] * stitch_range))
 	for y in range(len(sample) - 1):
 		std_set = [(x, np.std(np.divide(sample[y].proj_bot(x), sample[y + 1].proj_top(x)))) for x in stitch_scope]
 		std_set.sort(key=lambda x: x[1])
-		print(std_set[:10])
+		log.log("Overlap", f"{std_set[0]}")
 
 		overlaps.append(std_set[0][0])
 
