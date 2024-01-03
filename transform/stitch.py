@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 from pathlib import Path
 
 import click
@@ -46,9 +47,49 @@ class SampleSet():
 	def proj_bot(self, x):
 		return self._proj[-x:, self._center - self._half_width: self._center + self._half_width]
 
+	def del_proj(self):
+		self._proj = None
 
-def stitch_proj(samples, overlaps):
+	def load_proj(self, x):
+		self._proj = tf.imread(self.projs[x])
+
+
+def stitch_single(samples, overlaps, new_dim, stitch_output, x):
+	stitched = np.zeros(new_dim, dtype=np.uint16)
+
+	for s in samples:
+		s.load_proj(x)
+
+	stitched[0:samples[0].proj.shape[0], :] = samples[0].proj
+	offset = samples[0].proj.shape[0]
+
+	for i, overlap in enumerate(overlaps):
+		non_overlap = samples[i + 1].proj.shape[0] - overlap
+
+		# Proj Merge
+		np.median([stitched[offset - overlap:offset, :], samples[i + 1].proj_top(overlap)], axis=0,
+					out=stitched[offset - overlap:offset, :])
+
+
+		# Next section.
+		stitched[offset: offset + non_overlap, :] = samples[i + 1].proj_bot(non_overlap)
+
+		offset += non_overlap
+
+	tf.imwrite(Path(stitch_output, f"AAA590_Stitched_{x}.tif"), stitched)
+
+
+def stitch_samples(samples, overlaps, stitch_output):
 	print(overlaps)
+	new_dim = (np.sum([s.proj.shape[0] for s in samples]) - np.sum(overlaps), samples[0].half_width * 2)
+	print(new_dim)
+	for s in samples:
+		s.del_proj()
+
+	Path(stitch_output).mkdir(parents=True, exist_ok=True)
+
+	with Pool(50) as pool:
+		pool.starmap(stitch_single, [(samples, overlaps, new_dim, stitch_output, x) for x in range(0, len(samples[0].projs))])
 
 
 @click.command()
@@ -56,9 +97,10 @@ def stitch_proj(samples, overlaps):
 				help="Sample information; comma separated list of projection folder, flat folder, rotational center, and tilt.")
 @click.option("--top-stitch/--bottom-stitch", type=click.BOOL, default=False,
 				help="Vertical side of first sample to stitch at.")
-@click.option("--stitch-range", type=click.FLOAT, default=0.2, help="Maximum")
-@click.argument("output_samples")
-def stitch(sample, top_stitch, stitch_range, output_samples):
+@click.option("--stitch-range", type=click.FLOAT, default=0.2,
+				help="Maximum range (as percent of height) to scan for overlaps.")
+@click.option("--stitch-output", type=click.Path(), required=True, help="Output path of stitching.")
+def stitch(sample, top_stitch, stitch_range, stitch_output):
 	# samples = [SampleSet(first_sample, first_flat, first_center), SampleSet(second_sample, second_flat, second_center)]
 	target_width = min([x.half_width for x in sample])
 
@@ -72,14 +114,14 @@ def stitch(sample, top_stitch, stitch_range, output_samples):
 
 	overlaps = []
 	stitch_scope = range(20, int(sample[0].proj.shape[0] * stitch_range))
-	for y in range(0, len(sample) - 1):
+	for y in range(len(sample) - 1):
 		std_set = [(x, np.std(np.divide(sample[y].proj_bot(x), sample[y + 1].proj_top(x)))) for x in stitch_scope]
 		std_set.sort(key=lambda x: x[1])
 		print(std_set[:10])
 
-		overlaps.append(std_set[0])
+		overlaps.append(std_set[0][0])
 
-	stitch_proj(sample, overlaps)
+	stitch_samples(sample, overlaps, stitch_output)
 
 
 if __name__ == "__main__":
