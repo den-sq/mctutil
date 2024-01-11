@@ -1,4 +1,4 @@
-from multiprocessing import Pool, shared_memory
+from multiprocessing import Pool
 from pathlib import Path
 import sys
 
@@ -30,10 +30,35 @@ class SampleParameter(click.ParamType):
 class SampleSet():
 	def __init__(self, proj_folder, pre_flat=None, post_flat=None, center=None, tilt=None):
 		self.projs = sorted(list(Path(proj_folder).iterdir()))
+
+		self._use_flats = pre_flat is not None
+
 		temp_proj = tf.imread(self.projs[0])
-		if pre_flat is not None:
-			flatset = np.stack([tf.memmap(flat) for flat in Path(pre_flat).iterdir() if flat.suffix[:4] == '.tif'], axis=0)
-			self._proj = np.divide(temp_proj, np.median(flatset, axis=0).astype(temp_proj.dtype))
+		if self._use_flats:
+			self._flat_mem_base = SharedNP(f"Flats_{Path(proj_folder).parent.name}", temp_proj.dtype,
+										ProjOrder(2, temp_proj.shape[0], temp_proj.shape[1]), create=False)
+			self._flat_mem = self._flat_mem_base.create()
+
+			with self._flat_mem as flats:
+				flats[0, :, :] = np.median(np.stack([tf.memmap(flat) for flat in Path(pre_flat).iterdir()
+													if flat.suffix[:4] == '.tif'], axis=0), axis=0).astype(temp_proj.dtype)
+				if post_flat is not None:
+					flats[1, :, :] = np.median(np.stack([tf.memmap(flat) for flat in Path(post_flat).iterdir()
+														if flat.suffix[:4] == '.tif'], axis=0), axis=0)
+				else:
+					flats[1, :, :] = flats[0, :, :]
+
+				self._proj = np.multiply(np.divide(temp_proj, flats[0, :, :]))
+
+				tf.imwrite("test_preflat.tif", flats[0, :, :])
+				tf.imwrite("test_postflat.tif", flats[0, :, :])
+				tf.imwrite("test_div.tif", self._proj)
+
+			self._flat_mem.unlink()
+			exit()
+		else:
+			self._proj = temp_proj
+
 		self._center = center if center is not None else self._proj.shape[1] // 2
 		self._half_width = min(self._center, self._proj.shape[1] - self._center)
 
@@ -58,8 +83,21 @@ class SampleSet():
 	def del_proj(self):
 		self._proj = None
 
+	@property
+	def len(self):
+		return len(self.projs)
+
 	def load_proj(self, x):
-		self._proj = tf.imread(self.projs[x])
+		temp_proj = tf.imread(self.projs[x])
+		if self._use_flats:
+			with self._flat_mem as flats:
+				gain_map = np.average(flats[0:2, :, :], axis=0, weights=[self.len - x, x])
+				self._proj = np.multiply(np.divide(temp_proj, gain_map), np.iinfo(temp_proj.dtype).max).astype(temp_proj.dtype)
+		else:
+			self._proj = temp_proj
+
+	def unlink(self):
+		self._flat_mem.unlink()
 
 
 def stitch_single(samples, overlaps, new_dim, stitch_output, x):
@@ -76,8 +114,7 @@ def stitch_single(samples, overlaps, new_dim, stitch_output, x):
 		# print(f"{offset}|{overlap}|{non_overlap}")
 
 		# Proj Merge
-		np.median([stitched[offset - overlap:offset, :], samples[i + 1].proj_top(overlap)], axis=0,
-					out=stitched[offset - overlap:offset, :])
+		stitched[offset - overlap:offset, :] = np.median([stitched[offset - overlap:offset, :], samples[i + 1].proj_top(overlap)], axis=0)
 
 		# Next section.
 		stitched[offset: offset + non_overlap, :] = samples[i + 1].proj_bot(non_overlap)
@@ -107,7 +144,7 @@ def stitch_samples(samples, overlaps, stitch_output):
 
 @click.command()
 @click.option("-s", "--sample", type=SampleParameter(), multiple=True,
-				help="Sample information; comma separated list of projection folder, flat folder, rotational center, and tilt.")
+				help="Sample information; comma separated list of projection folder, pre-flat folder, post-flat folder, rotational center, and tilt.")
 @click.option("--top-stitch/--bottom-stitch", type=click.BOOL, default=False,
 				help="Vertical side of first sample to stitch at.")
 @click.option("--stitch-range", type=click.FLOAT, default=0.2,
@@ -138,7 +175,9 @@ def stitch(sample, top_stitch, stitch_range, stitch_output):
 
 	stitch_samples(sample, overlaps, stitch_output)
 
+	for s in sample:
+		s.unlink()
+
 
 if __name__ == "__main__":
 	stitch()
-
