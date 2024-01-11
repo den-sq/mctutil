@@ -34,8 +34,9 @@ class SampleSet():
 		self._use_flats = pre_flat is not None
 
 		temp_proj = tf.imread(self.projs[0])
+		mem_name = Path(proj_folder).parent.name
 		if self._use_flats:
-			self._flat_mem_base = SharedNP(f"Flats_{Path(proj_folder).parent.name}", temp_proj.dtype,
+			self._flat_mem_base = SharedNP(f"Flats_{mem_name}", temp_proj.dtype,
 										ProjOrder(2, temp_proj.shape[0], temp_proj.shape[1]), create=False)
 			self._flat_mem = self._flat_mem_base.create()
 
@@ -48,14 +49,11 @@ class SampleSet():
 				else:
 					flats[1, :, :] = flats[0, :, :]
 
-				self._proj = np.multiply(np.divide(temp_proj, flats[0, :, :]))
+				self._proj = np.divide(temp_proj, flats[0, :, :])
 
-				tf.imwrite("test_preflat.tif", flats[0, :, :])
-				tf.imwrite("test_postflat.tif", flats[0, :, :])
-				tf.imwrite("test_div.tif", self._proj)
-
-			self._flat_mem.unlink()
-			exit()
+				tf.imwrite(f"{mem_name}_preflat.tif", flats[0, :, :])
+				tf.imwrite(f"{mem_name}_postflat.tif", flats[0, :, :])
+				tf.imwrite(f"{mem_name}_test_div.tif", self._proj)
 		else:
 			self._proj = temp_proj
 
