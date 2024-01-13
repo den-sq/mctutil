@@ -46,12 +46,26 @@ def convert(source_mem, target_mem, i, j):
 
 
 def batch(iterable, n=1, extra=0):
+	""" Divides iterable into batches.
+
+		:param iterable: Source iterable.
+		:param n: # of entries in each batch.
+		:param extra: # of extra entries placed before batch entries for mips/rotation space.
+
+		:retval: yield of each iterable section.
+	"""
 	length = len(iterable)
 	for ndx in range(extra, length, n):
 		yield iterable[ndx - extra:min(ndx + n, length)]
 
 
 def memreader(mem, i, path):
+	""" Simple full-file reading into shared memory.
+	
+		:param mem: Metadata for shared memory.
+		:param i: Index (0th Axis) of shared memory to write to.
+		:param path: Path on disk to read from.
+	"""
 	with mem as mem_array:
 		mem_array[i] = tf.imread(path)
 
