@@ -80,7 +80,7 @@ class OptionList(click.ParamType):
 			self.fail(f'{value} is not a list of comma-separated options.')
 
 
-# Click Parameter: Comma-separated key=value list of options.
+# Click Parameter:
 class Range(click.ParamType):
 	name = "Integer Range"
 
@@ -128,6 +128,34 @@ class NumPyType(click.ParamType):
 			return val
 		except TypeError:
 			self.fail(f'{value} is not a valid numpy datatype.')
+
+
+# Click Parameter: Indexing Slice
+class SLICE(click.ParamType):
+	name = "Index Slice"
+
+	def convert(self, value, _param, _ctx):
+		try:
+			if value[0] != '[' or value[-1] != ']':
+				self.fail(f"{value} should be enclosed in brackets like a slice; e.g. [1:5, 2:3].")
+
+			built_slice = ()
+
+			for dim in value[1:-1].split(","):
+				entries = [int(x) if x != '' else None for x in dim.split(':')]
+				if len(entries) == 1:
+					built_slice += (np.s_[entries[0]],)
+				elif len(entries) == 2:
+					built_slice += (np.s_[entries[0]: entries[1]],)
+				elif len(entries) == 3:
+					built_slice += (np.s_[entries[0]: entries[1]: entries[2]],)
+
+			if built_slice != ():
+				return built_slice
+			else:
+				self.fail(f'{value} must have at least one entry to be a slice.')
+		except ValueError as ex:
+			self.fail(f'{value} is not formatted as a valid slice; e.g. [1,2:7,4:] - {ex}')
 
 
 # Different projection types for CUDA reconstruction algorithms.
