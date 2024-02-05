@@ -1,4 +1,5 @@
 from multiprocessing import Pool
+import numbers
 from os import PathLike
 from pathlib import Path
 import sys
@@ -33,6 +34,7 @@ def normalize_calc(image_mem, index, bottom_threshold, top_threshold, slice):
 		log.log("Normalize Setup", f"{image.shape}:{im_part}")
 		floor = np.percentile(image[im_part], bottom_threshold)
 		ceiling = np.percentile(image[im_part], top_threshold)
+		log.log("Normalization Setup", f"{image.dtype}:{image.dtype.type}")
 		log.log('Normalization Setup',
 			f"{np.min(image)}-{np.max(image)}: {bottom_threshold}-{top_threshold} is {floor:.4g}-{ceiling:.4g}",
 			log_level=log.DEBUG.INFO)
@@ -79,9 +81,9 @@ def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
 	"""
 	with mem[i] as out_data:
 		if np.issubdtype(dtype, np.integer):
-			tf.imwrite(path, np.multiply(out_data[slice], np.iinfo(dtype).max).astype(dtype), dtype=dtype)
+			tf.imwrite(path, np.multiply(out_data[slice], np.iinfo(dtype).max).astype(dtype), dtype=dtype, compression=8)
 		else:
-			tf.imwrite(path, out_data[slice].astype(dtype), dtype=dtype)
+			tf.imwrite(path, out_data[slice].astype(dtype), dtype=dtype, compression=8)
 
 
 @click.command()
@@ -114,7 +116,6 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 	mips_offset = max(mips, 1) - 1
 	indices = list(range(0, mips_offset + processes))
-
 	Path(output_dir).mkdir(parents=True, exist_ok=True)
 	inputs = sorted([x for x in Path(data_dir).iterdir() if ".tif" in x.name])
 
@@ -124,7 +125,7 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 	batched_input = list(batch(inputs, processes, mips_offset))
 
-	log.log("Initialize", "Inputs Batched")
+	log.log("Initialize", "Inputs Batched; Normalize Interval {normalize_interval}")
 
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes + mips_offset, tif.pages[0].shape[0], tif.pages[0].shape[1])
@@ -132,18 +133,22 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 		out_dim = np.s_[int(dim[0] * top_trim):int(dim[0] * (1 - bottom_trim)),
 						int(dim[1] * left_trim):int(dim[1] * (1 - right_trim))]
 		log.log("Dimensions", f"{dim}-{out_dim}")
+		in_type = tif.pages[0].dtype
 
 	log.log("Initialize", "Tiff Dimensions Fetched")
 
 	if circ_mask_ratio:
 		actual_start = normalize_over.start + 100 * (1.0 - np.pi * ((circ_mask_ratio / 2) ** 2))
+	else:
+		actual_start = normalize_over.start
 
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:
 		# Normalization calculation
 		with Pool(processes) as pool:
 			image_count = len(inputs) // normalize_interval
 			log.log("Image Load", f"{len(inputs)}:{normalize_interval}:{processes}:{len(inputs) // normalize_interval}")
-			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i, j in enumerate(range(0, len(inputs), image_count))])
+
+			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i, j in enumerate(range(0, len(inputs), normalize_interval))])
 			log.log("Image Load",
 					f"{len(range(0, len(inputs), len(inputs) % normalize_interval))}|{normalize_interval}"
 					" Images Loaded For Normalization")
