@@ -25,11 +25,18 @@ def fetch_slices(remote, use_https, region, bin_power, output_dir):
 		tifffile.imwrite(os.path.join(output_dir, f"slice_{str(i).zfill(4)}.tif"), slice_data)
 
 
-def bin_slices(base_slice, bin_power):
-	out_slice = ()
-	for dim in base_slice:
-		out_slice += (np.s_[dim.start // (2 ** bin_power): dim.stop // (2 ** bin_power)], )
-	return out_slice
+def bin_slices(base_slice, bin_power, base_dim):
+	if bin_power:
+		out_slice = ()
+
+		for i, slice_dim in enumerate(base_slice):
+			new_start = 0 if slice_dim.start is None else slice_dim.start // (2 ** bin_power)
+			new_stop = base_dim[i] if slice_dim.stop is None else slice_dim.stop // (2 ** bin_power)
+			out_slice += (np.s_[new_start: new_stop], )
+		log.log("Slice Calculation", out_slice)
+		return out_slice
+	else:
+		return base_slice
 
 
 @click.command()
@@ -46,7 +53,8 @@ def bin_slices(base_slice, bin_power):
 def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, num_processes, output_dir):
 	log.log("Start")
 
-	cloud_slice = bin_slices(cloud_slice, bin_power)
+	cloud_slice = bin_slices(cloud_slice, bin_power,
+							CloudVolume(cloud_url, mip=bin_power, use_https=use_https, progress=True).shape)
 	batch_size = (cloud_slice[0].stop - cloud_slice[0].start) // num_processes
 
 	# directory management
