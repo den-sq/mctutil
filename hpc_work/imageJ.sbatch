@@ -2,8 +2,9 @@
 #SBATCH --job-name=remote_work
 #SBATCH --output=../log/ImageJ_%j_%N.std
 #SBATCH --error=../log/ImageJ_%j_%N.err
-#SBATCH -p compute
+#SBATCH -p dense
 #SBATCH --exclusive
-#SBATCH --extra-node-info=48:1:1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=312G
 
 ../Fiji.app/ImageJ-linux64
