@@ -112,7 +112,8 @@ def stitch_single(samples, overlaps, new_dim, stitch_output, x):
 		# print(f"{offset}|{overlap}|{non_overlap}")
 
 		# Proj Merge
-		stitched[offset - overlap:offset, :] = np.median([stitched[offset - overlap:offset, :], samples[i + 1].proj_top(overlap)], axis=0)
+		stitched[offset - overlap:offset, :] = np.median(
+			[stitched[offset - overlap:offset, :], samples[i + 1].proj_top(overlap)], axis=0)
 
 		# Next section.
 		stitched[offset: offset + non_overlap, :] = samples[i + 1].proj_bot(non_overlap)
@@ -142,7 +143,8 @@ def stitch_samples(samples, overlaps, stitch_output):
 
 @click.command()
 @click.option("-s", "--sample", type=SampleParameter(), multiple=True,
-				help="Sample information; comma separated list of projection folder, pre-flat folder, post-flat folder, rotational center, and tilt.")
+				help="Sample information; comma separated list of "
+						"projection folder, pre-flat folder, post-flat folder, rotational center, and tilt.")
 @click.option("--top-stitch/--bottom-stitch", type=click.BOOL, default=False,
 				help="Vertical side of first sample to stitch at.")
 @click.option("--stitch-range", type=click.FLOAT, default=0.2,
