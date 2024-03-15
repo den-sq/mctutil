@@ -138,7 +138,7 @@ def distribute_read(target_mem: SharedNP, pj: Mapping, window, int_window,
 	sino_block_size = target_mem.shape.Theta * h_step
 
 	# Size of Proj block
-	proj_block_size = target_mem.shape.Y * h_step
+	proj_block_size = len(int_window) * h_step
 
 	# Find the offset values for start of blocks.
 	# This is hilariouslyy stupid and needs a rewrite
@@ -222,7 +222,7 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 
 		for x in range(0, pj["y"], process_count):
 			window = range(x, min(x + process_count, pj["y"]))
-			internal_window = range(0, process_count)
+			internal_window = range(0, len(window))
 
 			log.log("Cycle Start", f"Window {window}; Shape {sino_shape} from {proj_shape}")
 
@@ -230,10 +230,6 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 							thread_max=process_count, sino_order=False)
 
 			log.log("Files Read", f"Window {window}; Shape {proj_shape}")
-
-# 			with Pool(process_count) as pool:
-# 				pool.starmap(sino_write, [(input_mem, output_dir.joinpath(f"{x}_{i}"), i) for i in range(len(image_paths))])
-# 				continue
 
 			with Pool(process_count) as pool:
 				pool.starmap(weighted_normalize, [(sino_mem, input_mem, flats_mem, window, internal_window, i, sino_mem.shape.Theta)
