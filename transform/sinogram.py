@@ -52,11 +52,12 @@ class FLAT(Enum):
 
 
 # Normalziation cacluation using weighted pre/post.
-def weighted_normalize(sino_mem: SharedNP, flats_mem: SharedNP, window, int_window,
-						projection: int, projection_count: int):
+def weighted_normalize(sino_mem: SharedNP, input_mem: SharedNP, flats_mem: SharedNP, window, int_window,
+						projection: int, projection_count: int, debug_folder: Path = None):
 	"""Normalizes single projection using gain and dark flats, weighing pre and post darks based on projection #.
 
 		:param sino_mem: Shared memory metadata for sinogram.
+		:param input_mem: Shared memory holding read input.
 		:param flats_mem: Shared memory metadata for flats (gains, darks).
 		:param work_mem: Shared memory metadata for working memory.
 		:param window: Working window of full sinogram.
@@ -65,12 +66,12 @@ def weighted_normalize(sino_mem: SharedNP, flats_mem: SharedNP, window, int_wind
 		:param projection_count: Total # of projections.
 	"""
 
-	with sino_mem[int_window] as sino, flats_mem as flats:
+	with sino_mem[int_window] as sino, flats_mem as flats, input_mem as source:
 		dark_map = np.average(flats[FLAT.PREDARK.index:FLAT.POSTDARK.index + 1, window, :], axis=0,
 								weights=[projection_count - projection, projection])
 		gain_map = np.subtract(np.average(flats[FLAT.PREGAIN.index:FLAT.POSTGAIN.index + 1, window, :], axis=0,
 								weights=[projection_count - projection, projection]), dark_map)
-		temp = np.subtract(sino[:, projection, :].astype(sino_mem.dtype), dark_map)
+		temp = np.subtract(source[projection, int_window, :].astype(sino_mem.dtype), dark_map)
 
 		sino[:, projection, :] = np.divide(temp, gain_map)
 
@@ -114,7 +115,7 @@ def byteread_helper(target: SharedNP, image: PathLike, i_dtype: np.dtype, offset
 	sm.close()
 
 
-def distribute_read(target_mem: SharedNP, mem_shape, pj: Mapping, window, int_window,
+def distribute_read(target_mem: SharedNP, pj: Mapping, window, int_window,
 					image_order: ArrayLike, thread_max: int = cpu_count(),
 					read_func: Callable = byteread_helper, sino_order: bool = True):
 	""" Distributes file reading across multiple threads.
@@ -132,7 +133,12 @@ def distribute_read(target_mem: SharedNP, mem_shape, pj: Mapping, window, int_wi
 	"""
 	# Steps for memory space jumps.
 	h_step = pj["x"] * pj["bytesize"]
-	block_size = mem_shape.Theta * h_step
+
+	# Size of Sinogram Block
+	sino_block_size = target_mem.shape.Theta * h_step
+
+	# Size of Proj block
+	proj_block_size = len(int_window) * h_step
 
 	# Find the offset values for start of blocks.
 	# This is hilariouslyy stupid and needs a rewrite
@@ -140,21 +146,23 @@ def distribute_read(target_mem: SharedNP, mem_shape, pj: Mapping, window, int_wi
 
 	def generate_offset_pairs_sino(i):
 		return [{"source": pj["offset"] + (window.start + j) * h_step,
-				"target": int(base_offset + j * block_size + i * h_step)}
+				"target": int(base_offset + j * sino_block_size + i * h_step)}
 					for j in range(len(int_window))]
 
 	def generate_offset_pairs_proj(i):
-		return [{"source": pj["offset"] + (window.start) * h_step, "target": int(base_offset + i * h_step)}]
-
-	log("Files Into Memory", f"Writing (in {target_mem.name}) {base_offset}"
-		+ f" to {base_offset + len(int_window) * block_size}", log_level=log.DEBUG.INFO)
+		return [{"source": pj["offset"] + (window.start) * h_step, "target": int(base_offset + i * proj_block_size)}]
 
 	if sino_order:
+		log.log("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
+			+ f" to {base_offset + len(int_window) * sino_block_size}", log_level=log.DEBUG.INFO)
 		pairs_func = generate_offset_pairs_sino
 		size = h_step
 	else:
+		log.log("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
+			+ f" to {base_offset + len(int_window) * proj_block_size} out of {target_mem[int_window].buffer_address}",
+			log_level=log.DEBUG.INFO)
 		pairs_func = generate_offset_pairs_proj
-		size = h_step * len(int_window)
+		size = proj_block_size
 
 	# Load initial data.
 	with Pool(thread_max) as pool:
@@ -162,7 +170,7 @@ def distribute_read(target_mem: SharedNP, mem_shape, pj: Mapping, window, int_wi
 			[(target_mem.name, image, pj["dtype"], pairs_func(i), size) for i, image in image_order])
 
 
-def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI):
+def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = None):
 	""" Writes a portion of sinogram to disk.
 
 		:param sino_mem: Metadata for reconstruction shared memory.
@@ -183,43 +191,56 @@ def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI):
 				help="Directory of Output Sinograms.")
 @click.option("-f", "--flat-dir", type=click.Path(path_type=Path, file_okay=False),
 				help="Directory of Flats.")
-@click.option("-p", "--process-count", type=click.INT,
+@click.option("-p", "--process-count", type=click.INT, default=cpu_count(),
 				help="# of simulatenous processes during conversion.  Also used as window size.")
 def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int):
 	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
+	output_dir.mkdir(parents=True, exist_ok=True)
 	output_paths = [output_dir.joinpath(x.name) for x in image_paths]
 
 	segment_id = str(uuid.uuid4())
-	int_dtype = np.uint16
+	internal_dtype = np.float32
 
 	with tf.TiffFile(image_paths[0]) as tif:
 		page = tif.pages[0]
 		pj = {"dtype": page.dtype, "bytesize": page.dtype.itemsize, "offset": page.dataoffsets[0],
 				"x": page.shape[1], "y": page.shape[0]}
 
-	sino_shape = SinoOrder(pj["y"], len(image_paths), pj["x"])
+	sino_shape = SinoOrder(process_count, len(image_paths), pj["x"])
+	proj_shape = ProjOrder(len(image_paths), process_count, pj["x"])
 
-	for x in range(0, len(image_paths), process_count):
-		window = range(x, min(x + process_count, len(image_paths)))
-		int_window = range(0, process_count)
+	log.log("Setup", f"{pj}")
 
-		with (SharedNP(f'flats_{segment_id}', int_dtype, ProjOrder(len(FLAT), pj["y"], pj["x"]), create=True) as flats_mem,
-				SharedNP(f"sino_{segment_id}", int_dtype, sino_shape) as sino_mem):
+	with (SharedNP(f'flats_{segment_id}', internal_dtype, ProjOrder(len(FLAT), pj["y"], pj["x"]),
+			create=True) as flats_mem,
+			SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem,
+			SharedNP(f"input_{segment_id}", pj["dtype"], proj_shape, create=True) as input_mem):
 
-			distribute_read(sino_mem, sino_mem.shape, pj, window, int_window, enumerate(image_paths), thread_max=process_count)
+		with flats_mem as flat_set:
+			for flat in list(FLAT):
+				flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tif")).astype(internal_dtype)
 
-			with flats_mem as flat_set:
-				for flat in list(FLAT):
-					flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tif")).astype(int_dtype)
+		for x in range(0, pj["y"], process_count):
+			window = range(x, min(x + process_count, pj["y"]))
+			internal_window = range(0, len(window))
+
+			log.log("Cycle Start", f"Window {window}; Shape {sino_shape} from {proj_shape}")
+
+			distribute_read(input_mem, pj, window, internal_window, enumerate(image_paths),
+							thread_max=process_count, sino_order=False)
+
+			log.log("Files Read", f"Window {window}; Shape {proj_shape}")
 
 			with Pool(process_count) as pool:
-				pool.starmap(weighted_normalize, [(sino_mem, flats_mem, window, int_window, i, sino_mem.shape.Theta)
+				pool.starmap(weighted_normalize, [(sino_mem, input_mem, flats_mem, window, internal_window, i, sino_mem.shape.Theta)
 													for i in range(sino_mem.shape.Theta)])
 
-			log("Gain Correction", f"{int_window} | {process_count}", log.DEBUG.TIME)
+			log.log("Gain Correction", f"{window}", log.DEBUG.TIME)
 
 			with Pool(process_count) as pool:
-				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in int_window])
+				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
+
+			log.log("Files Written", f"{output_dir} : {window}", log.DEBUG.TIME)
 
 
 if __name__ == "__main__":
