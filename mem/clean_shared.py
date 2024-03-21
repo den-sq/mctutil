@@ -13,7 +13,8 @@ shm = {							# Names of shared memory to be script-specific (for now)
 	"log": "last_step",
 	"ssm": "sino",
 	"wsm": "work",
-	"csm": "center"
+	"csm": "center",
+	"inp": "input",
 }
 
 other_shm = "__KMP_REGISTERED_LIB"
