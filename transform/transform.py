@@ -125,7 +125,7 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 	batched_input = list(batch(inputs, processes, mips_offset))
 
-	log.log("Initialize", "Inputs Batched; Normalize Interval {normalize_interval}")
+	log.log("Initialize", f"Inputs Batched; Normalize Interval {normalize_interval}")
 
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes + mips_offset, tif.pages[0].shape[0], tif.pages[0].shape[1])
@@ -150,7 +150,7 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i, j in enumerate(range(0, len(inputs), normalize_interval))])
 			log.log("Image Load",
-					f"{len(range(0, len(inputs), len(inputs) % normalize_interval))}|{normalize_interval}"
+					f"{len(range(0, len(inputs), len(inputs) // normalize_interval))}|{normalize_interval}"
 					" Images Loaded For Normalization")
 
 			if circ_mask_ratio:
