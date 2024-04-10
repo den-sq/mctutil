@@ -253,7 +253,7 @@ def sino_convert(input_dir: Path, output_dir: Path, process_count: int, min_val:
 				log.log("Preprocess Cycle Start", f"Window {window}; Shape {sino_shape}")
 
 				with Pool(process_count) as pool:
-					pool(sh_imread, [(sino_mem, i, image_paths[window[i]]) for i in internal_window])
+					pool.starmap(sh_imread, [(sino_mem, i, image_paths[window[i]]) for i in internal_window])
 
 				log.log("Files Read", f"Window {window}; Shape {sino_shape}")
 
