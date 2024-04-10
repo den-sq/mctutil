@@ -246,8 +246,8 @@ def sino_convert(input_dir: Path, output_dir: Path, process_count: int, min_val:
 
 	if min_val is None or max_val is None:
 		with (SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem):
-			for x in range(0, pj["y"], process_count):
-				window = range(x, min(x + process_count, pj["y"]))
+			for x in range(0, len(image_paths), process_count):
+				window = range(x, min(x + process_count, len(image_paths)))
 				internal_window = range(0, len(window))
 
 				log.log("Preprocess Cycle Start", f"Window {window}; Shape {sino_shape}")
@@ -267,8 +267,8 @@ def sino_convert(input_dir: Path, output_dir: Path, process_count: int, min_val:
 		log.log("Final Bounds Calculated", f"{min_val} : {max_val}", log.DEBUG.TIME)
 
 	with (SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem):
-		for x in range(0, pj["y"], process_count):
-			window = range(x, min(x + process_count, pj["y"]))
+		for x in range(0, len(image_paths), process_count):
+			window = range(x, min(x + process_count, len(image_paths)))
 			internal_window = range(0, len(window))
 
 			log.log("Preprocess Cycle Start", f"Window {window}; Shape {sino_shape}")
