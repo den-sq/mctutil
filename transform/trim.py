@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 import sys
 from pathlib import Path 	# if you haven't already done so
 
@@ -11,6 +12,15 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from shared import log 	# noqa::E402
 
 
+def write_crop(input, output, crop, compress):
+	img = tf.imread(input)
+	if compress:
+		tf.imwrite(output, img[crop], compression=8)
+	else:
+		tf.imwrite(output, img[crop])
+	log.log("File Written", f"{output.name}: ({img.shape}>{crop})")
+
+
 @click.command
 @click.option('-d', '--data-dir', type=click.Path(exists=True), help='Input path for original dataset.', required=True)
 @click.option('-o', '--output-dir', type=click.Path(), required=True,
@@ -19,18 +29,22 @@ from shared import log 	# noqa::E402
 				help='Vertical trim (top and bottom) as a percent')
 @click.option('-h', '--horizontal-trim', type=click.FLOAT, default=0.0,
 				help='Horizontal trim (top and bottom) as a percent')
-def trim(data_dir, output_dir, vertical_trim, horizontal_trim):
+@click.option('--compressed/--uncompressed', default=False,
+				help='Whether to compress output data.')
+def trim(data_dir, output_dir, vertical_trim, horizontal_trim, compressed):
 	log.start()
 	out_dir = Path(output_dir)
 	out_dir.mkdir(parents=True, exist_ok=True)
+	path_list = list(Path(data_dir).glob("*.tif*"))
 
-	for path in Path(data_dir).iterdir():
-		in_img = tf.imread(path)
-		dim = np.shape(in_img)
-		tf.imwrite(Path(out_dir, path.name), in_img[
-			int(dim[0] * horizontal_trim):int(-1 * dim[0] * horizontal_trim),
-			int(dim[1] * vertical_trim):int(-1 * dim[1] * vertical_trim)])
-		log.log("File Written", path.name)
+	with tf.TiffFile(path_list[0]) as tif:
+		dim = tif.pages[0].shape
+
+	new_dim = np.s_[int(dim[0] * vertical_trim):int(dim[0] * (1.0 - vertical_trim)),
+                       	int(dim[1] * horizontal_trim):int(dim[1] * (1.0 - horizontal_trim))]
+
+	with Pool(64) as pool:
+		pool.starmap(write_crop, [(path, Path(out_dir, path.name), new_dim, compressed) for path in path_list])
 
 
 if __name__ == "__main__":
