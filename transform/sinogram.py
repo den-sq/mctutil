@@ -67,14 +67,17 @@ def weighted_normalize(sino_mem: SharedNP, input_mem: SharedNP, flats_mem: Share
 		:param projection_count: Total # of projections.
 	"""
 
+	# print(int_window)
 	with sino_mem[int_window] as sino, flats_mem as flats, input_mem as source:
 		dark_map = np.average(flats[FLAT.PREDARK.index:FLAT.POSTDARK.index + 1, window, :], axis=0,
 								weights=[projection_count - projection, projection])
 		gain_map = np.subtract(np.average(flats[FLAT.PREGAIN.index:FLAT.POSTGAIN.index + 1, window, :], axis=0,
 								weights=[projection_count - projection, projection]), dark_map)
+		gain_map[gain_map == 0] = np.min(gain_map[gain_map != 0])
+
 		temp = np.subtract(source[projection, int_window, :].astype(sino_mem.dtype), dark_map)
 
-		sino[:, projection, :] = np.divide(temp, gain_map)
+		sino[int_window, projection, :] = np.divide(temp, gain_map)
 
 
 def memmap_helper(target, image, i_dtype, offsets, size):
@@ -187,7 +190,9 @@ def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = N
 
 def image_bounds(sino_mem: SharedNP, i: int):
 	with sino_mem[i] as sino:
-		np.array([np.min(sino), np.max(sino)])
+		if np.max(sino) > 2:
+			print(np.max(sino))
+		return np.array([np.min(sino), np.max(sino)])
 
 
 def minmaxscale(sino_mem, i, minval=None, maxval=None):
@@ -226,14 +231,16 @@ def sh_imread(sino_mem, i, path):
 				help="Directory of Flats.")
 @click.option("-p", "--process-count", type=click.INT, default=cpu_count(),
 				help="# of simulatenous processes during conversion.  Also used as window size.")
-@click.option("-c", "--complete_preprocess", type=click.BOOL, default=False,
+@click.option("-c", "--complete-preprocess", type=click.BOOL, default=False,
 				help="Whether to perform complete preprocessing steps on sinogram data,"
 					"including 0.0-1.0 normalization and denoise_nl_means.")
+@click.option('-l", "--outlier-cuts", type=click.INT, default=15,
+				help="Number of outlier values on each side to throw out for min/max across entire set."
+					" Necessary for certain instances where gains match darks.")
 def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int,
-					complete_preprocess: bool):
+					complete_preprocess: bool, outlier_cuts: int):
 	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
 	output_dir.mkdir(parents=True, exist_ok=True)
-	output_paths = [output_dir.joinpath(x.name) for x in image_paths]
 
 	segment_id = str(uuid.uuid4())
 	internal_dtype = np.float32
@@ -243,6 +250,8 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 		pj = {"dtype": page.dtype, "bytesize": page.dtype.itemsize, "offset": page.dataoffsets[0],
 				"x": page.shape[1], "y": page.shape[0]}
 
+	output_paths = [output_dir.joinpath(f"sino_{x:05}.tiff") for x in range(pj["y"])]
+
 	sino_shape = SinoOrder(process_count, len(image_paths), pj["x"])
 	proj_shape = ProjOrder(len(image_paths), process_count, pj["x"])
 
@@ -250,7 +259,7 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 
 	log.log("Setup", f"{pj}")
 
-	with (SharedNP(f'flats_{segment_id}', internal_dtype, ProjOrder(len(FLAT), pj["y"], pj["x"]),
+	with (SharedNP(f'flats_{segment_id}', pj["dtype"], ProjOrder(len(FLAT), pj["y"], pj["x"]),
 			create=True) as flats_mem,
 			SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem,
 			SharedNP(f"input_{segment_id}", pj["dtype"], proj_shape, create=True) as input_mem):
@@ -263,7 +272,7 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 			window = range(x, min(x + process_count, pj["y"]))
 			internal_window = range(0, len(window))
 
-			log.log("Cycle Start", f"Window {window}; Shape {sino_shape} from {proj_shape}")
+			log.log("Cycle Start", f"Window {window}; Internal {internal_window}; Shape {sino_shape} from {proj_shape}")
 
 			distribute_read(input_mem, pj, window, internal_window, enumerate(image_paths),
 							thread_max=process_count, sino_order=False)
@@ -279,15 +288,22 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 			with Pool(process_count) as pool:
 				bounds += pool.starmap(image_bounds, [(sino_mem, i) for i in internal_window])
 
-			log.log("Bounds Calculated", f"{window}", log.DEBUG.TIME)
+			log.log("Bounds Calculated",f"{window}", log.DEBUG.TIME)
 
 			with Pool(process_count) as pool:
 				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
 
 			log.log("Files Written", f"{output_dir} : {window}", log.DEBUG.TIME)
 
-	min_val = np.min(bounds[:, 0])
-	max_val = np.max(bounds[:, 1])
+	bounds = np.array(bounds)
+	print(np.sort(bounds, axis=None))
+	print(bounds.shape)
+
+	min_val = np.partition(bounds[:, 0], outlier_cuts)[outlier_cuts]
+	max_val = np.partition(bounds[:, 1], bounds.shape[0] - outlier_cuts)[bounds.shape[0] - outlier_cuts]
+
+	# min_val = np.min(bounds[:, 0])
+	# max_val = np.max(bounds[:, 1])
 	log.log("Final Bounds Calculated", f"{min_val} : {max_val}", log.DEBUG.TIME)
 
 	if not complete_preprocess:
@@ -301,7 +317,7 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 			log.log("Preprocess Cycle Start", f"Window {window}; Shape {sino_shape}")
 
 			with Pool(process_count) as pool:
-				pool(sh_imread, [(sino_mem, i, image_paths[window[i]]) for i in internal_window])
+				pool.starmap(sh_imread, [(sino_mem, i, output_paths[window[i]]) for i in internal_window])
 
 			log.log("Files Read", f"Window {window}; Shape {proj_shape}")
 
@@ -318,4 +334,5 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 
 if __name__ == "__main__":
 	sino_convert()
+
 
