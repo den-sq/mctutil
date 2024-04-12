@@ -234,7 +234,7 @@ def sh_imread(sino_mem, i, path):
 @click.option("-c", "--complete-preprocess", type=click.BOOL, default=False,
 				help="Whether to perform complete preprocessing steps on sinogram data,"
 					"including 0.0-1.0 normalization and denoise_nl_means.")
-@click.option('-l", "--outlier-cuts", type=click.INT, default=15,
+@click.option("-l", "--outlier-cuts", type=click.INT, default=15,
 				help="Number of outlier values on each side to throw out for min/max across entire set."
 					" Necessary for certain instances where gains match darks.")
 def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int,
