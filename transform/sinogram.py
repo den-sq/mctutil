@@ -288,7 +288,7 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 			with Pool(process_count) as pool:
 				bounds += pool.starmap(image_bounds, [(sino_mem, i) for i in internal_window])
 
-			log.log("Bounds Calculated",f"{window}", log.DEBUG.TIME)
+			log.log("Bounds Calculated", f"{window}", log.DEBUG.TIME)
 
 			with Pool(process_count) as pool:
 				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
@@ -334,5 +334,3 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 
 if __name__ == "__main__":
 	sino_convert()
-
-

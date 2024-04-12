@@ -291,4 +291,3 @@ def sino_convert(input_dir: Path, output_dir: Path, process_count: int, min_val:
 
 if __name__ == "__main__":
 	sino_convert()
-
