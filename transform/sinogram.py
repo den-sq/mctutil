@@ -237,10 +237,14 @@ def sh_imread(sino_mem, i, path):
 @click.option("-l", "--outlier-cuts", type=click.INT, default=15,
 				help="Number of outlier values on each side to throw out for min/max across entire set."
 					" Necessary for certain instances where gains match darks.")
+@click.option("-s", "--sectioning", type=click.INT, required=False,
+				help="Divide results into serial sections of this size (optional).")
+@click.option("-r", "--sino_range", type=cli.RANGE, required=False,
+				help="Sinogram (Projection Y Dimension) Range to Create")
 def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int,
-					complete_preprocess: bool, outlier_cuts: int):
+					complete_preprocess: bool, outlier_cuts: int, sectioning: int,
+					sino_range: range):
 	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
-	output_dir.mkdir(parents=True, exist_ok=True)
 
 	segment_id = str(uuid.uuid4())
 	internal_dtype = np.float32
@@ -250,7 +254,18 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 		pj = {"dtype": page.dtype, "bytesize": page.dtype.itemsize, "offset": page.dataoffsets[0],
 				"x": page.shape[1], "y": page.shape[0]}
 
-	output_paths = [output_dir.joinpath(f"sino_{x:05}.tiff") for x in range(pj["y"])]
+	# sino_range = range(0 if range_start is None else range_start, pj["y"] if range_end is None else range_end)
+	if sino_range is None:
+		sino_split = range(0, pj["y"], process_count)
+	else:
+		sino_split = range(sino_range.start, sino_range.stop, process_count)
+
+	if sectioning:
+		output_paths = [output_dir.joinpath(f"section_{x - x % sectioning:03}_{x - x % sectioning + sectioning:03}",
+											f"sino_{x % sectioning:05}.tiff") for x in range(pj["y"])]
+	else:
+		output_dir.mkdir(parents=True, exist_ok=True)
+		output_paths = [output_dir.joinpath(f"sino_{x:05}.tiff") for x in range(pj["y"])]
 
 	sino_shape = SinoOrder(process_count, len(image_paths), pj["x"])
 	proj_shape = ProjOrder(len(image_paths), process_count, pj["x"])
@@ -268,8 +283,8 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 			for flat in list(FLAT):
 				flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tif")).astype(internal_dtype)
 
-		for x in range(0, pj["y"], process_count):
-			window = range(x, min(x + process_count, pj["y"]))
+		for x in sino_split:
+			window = range(x, min(x + process_count, sino_split.stop))
 			internal_window = range(0, len(window))
 
 			log.log("Cycle Start", f"Window {window}; Internal {internal_window}; Shape {sino_shape} from {proj_shape}")
@@ -289,6 +304,9 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 				bounds += pool.starmap(image_bounds, [(sino_mem, i) for i in internal_window])
 
 			log.log("Bounds Calculated", f"{window}", log.DEBUG.TIME)
+
+			for section_dir in set([fullpath.parent for fullpath in output_paths[window.start:window.stop]]):
+				section_dir.mkdir(parents=True, exist_ok=True)
 
 			with Pool(process_count) as pool:
 				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
@@ -310,8 +328,8 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 		exit()
 
 	with (SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem):
-		for x in range(0, pj["y"], process_count):
-			window = range(x, min(x + process_count, pj["y"]))
+		for x in sino_split:
+			window = range(x, min(x + process_count, sino_split.stop))
 			internal_window = range(0, len(window))
 
 			log.log("Preprocess Cycle Start", f"Window {window}; Shape {sino_shape}")
@@ -325,6 +343,9 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 				pool.starmap(preprocess, [(sino_mem, i, min_val, max_val) for i in internal_window])
 
 			log.log("Sinogram Preprocessing", f"{min_val} : {max_val}", log.DEBUG.TIME)
+
+			for section_dir in set([fullpath.parent for fullpath in output_paths[window.start:window.stop]]):
+				section_dir.mkdir(parents=True, exist_ok=True)
 
 			with Pool(process_count) as pool:
 				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
