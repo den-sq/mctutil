@@ -29,5 +29,6 @@ def downsample(data_dir, output_dir, out_dtype):
 		tf.imwrite(Path(out_dir, path.name), (in_img * target_range / source_range).astype(dtype), dtype=dtype)
 		log.log("File Written", path.name)
 
+
 if __name__ == "__main__":
 	downsample()

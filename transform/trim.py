@@ -41,7 +41,7 @@ def trim(data_dir, output_dir, vertical_trim, horizontal_trim, compressed):
 		dim = tif.pages[0].shape
 
 	new_dim = np.s_[int(dim[0] * vertical_trim):int(dim[0] * (1.0 - vertical_trim)),
-                       	int(dim[1] * horizontal_trim):int(dim[1] * (1.0 - horizontal_trim))]
+					int(dim[1] * horizontal_trim):int(dim[1] * (1.0 - horizontal_trim))]
 
 	with Pool(64) as pool:
 		pool.starmap(write_crop, [(path, Path(out_dir, path.name), new_dim, compressed) for path in path_list])

@@ -59,6 +59,8 @@ class NumpyCLI:
 		if np.issubdtype(self._nptype, np.integer):
 			dtype_range = np.iinfo(self._nptype).max - np.iinfo(self._nptype).min
 			source_range = int(np.max(alt_ar) - np.min(alt_ar))
+			if source_range == 0:
+				source_range = dtype_range
 			return (alt_ar * (dtype_range // source_range))
 		elif np.issubdtype(self._nptype, np.floating):
 			return alt_ar.astype(self._nptype)
