@@ -236,7 +236,7 @@ def sh_imread(sino_mem, i, path):
 					"including 0.0-1.0 normalization and denoise_nl_means.")
 @click.option("-l", "--outlier-cuts", type=click.INT, default=15,
 				help="Number of outlier values on each side to throw out for min/max across entire set."
-					" Necessary for certain instances where gains match darks.
+					" Necessary for certain instances where gains match darks.")
 @click.option("-s", "--sectioning", type=click.INT, required=False,
 				help="Divide results into serial sections of this size (optional).")
 @click.option("-r", "--sino_range", type=cli.RANGE, required=False,
