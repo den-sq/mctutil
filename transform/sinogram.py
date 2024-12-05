@@ -236,14 +236,16 @@ def sh_imread(sino_mem, i, path):
 					"including 0.0-1.0 normalization and denoise_nl_means.")
 @click.option("-l", "--outlier-cuts", type=click.INT, default=15,
 				help="Number of outlier values on each side to throw out for min/max across entire set."
-					" Necessary for certain instances where gains match darks.")
+					" Necessary for certain instances where gains match darks.
 @click.option("-s", "--sectioning", type=click.INT, required=False,
 				help="Divide results into serial sections of this size (optional).")
 @click.option("-r", "--sino_range", type=cli.RANGE, required=False,
 				help="Sinogram (Projection Y Dimension) Range to Create")
+@click.option("-h", "--hard-cut", type=click.FLOAT, default=None,
+				help="Hard absolute values for minimum/maximum bounds for normalizing.")
 def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int,
 					complete_preprocess: bool, outlier_cuts: int, sectioning: int,
-					sino_range: range):
+					sino_range: range, hard_cut: float):
 	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
 
 	segment_id = str(uuid.uuid4())
@@ -281,7 +283,7 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 
 		with flats_mem as flat_set:
 			for flat in list(FLAT):
-				flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tif")).astype(internal_dtype)
+				flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tiff")).astype(internal_dtype)
 
 		for x in sino_split:
 			window = range(x, min(x + process_count, sino_split.stop))
@@ -323,6 +325,10 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 	# min_val = np.min(bounds[:, 0])
 	# max_val = np.max(bounds[:, 1])
 	log.log("Final Bounds Calculated", f"{min_val} : {max_val}", log.DEBUG.TIME)
+
+	if hard_cut is not None:
+		min_val = max(min_val, -1 * hard_cut)
+		max_val = min(max_val, hard_cut)
 
 	if not complete_preprocess:
 		exit()
