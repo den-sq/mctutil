@@ -1,10 +1,10 @@
 from multiprocessing import Pool
-import numbers
 from os import PathLike
 from pathlib import Path
 import sys
 
 import click
+import cv2
 import numpy as np
 import psutil
 import tifffile as tf
@@ -63,7 +63,7 @@ def batch(iterable, n=1, extra=0):
 
 def memreader(mem, i, path):
 	""" Simple full-file reading into shared memory.
-	
+
 		:param mem: Metadata for shared memory.
 		:param i: Index (0th Axis) of shared memory to write to.
 		:param path: Path on disk to read from.
@@ -72,18 +72,44 @@ def memreader(mem, i, path):
 		mem_array[i] = tf.imread(path)
 
 
-def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
+def mem_write(mem: SharedNP, path: PathLike, i, xy_slice, dtype, compression):
 	""" Writes to disk in distributed fashion
 
 		:param mem: Metadata for reconstruction shared memory.
 		:param path: Path on disk to write to.
 		:param i: Vertical slice(s) (y) of reconstruction to write.
+		:param xy_slice: X-Y slice to write.
+		:param dtype: Target writing dtype.
 	"""
 	with mem[i] as out_data:
+		log.log("Write Target", f"{path}")
 		if np.issubdtype(dtype, np.integer):
-			tf.imwrite(path, np.multiply(out_data[slice], np.iinfo(dtype).max).astype(dtype), dtype=dtype, compression=8)
+			tf.imwrite(path, np.multiply(out_data[xy_slice], np.iinfo(dtype).max).astype(dtype), dtype=dtype,
+						compression=compression)
 		else:
-			tf.imwrite(path, out_data[slice].astype(dtype), dtype=dtype, compression=8)
+			tf.imwrite(path, out_data[xy_slice].astype(dtype), dtype=dtype, compression=compression)
+
+
+def bin_write(mem: SharedNP, path: PathLike, i: int, xy_slice, dtype, bin_power: int, compression: int):
+	"""Bins data via linear interpolation in the x-y dimension.
+
+		:param mem: Metadata for reconstruction shared memory.
+		:param path: Path on disk to write to.
+		:param xy_slice: X-Y slice to write.
+		:param i: Index (0th axis, Z-Dimension) to write to.
+		:param bin_power: Power of bin level.
+	"""
+	with mem[i] as out_data:
+		log.log("Write Target", f"{path}")
+		new_shape = (out_data.shape[0] / 2, out_data.shape[1] / 2)
+
+		if np.issubdtype(dtype, np.integer):
+			tf.imwrite(path, np.multiply(
+								cv2.resize(out_data[xy_slice], new_shape, interpolation=cv2.INTER_AREA),
+								np.iinfo(dtype).max).astype(dtype), dtype=dtype, compression=compression)
+		else:
+			tf.imwrite(path, cv2.resize(out_data[xy_slice], new_shape, interpolation=cv2.INTER_AREA).astype(dtype),
+						dtype=dtype, compression=compression)
 
 
 @click.command()
@@ -97,12 +123,18 @@ def mem_write(mem: SharedNP, path: PathLike, i, slice, dtype):
 @click.option('-t', "--out-dtype", type=cli.NUMPYTYPE, default=np.uint8, help="Datatype of Output.")
 @click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
+@click.option("-b", "--bin-power", type=click.INT,
+				help="# of projections in each direction to add in averaged bin.")
 @click.option('-m', '--mips', type=click.INT, help='# of projections to take maximum intensity from.', default=0)
+@click.option("--mips-index", type=click.INT, default=0, help="Index to use MIPs on (default 0)")
 @click.option("-c", "--circ-mask-ratio", type=click.FLOAT, default=None,
 				help="Circular Mask Ratio, if wanted.")
-def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype, processes, mips,
-			circ_mask_ratio):
+@click.option('--compressed/--uncompressed', default=False, help='Whether to compress output data.')
+def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype, processes, bin_power, mips,
+			mips_index, circ_mask_ratio, compressed):
 	log.start()
+
+	compression = 8 if compressed else None
 
 	try:
 		top_trim = bottom_trim = float(vertical_trim)
@@ -114,7 +146,8 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 	except ValueError:
 		left_trim, right_trim = [float(x) for x in horizontal_trim.split(",")]
 
-	mips_offset = max(mips, 1) - 1
+	mips_offset = max(mips, 1) - 1 if not mips_index else 0
+
 	indices = list(range(0, mips_offset + processes))
 	Path(output_dir).mkdir(parents=True, exist_ok=True)
 	inputs = sorted([x for x in Path(data_dir).iterdir() if ".tif" in x.name])
@@ -130,10 +163,17 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes + mips_offset, tif.pages[0].shape[0], tif.pages[0].shape[1])
 		dim = tif.pages[0].shape
-		out_dim = np.s_[int(dim[0] * top_trim):int(dim[0] * (1 - bottom_trim)),
-						int(dim[1] * left_trim):int(dim[1] * (1 - right_trim))]
+		if mips_index == 2:
+			out_dim = np.s_[max(int(dim[0] * top_trim), mips - 1):min(int(dim[0] * (1 - bottom_trim)), dim[0] - (mips - 1)),
+				int(dim[1] * left_trim):int(dim[1] * (1 - right_trim))]
+		elif mips_index == 1:
+			out_dim = np.s_[int(dim[0] * top_trim):int(dim[0] * (1 - bottom_trim)),
+				max(int(dim[1] * left_trim), mips - 1):min(int(dim[1] * (1 - right_trim)), dim[1] - (mips - 1))]
+		else:
+			out_dim = np.s_[int(dim[0] * top_trim):int(dim[0] * (1 - bottom_trim)),
+				int(dim[1] * left_trim):int(dim[1] * (1 - right_trim))]
+
 		log.log("Dimensions", f"{dim}-{out_dim}")
-		in_type = tif.pages[0].dtype
 
 	log.log("Initialize", "Tiff Dimensions Fetched")
 
@@ -163,9 +203,13 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 		for input_set in batched_input:
 			indices = [i for i in indices if i < len(input_set)]
 
-			with Pool(processes) as pool:
-				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
-			log.log("Image Load", f"{len(indices)}|{len(input_set)} Images Loaded")
+			try:
+				with Pool(processes) as pool:
+					pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
+				log.log("Image Load", f"{len(indices)}|{len(input_set)} Images Loaded")
+			except Exception as ex:
+				log.log("Image Load", f"Fail: {ex}")
+				continue
 
 			if circ_mask_ratio:
 				with norm_mem as mips_mem:
@@ -174,12 +218,12 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 
 			if mips > 1:
 				with norm_mem as mips_mem:
-					for i in reversed(indices[mips_offset:]):
-						# log.log("Making MIP", f"{i}:{i - mips_offset}:{mips_mem.shape}:{np.min(mips_mem[i])}:{np.max(mips_mem[i])}",
-						# 			log_level=log.DEBUG.INFO)
-						mips_mem[i] = np.max(mips_mem[i - mips_offset: i + 1], axis=0)
-						# log.log("Making MIP", f"{i}:{i - mips_offset}:{mips_mem.shape}:{np.min(mips_mem[i])}:{np.max(mips_mem[i])}",
-						# 			log_level=log.DEBUG.INFO)
+					if mips_index == 0:
+						for i in reversed(indices[mips_offset:]):
+							mips_mem[i] = np.max(mips_mem[i - mips + 1: i + 1], axis=0)
+					elif mips_index == 1:
+						for i in range(out_dim.stop + (mips - 1), out_dim.start - 1, -1):
+							mips_mem[:, i, :] = np.max(mips_mem[:, i - mips + 1: i + 1, :])
 
 			with Pool(processes) as pool:
 				pool.starmap(normalize, [(norm_mem, i, floor, ceiling) for i in indices[mips_offset:]])
@@ -188,7 +232,7 @@ def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, o
 					f"{len(indices[mips_offset:])} Images Normalized at {floor:.4g} to {ceiling:.4g} over {(ceiling - floor):.4g}")
 
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype)
+				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype, compression)
 								for i in indices[mips_offset:]])
 
 			log.log("Image Writing", f"{len([i for i in indices[mips_offset:]])} Images Written")
