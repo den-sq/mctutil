@@ -1,11 +1,14 @@
 import os
 import sys
 from pathlib import Path
+from taskqueue import LocalTaskQueue
 
 from concurrent.futures import ProcessPoolExecutor
+from botocore.exceptions import ClientError
 
 import boto3
 import click
+import igneous.task_creation as tc
 
 # Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -18,12 +21,22 @@ session = boto3.Session(profile_name='chenglab')
 def upload_file_to_s3(file_path, key, bucket_name, content_encoding):
 	s3 = session.client('s3')
 	if file_path.is_dir():  # Handle directory
-		s3.put_object(Bucket=bucket_name, Key=f"{key}/")
+		try:
+			s3.put_object(Bucket=bucket_name, Key=f"{key}/")
+		except ClientError as e:
+			print(e.response)
+		except Exception as e:
+			print(e)
 	else:  # Handle file
 		extra_args = {}
 		if content_encoding is not None:
 			extra_args['ContentEncoding'] = content_encoding
-		s3.upload_file(file_path, bucket_name, str(key), ExtraArgs=extra_args)
+		try:
+			s3.upload_file(file_path, bucket_name, str(key), ExtraArgs=extra_args)
+		except ClientError as e:
+			print(e.response)
+		except Exception as e:
+			print(e)
 	print(f'uploaded: {key}')
 
 
@@ -53,6 +66,10 @@ def s3upload(bucket_prefix, bucket_name, process_count, source_folder, target_fo
 
 	print(f'target bucket: {bucket_name}')
 	print(f'target folder: {target_full}')
+
+	s3 = session.client('s3')
+	s3.put_object(Bucket=bucket_name, Key=f"{target_full}/")
+	s3.close()
 
 	upload_folder_to_s3_parallel(source_folder, target_full, bucket_name, num_processes=process_count)
 

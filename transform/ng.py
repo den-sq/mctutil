@@ -38,7 +38,7 @@ def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, meta
 	if segmentation:
 		json_metadata = {
 			"type": "segmentation",
-			"mesh": "mesh",
+			"mesh": "mesh_mip_0_err_40", 				# mesh
 			"encoding": 'compressed_segmentation',
 			"data_type": "uint64",
 			"num_channels": 1,
@@ -73,7 +73,7 @@ def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, meta
 
 	generate_scales_info(metadata_info, output_location, chunk_size)
 	convert_slices_in_directory([Path(input_path)], output_location, options={"flat": True})
-	compute_scales(output_location, "stride" if segmentation else "average", options={"flat": True})
+	compute_scales(output_location, "majority" if segmentation else "average", options={"flat": True})
 
 	if strip_gz:
 		for out_file in Path(output_location).glob("**/*.gz"):
