@@ -139,7 +139,7 @@ class SLICE(click.ParamType):
 	def convert(self, value, _param, _ctx):
 		try:
 			if value[0] != '[' or value[-1] != ']':
-				self.fail(f"{value} should be enclosed in brackets like a slice; e.g. [1:5, 2:3].")
+				self.fail(f"{value} should be enclosed in brackets like a slice; e.g. [1:5,2:3].")
 
 			built_slice = ()
 
