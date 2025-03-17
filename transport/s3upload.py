@@ -58,9 +58,11 @@ def upload_folder_to_s3_parallel(folder_path, target_folder, bucket_name, num_pr
 @click.option("-p", "--bucket-prefix", type=click.Path(path_type=Path), required=True)
 @click.option("-n", "--bucket-name", type=click.STRING, required=True, help="Name of target s3 bucket.")
 @click.option("-t", "--process-count", type=click.INT, default=60, help="Number of simultaneous uploads.")
+@click.option("--mesh", type=click.BOOL, is_flag=True, show_default=True, default=False, 
+				help="Whether to mesh the resulting upload.")
 @click.argument("SOURCE_FOLDER", nargs=1, type=click.Path(exists=True, path_type=Path))
 @click.argument("TARGET_FOLDER", nargs=1, type=click.Path(path_type=Path))
-def s3upload(bucket_prefix, bucket_name, process_count, source_folder, target_folder):
+def s3upload(bucket_prefix, bucket_name, process_count, mesh, source_folder, target_folder):
 
 	target_full = bucket_prefix.joinpath(target_folder)
 
@@ -72,6 +74,15 @@ def s3upload(bucket_prefix, bucket_name, process_count, source_folder, target_fo
 	s3.close()
 
 	upload_folder_to_s3_parallel(source_folder, target_full, bucket_name, num_processes=process_count)
+
+	if mesh:
+		mesh_path = f"precomputed://s3://{bucket_name}/{target_full}"
+		print(f"full remote path: {mesh_path}")
+		tq = LocalTaskQueue(parallel=process_count // 4)
+		tq.insert(tc.create_meshing_tasks(mesh_path, mip=0))
+		tq.execute()
+		tq.insert(tc.create_unsharded_multires_mesh_tasks(mesh_path, num_lod=4))
+		tq.execute()
 
 
 if __name__ == '__main__':
