@@ -22,7 +22,7 @@ def f_transpose(inputdir: Path, outputdir: Path):
 
 	outputdir.mkdir(parents=True, exist_ok=True)
 	for i in range(old_shape[2]):
-		tf.imwrite(outputdir.joinpath(f"tp_{i}.tif"), transposed_data[i])
+		tf.imwrite(outputdir.joinpath(f"tp_{str(i).zfill(4)}.tif"), transposed_data[i])
 
 
 if __name__ == "__main__":

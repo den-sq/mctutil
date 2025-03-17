@@ -1,6 +1,7 @@
 import gzip
 from pathlib import Path
 
+from natsort import natsorted
 from neuroglancer_scripts.scripts.generate_scales_info import generate_scales_info
 from neuroglancer_scripts.scripts.slices_to_precomputed import convert_slices_in_directory
 from neuroglancer_scripts.scripts.compute_scales import compute_scales
@@ -27,7 +28,7 @@ import click
 def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, metadata_info, compress_info,
 				output_location):
 	print(f'input folder: {input_path}')
-	image_paths = list(Path(input_path).glob("**/*.tif"))
+	image_paths = natsorted(Path(input_path).glob("**/*.tif"))
 
 	memmap_ = tifffile.memmap(image_paths[0])
 	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
