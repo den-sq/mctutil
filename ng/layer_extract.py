@@ -15,7 +15,7 @@ def layer_copy(json_file: Path, json_result: Path, layers: str):
 	""" Extract layers contained in a neuroglancer json file into a new file.
 
 		Example run:
-			python layer_extracct.py -j Full_Annotation.json r Limited_Annotations.json 
+			python layer_extracct.py -j Full_Annotation.json r Limited_Annotations.json
 		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)

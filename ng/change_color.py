@@ -1,10 +1,9 @@
 from dataclasses import dataclass
-
+import json
 from pathlib import Path
 import re
 
 import click
-import json
 
 
 @dataclass(frozen=True)
