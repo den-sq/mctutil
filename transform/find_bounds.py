@@ -25,10 +25,10 @@ def image_bounds(path):
 def find_bounds(process_count, input_path):
 	print("Starting")
 	with ThreadPool(process_count) as pool:
-		bounds = np.array(pool.map(image_bounds, input_path.glob("**/*.tif")))
+		bounds = np.array(pool.map(image_bounds, input_path.glob("**/*.tif*")))
 	min_val = np.min(bounds[:, 0])
 	max_val = np.max(bounds[:, 1])
-	print(f"{min_val}:{max_val}")
+	print(f"\n{min_val}:{max_val}")
 	return min_val, max_val
 
 
