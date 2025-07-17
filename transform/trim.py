@@ -16,21 +16,24 @@ class CropNumberType(click.ParamType):
 	name = "CropNumber"
 
 	def convert(self, value, param, ctx):
-		if "," in value:
+		if "," in str(value):
 			pair = value.split(",")
+			print(f"is pair {pair}")
 			if len(pair) != 2:
 				self.fail(f"{value} must be a single or pair of values.")
 		else:
 			pair = [value, value]
-		
+
 		for x in range(0, 2):
-			if str(pair[x]).isdigit():
+			if str(pair[x]).isnumeric():
 				pair[x] = int(pair[x])
-			elif str(pair[x]).isnumeric():
-				pair[x] = float(pair[x])
 			else:
-				self.fail("f{value} must contain ints or floats")
+				try:
+					pair[x] = float(pair[x])
+				except ValueError:
+					self.fail(f"{value} must contain ints or floats: {pair[x]} is not.")
 		return pair
+
 
 CROP_NUMBER = CropNumberType()
 
@@ -71,7 +74,7 @@ def trim(data_dir, output_dir, vertical_trim, horizontal_trim, z_trim, compresse
 	with tf.TiffFile(path_list[0]) as tif:
 		dim = tif.pages[0].shape
 
-	new_dim = np.s_[crop_val(vertical_trim, dim[0]),crop_val(horizontal_trim, dim[1])]
+	new_dim = np.s_[crop_val(vertical_trim, dim[0]), crop_val(horizontal_trim, dim[1])]
 
 	with Pool(64) as pool:
 		pool.starmap(write_crop, [(path, Path(out_dir, path.name), new_dim, compressed) for path in path_list])
