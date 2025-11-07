@@ -25,14 +25,14 @@ def layer_copy(json_file: Path, json_result: Path, json_target: Path, source_ann
 		json_target = json.load(json_handle)
 	print("json loaded")
 
-	existing_annotations = [layer["name"] for layer in json_source["layers"] if (layer["type"] == "annotation")]
+	existing_annotations = [layer["name"] for layer in json_source["layers"]]
 	if len(source_annotations) > 0:
 		duplicate_layers = set(source_annotations).intersection([layer["name"] for layer in json_target["layers"]])
 	else:
 		duplicate_layers = set(existing_annotations).intersection([layer["name"] for layer in json_target["layers"]])
 
-	annotations = [layer for layer in json_source["layers"] if (layer["type"] == "annotation")
-							and ((layer["name"] in source_annotations) or (len(source_annotations) == 0))]
+	annotations = [layer for layer in json_source["layers"] if
+					((layer["name"] in source_annotations) or (len(source_annotations) == 0))]
 
 	print(f"{len(annotations)} Found to Copy")
 
