@@ -57,14 +57,18 @@ def crop_val(x, dim):
 @click.option('-o', '--output-dir', type=click.Path(), required=True,
 				help='Output path for transformed dataset.')
 @click.option('-v', '--vertical-trim', type=CROP_NUMBER, default=0.0,
-				help='Vertical trim (top and bottom) as a percent')
+				help='Vertical trim (top and bottom) as an absolute value (integer) or percent (float)')
 @click.option('-h', '--horizontal-trim', type=CROP_NUMBER, default=0.0,
-				help='Horizontal trim (top and bottom) as a percent')
+				help='Horizontal trim (top and bottom) as an absolute value (integer) or percent (float)')
 @click.option('-z', '--z-trim', type=CROP_NUMBER, default=0.0,
-				help='Z-dimension trim (top and bottom) as an integer or percent.')
+				help='Z-dimension trim (top and bottom) as an absolute value (integer) or percent (float)')
 @click.option('--compressed/--uncompressed', default=False,
 				help='Whether to compress output data.')
 def trim(data_dir, output_dir, vertical_trim, horizontal_trim, z_trim, compressed):
+	""" Crop an image stack.
+		Crop values can be a comma separated pair like 5,4 or a single value like 3.
+		Float values are handled as % of image size; integer values as voxel values.
+		"""
 	log.start()
 	out_dir = Path(output_dir)
 	out_dir.mkdir(parents=True, exist_ok=True)
