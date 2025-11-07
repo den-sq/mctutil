@@ -28,7 +28,7 @@ import click
 def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, metadata_info, compress_info,
 				output_location):
 	print(f'input folder: {input_path}')
-	image_paths = natsorted(Path(input_path).glob("**/*.tif"))
+	image_paths = natsorted(Path(input_path).glob("**/*.tif*"))
 
 	memmap_ = tifffile.memmap(image_paths[0])
 	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]

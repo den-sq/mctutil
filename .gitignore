@@ -169,3 +169,8 @@ log/*
 runs/*
 samples/*
 credentials/*
+awscreds.json
+
+# Ignore data from test runs or other local runs
+data/*
+queue/*
