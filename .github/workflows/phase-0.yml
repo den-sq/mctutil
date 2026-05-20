@@ -21,21 +21,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: conda-incubator/setup-miniconda@v3
         with:
+          channels: conda-forge
+          activate-environment: mctutil
+          auto-activate-base: false
           python-version: ${{ matrix.python-version }}
-          cache: poetry
 
-      - name: Install Poetry
-        run: python -m pip install poetry
-
-      - name: Install package
-        run: poetry install --with dev
+      - name: Install environment
+        shell: bash -el {0}
+        run: |
+          conda env update -n mctutil -f environment.yml
+          python -m pip install --no-deps -e .
 
       - name: Lint
+        shell: bash -el {0}
         run: |
-          poetry run flake8 mctutil scripts tests
-          poetry run python scripts/check_python_tabs.py
+          flake8 mctutil scripts tests
+          python scripts/check_python_tabs.py
 
       - name: Smoke tests
-        run: poetry run pytest tests/
+        shell: bash -el {0}
+        run: |
+          pytest tests/
+          mctutil --help

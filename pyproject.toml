@@ -1,60 +1,30 @@
 [build-system]
-requires = ["poetry-core>=1.9.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry]
+[project]
 name = "mctutil"
 version = "0.0.0"
 description = "MicroCT data tooling used by the Cheng Lab at PSU."
-authors = ["Cheng Lab contributors"]
 readme = "README.md"
-packages = [
-	{ include = "mctutil" },
+requires-python = ">=3.10"
+authors = [
+  { name = "Cheng Lab contributors" },
 ]
+# Runtime dependencies are managed through environment.yml so TomoPy and other
+# non-PyPI-first packages can be sourced from conda-forge.
 
-[tool.poetry.dependencies]
-python = ">=3.10,<4.0"
-click = ">=8,<9"
-numpy = "*"
-natsort = "*"
-opencv-python = "*"
-psutil = "*"
-ruamel-yaml = "*"
-tifffile = "*"
-boto3 = { version = "*", optional = true }
-brotli = { version = "*", optional = true }
-cloud-volume = { version = "*", optional = true }
-dicom2jpg = { version = "*", optional = true }
-gdal = { version = "*", optional = true }
-google-auth = { version = "*", optional = true }
-google-auth-oauthlib = { version = "*", optional = true }
-google-api-python-client = { version = "*", optional = true }
-igneous-pipeline = { version = "*", optional = true }
-ipyslurm = { version = "*", optional = true }
-neuroglancer-scripts = { version = "*", optional = true }
-scikit-image = { version = "*", optional = true }
-task-queue = { version = "*", optional = true }
-
-[tool.poetry.group.dev.dependencies]
-flake8 = "*"
-pytest = "*"
-
-[tool.poetry.extras]
-aws = ["boto3", "brotli"]
-cloud = ["cloud-volume"]
-dicom = ["dicom2jpg"]
-gdal = ["gdal"]
-gsheets = ["google-auth", "google-auth-oauthlib", "google-api-python-client"]
-hpc = ["ipyslurm"]
-mesh = ["igneous-pipeline", "task-queue"]
-ng = ["neuroglancer-scripts"]
-sino = ["scikit-image"]
-
-[tool.poetry.scripts]
+[project.scripts]
 mctutil = "mctutil.cli:main"
 
-[tool.poetry.urls]
+[project.urls]
 Repository = "https://github.com/den-sq/mctutil"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "mctutil*",
+]

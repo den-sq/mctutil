@@ -14,28 +14,25 @@ layout yet.
 
 ## Installation
 
-Core Poetry install:
+Conda-first bootstrap:
 
 ```bash
-poetry install --with dev
-```
-
-Optional extras for heavier stacks:
-
-```bash
-poetry install --with dev -E aws -E cloud -E dicom -E gdal -E gsheets -E hpc -E mesh -E ng -E sino
+conda env create -f environment.yml
+conda activate mctutil
+python -m pip install --no-deps -e .
 ```
 
 Notes:
+- `environment.yml` is the authoritative dependency set for this repository.
+- Conda-forge is the supported source for `tomopy`; plain `pip install tomopy`
+  does not work.
+- A few packages are still pulled through the `pip:` section because they are
+  not published on conda-forge today: `cloud-volume`, `dicom2jpg`,
+  `igneous-pipeline`, `neuroglancer-scripts`, and `task-queue`.
 - Python indentation uses tabs in this repository.
 - No autoformatter is configured at this time.
 - Linting is enforced with `flake8`, the pre-commit hooks in
   `.pre-commit-config.yaml`, and `scripts/check_python_tabs.py`.
-- `transform/transform.py` also needs TomoPy. Poetry is now the dependency
-  manager, but `poetry add tomopy` still fails for the same reason: TomoPy is
-  not published on a standard Python package index that Poetry can resolve in
-  this environment. It remains documented instead of declared so the base
-  install and CI stay usable.
 - The `mctutil` console script is intentionally a stub for now. The current
   command surface still lives at `python -m <module>` from a repo checkout;
   Phase 4 will unify it under `mctutil <category> <task>`.
