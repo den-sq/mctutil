@@ -31,7 +31,7 @@ COORDINATES = Coordinates()
 				required=True, help="Neuroglancer JSON file to write shifted annotations.")
 @click.option("--shift-dimensions", "-s", type=COORDINATES, required=True,
 				help="Amount to shift all annotations, in 'x,y,z' format.")
-def point_merge(json_file: Path, json_result: Path, shift_dimensions: Coord):
+def point_shift(json_file: Path, json_result: Path, shift_dimensions: Coord):
 	""" Shift all annotations in a given file in 3 dimensions.
 
 		Example run:
@@ -57,4 +57,4 @@ def point_merge(json_file: Path, json_result: Path, shift_dimensions: Coord):
 
 
 if __name__ == "__main__":
-	point_merge()
+	point_shift()

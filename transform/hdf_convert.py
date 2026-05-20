@@ -16,7 +16,7 @@ def get_image_paths(folder: Path):
 		:param folder: Base Path containing raw folder.
 		:return: Sorted list of HDF files.
 	"""
-	return sorted(folder.glob('raw\\*.hdf'))
+	return sorted(folder.glob('raw/*.hdf'))
 
 
 def image_conv(image_path: Path, target_dir: Path):

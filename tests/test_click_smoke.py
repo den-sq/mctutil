@@ -19,13 +19,13 @@ CASES = [
 	CommandCase("mem/clean.py", "memclean", ("mark", "--help")),
 	CommandCase("ng/change_color.py", "change_color"),
 	CommandCase("ng/layer_copy.py", "layer_copy"),
-	CommandCase("ng/layer_extract.py", "layer_copy"),
+	CommandCase("ng/layer_extract.py", "layer_extract"),
 	CommandCase("ng/layer_tag.py", "layer_tag"),
 	CommandCase("ng/layer_urlshift.py", "layer_urlshift"),
 	CommandCase("ng/point_add.py", "point_add"),
 	CommandCase("ng/point_merge.py", "point_merge"),
-	CommandCase("ng/point_shift.py", "point_merge"),
-	CommandCase("ng/point_sort.py", "point_merge"),
+	CommandCase("ng/point_shift.py", "point_shift"),
+	CommandCase("ng/point_sort.py", "point_sort"),
 	CommandCase("ng/position_copy.py", "position_copy"),
 	CommandCase("ng/shift_angle.py", "shift_angle"),
 	CommandCase("parsing/pull_config.py", "get_conf"),
@@ -40,13 +40,7 @@ CASES = [
 	CommandCase("transform/fix_name.py", "fix_names"),
 	CommandCase("transform/gz_strip.py", "stripgz"),
 	CommandCase("transform/hdf_convert.py", "hdf_convert"),
-	pytest.param(
-		CommandCase("transform/mesh.py", "mesh"),
-		marks=pytest.mark.xfail(
-			reason="Known Phase 1 bug: @click.commmand typo",
-			strict=True,
-		),
-	),
+	CommandCase("transform/mesh.py", "mesh"),
 	CommandCase("transform/mesh_ig.py", "mesh_ig"),
 	CommandCase("transform/multitrim.py", "trim"),
 	CommandCase("transform/ng.py", "neuroglance"),
@@ -74,7 +68,6 @@ def test_click_help_smoke(load_module, case: CommandCase):
 	assert result.exit_code == 0, result.output
 
 
-@pytest.mark.xfail(reason="Known Phase 1 bug: -s short-option collision", strict=True)
 def test_upload_short_options_are_unique(load_module):
 	module = load_module("transform/upload.py")
 	short_opts = [

@@ -59,8 +59,8 @@ def trim(data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype):
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes, tif.pages[0].shape[0], tif.pages[0].shape[1])
 		dim = tif.pages[0].shape
-		out_dim = np.s_[int(dim[0] * horizontal_trim):int(dim[0] * (1 - horizontal_trim)),
-						int(dim[1] * vertical_trim):int(dim[1] * (1 - vertical_trim))]
+		out_dim = np.s_[int(dim[0] * vertical_trim):int(dim[0] * (1 - vertical_trim)),
+						int(dim[1] * horizontal_trim):int(dim[1] * (1 - horizontal_trim))]
 		log.log("Dimensions", f"{dim}-{out_dim}")
 
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:

@@ -79,7 +79,7 @@ def layer_tag(json_file: Path, json_result: Path, segment_radius, tagged_layer: 
 				# Generate an intensity that's not a repeat.
 				t_layer = replace(t_layer, intensity=next(intensity_gen))
 				while t_layer.intensity in preset_intensities:
-					replace(t_layer, intensity=next(intensity_gen))
+					t_layer = replace(t_layer, intensity=next(intensity_gen))
 
 			if t_layer.radius == -1:
 				# Update with default intensity.

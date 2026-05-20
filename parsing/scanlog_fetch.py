@@ -7,7 +7,7 @@ import click
 @click.command()
 @click.argument("root_dir", nargs=-1, type=click.Path())
 def scanlog_fetch(root_dir):
-	Path("logs").mkdir(exists_ok=True)
+	Path("logs").mkdir(exist_ok=True)
 	for dir_name in root_dir:
 		for fullpath in Path(dir_name).rglob("scanlog.txt"):
 			software_trigger_scans = ["_post", "_pre", "_uncrop", "_crop", "_focus", "_step"]

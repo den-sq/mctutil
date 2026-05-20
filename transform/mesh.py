@@ -11,7 +11,7 @@ import igneous.task_creation as tc
 # layer_path = 'precomputed://s3://3d.fish/assets/precomputed_repository/B2_daphnia/AAA399/AAA399_seg_out/'
 
 
-@click.commmand
+@click.command()
 @click.option("-p", "--proj-dir", type=click.Path(file_okay=False), required=True, help="Path of input data.")
 @click.option("-l", "--layer-path", type=click.STRING, required=True, help="Path of Layer data, including remote URLs.")
 def mesh(proj_dir, layer_path):
