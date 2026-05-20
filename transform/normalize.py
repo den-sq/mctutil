@@ -58,10 +58,14 @@ def memreader(mem, i, path):
 		mem_array[i] = tf.imread(path)
 
 
-def mem_write(mem: SharedNP, path: PathLike, i, dtype):
+def mem_write(mem: SharedNP, path: PathLike, i, dtype, execute=True):
 	"""Writes to disk in distributed fashion."""
 	with mem[i] as out_data:
-		tf.imwrite(path, np_convert(dtype, out_data), dtype=dtype)
+		if execute:
+			tf.imwrite(path, np_convert(dtype, out_data), dtype=dtype)
+			log.log("File Written", path.name)
+		else:
+			log.log("Dry Run", f"Would write {path.name}")
 
 
 @click.command()
@@ -71,10 +75,13 @@ def mem_write(mem: SharedNP, path: PathLike, i, dtype):
 				help='Output path for cleaned images', default='data/clean/')
 @click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
-def norm(normalize_over, data_dir, output_dir, processes):
+@click.option('--execute/--dry-run', default=True,
+				help='Whether to write normalized files or only log the planned outputs.')
+def norm(normalize_over, data_dir, output_dir, processes, execute):
 	log.start()
 
-	Path(output_dir).mkdir(parents=True, exist_ok=True)
+	if execute:
+		Path(output_dir).mkdir(parents=True, exist_ok=True)
 	inputs = sorted([x for x in Path(data_dir).iterdir() if ".tif" in x.name])
 	batched_input = list(batch(inputs, processes))
 
@@ -94,8 +101,11 @@ def norm(normalize_over, data_dir, output_dir, processes):
 			log.log("Image Load", f"{len(active_indices)} Images Loaded")
 			normalize(norm_mem, active_indices, normalize_over.start, normalize_over.stop, processes)
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, dtype) for i in active_indices])
-			log.log("Image Writing", f"{len(active_indices)} Images Written")
+				pool.starmap(
+					mem_write,
+					[(norm_mem, Path(output_dir, input_set[i].name), i, dtype, execute) for i in active_indices],
+				)
+			log.log("Image Writing", f"{len(active_indices)} Images {'Written' if execute else 'Planned'}")
 
 
 if __name__ == '__main__':
