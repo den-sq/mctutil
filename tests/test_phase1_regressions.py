@@ -140,7 +140,7 @@ def test_layer_tag_retries_generated_intensity_until_unique(load_module, monkeyp
 
 
 def test_image_bounds_returns_min_and_max(load_module):
-	module = load_module("transform/sino_preproc.py")
+	module = load_module("transform/sinogram.py")
 	bounds = module.image_bounds(_FakeMem(np.array([[3, 8], [1, 5]], dtype=np.float32)))
 	assert np.array_equal(bounds, np.array([1, 8], dtype=np.float32))
 
