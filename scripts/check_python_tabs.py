@@ -11,11 +11,18 @@ import sys
 LEADING_WS = re.compile(r'^(?P<ws>[ \t]+)(?=\S)')
 
 
+IGNORED_PARTS = {'.git', '.venv', '__pycache__'}
+
+
 def iter_python_files(paths: list[str]) -> list[Path]:
 	if paths:
 		return [Path(path) for path in paths if path.endswith('.py')]
 
-	return sorted(Path('.').rglob('*.py'))
+	return [
+		path
+		for path in sorted(Path('.').rglob('*.py'))
+		if not any(part in IGNORED_PARTS for part in path.parts)
+	]
 
 
 def main(argv: list[str] | None = None) -> int:

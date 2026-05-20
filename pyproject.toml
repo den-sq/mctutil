@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mctutil"
+version = "0.0.0"
+description = "MicroCT data tooling used by the Cheng Lab at PSU."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Cheng Lab contributors" },
+]
+dependencies = [
+  "click>=8",
+  "numpy",
+  "natsort",
+  "opencv-python",
+  "psutil",
+  "ruamel.yaml",
+  "tifffile",
+  # TomoPy is used by transform/transform.py but is not currently installable
+  # from PyPI in a way that keeps `pip install -e .[dev]` viable. Documented in
+  # the README until a packageable installation path is chosen.
+]
+
+[project.optional-dependencies]
+aws = [
+  "boto3",
+  "brotli",
+]
+cloud = [
+  "cloud-volume",
+]
+dev = [
+  "flake8",
+  "pytest",
+]
+dicom = [
+  "dicom2jpg",
+]
+dragonfly = []
+gdal = [
+  "gdal",
+]
+gsheets = [
+  "google-auth",
+  "google-auth-oauthlib",
+  "google-api-python-client",
+]
+hpc = [
+  "ipyslurm",
+]
+mesh = [
+  "igneous-pipeline",
+  "task-queue",
+]
+ng = [
+  "neuroglancer-scripts",
+]
+sino = [
+  "scikit-image",
+]
+
+[project.scripts]
+mctutil = "mctutil.cli:main"
+
+[project.urls]
+Repository = "https://github.com/den-sq/mctutil"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "hpc_env*",
+  "hpc_work*",
+  "mem*",
+  "mctutil*",
+  "ng*",
+  "parsing*",
+  "shared*",
+  "transform*",
+  "transport*",
+]
+namespaces = true
