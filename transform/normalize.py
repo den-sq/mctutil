@@ -8,12 +8,12 @@ import numpy as np
 import psutil
 import tifffile as tf
 
-# Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from shared import log 	# noqa::E402
 from shared.cli import FRANGE 	# noqa::E402
 from shared.mem import SharedNP, ProjOrder 	# noqa::E402
+from shared.np_convert import np_convert 	# noqa::E402
 
 
 def norm_helper(image_mem, i, floor, ceiling):
@@ -26,7 +26,7 @@ def norm_helper(image_mem, i, floor, ceiling):
 
 
 def normalize(image_mem, index, bottom_threshold, top_threshold, thread_max):
-	""" Straightforward image normalization, disposing of values at edges """
+	"""Straightforward image normalization, disposing of values at edges."""
 	with image_mem[index] as image:
 		floor = np.percentile(image, bottom_threshold)
 		ceiling = np.percentile(image, top_threshold)
@@ -59,14 +59,9 @@ def memreader(mem, i, path):
 
 
 def mem_write(mem: SharedNP, path: PathLike, i, dtype):
-	""" Writes to disk in distributed fashion
-
-		:param mem: Metadata for reconstruction shared memory.
-		:param path: Path on disk to write to.
-		:param i: Vertical slice(s) (y) of reconstruction to write.
-	"""
+	"""Writes to disk in distributed fashion."""
 	with mem[i] as out_data:
-		tf.imwrite(path, out_data.astype(dtype), dtype=dtype)
+		tf.imwrite(path, np_convert(dtype, out_data), dtype=dtype)
 
 
 @click.command()
@@ -99,7 +94,6 @@ def norm(normalize_over, data_dir, output_dir, processes):
 				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
 			log.log("Image Load", f"{len(indices)} Images Loaded")
 			normalize(norm_mem, indices, normalize_over.start, normalize_over.stop, processes)
-			# log.log("Image Normalization", f"{len(indices)} Images Normalized")
 			with Pool(processes) as pool:
 				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, dtype) for i in indices])
 			log.log("Image Writing", f"{len(indices)} Images Written")

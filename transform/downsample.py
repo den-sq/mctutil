@@ -1,15 +1,15 @@
 import sys
-from pathlib import Path 	# if you haven't already done so
+from pathlib import Path
 
 import click
 import numpy as np
 import tifffile as tf
 
-# Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from shared import cli 	# noqa::E402
 from shared import log 	# noqa::E402
+from shared.np_convert import np_convert 	# noqa::E402
 
 
 @click.command
@@ -23,10 +23,7 @@ def downsample(data_dir, output_dir, out_dtype):
 	dtype = out_dtype.nptype
 	for path in Path(data_dir).iterdir():
 		in_img = tf.imread(path)
-		# Assumes matching signed or unsigned should fix
-		source_range = np.max(in_img) - np.min(in_img)
-		target_range = np.iinfo(dtype).max - np.iinfo(dtype).min
-		tf.imwrite(Path(out_dir, path.name), (in_img * target_range / source_range).astype(dtype), dtype=dtype)
+		tf.imwrite(Path(out_dir, path.name), np_convert(dtype, in_img), dtype=dtype)
 		log.log("File Written", path.name)
 
 

@@ -1,4 +1,3 @@
-
 from collections import namedtuple
 import json
 from pathlib import Path
@@ -6,22 +5,12 @@ from pathlib import Path
 import click
 import numpy as np
 
+from shared.cli import DelimitedRecord
+
 Coord = namedtuple("Coord", ["x", "y", "z"])
 
 
-# Click Parameter:
-class Coordinates(click.ParamType):
-	name = "Integer Coodrinates"
-
-	def convert(self, value, param, ctx):
-		try:
-			coord = Coord(*[int(x) for x in value.split(",")])
-			return coord
-		except (ValueError, TypeError):
-			self.fail(f'{value} is not a 3-value intteger coordinate.')
-
-
-COORDINATES = Coordinates()
+COORDINATES = DelimitedRecord(Coord, [int, int, int], delimiter=",", name="Integer Coordinates")
 
 
 @click.command()
@@ -32,11 +21,6 @@ COORDINATES = Coordinates()
 @click.option("--shift-dimensions", "-s", type=COORDINATES, required=True,
 				help="Amount to shift all annotations, in 'x,y,z' format.")
 def point_shift(json_file: Path, json_result: Path, shift_dimensions: Coord):
-	""" Shift all annotations in a given file in 3 dimensions.
-
-		Example run:
-			python point_merge.py -j R2_L3.json -r R2_L3_Upd.json -s 10,5,3
-		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 

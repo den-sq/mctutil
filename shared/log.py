@@ -11,7 +11,6 @@ script_start = datetime.now()
 __attached_funcs = []
 
 
-# More specific debug-level logging.
 class DEBUG(Enum):
 	SILENT = ("SILENT", 0, "black")
 	ERROR = ("ERROR", 1, "red")
@@ -76,37 +75,20 @@ def log_prompt(step: str, statement: str = '', log_level: DEBUG = DEBUG.TIME, ou
 
 
 def attach_func(func: callable):
-	""" Attaches a function to be called during a logging step.
-		e.g. can be used to pass data to other processes for more granular logging.
-
-		:param func:  Callable object to be called on each log.
-		"""
+	"""Attach a function to be called during a logging step."""
 	if func not in __attached_funcs:
 		__attached_funcs.append(func)
 
 
 def cleanup_mem(*shm_objects):
-	""" Close and unlink shared memory objects.
+	from shared.mem import cleanup_mem as shared_cleanup_mem
 
-		:param shm_objects: Shared memory objects to shut down.
-	"""
-	for shm in shm_objects:
-		if shm is not None:
-			shm.close()
-			shm.unlink()
+	return shared_cleanup_mem(*shm_objects)
 
 
 def exit_cleanly(step: str, *shm_objects, return_code: int = 0, statement: str = '', log_level: DEBUG = DEBUG.TIME,
 					out: TextIO = stdout, throw: Exception = None):
-	""" Exit while cleaning up shared memory.
+	from shared.mem import exit_cleanly as shared_exit_cleanly
 
-		:param step: Step of reconstruction process we are exiting during.
-		:param shm_objects: Shared memory objects to shut down.
-		:param return_code: Process return code to send.
-	"""
-	log(step, statement, log_level, out)
-	cleanup_mem(*shm_objects)
-
-	if throw is not None:
-		raise throw
-	exit(return_code)
+	return shared_exit_cleanly(step, *shm_objects, return_code=return_code, statement=statement,
+								log_level=log_level, out=out, throw=throw)

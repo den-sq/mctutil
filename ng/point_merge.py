@@ -5,6 +5,8 @@ from pathlib import Path
 
 import click
 
+from shared.cli import DelimitedRecord
+
 
 class Direction(IntEnum):
 	BACKWARD = 0,
@@ -14,23 +16,11 @@ class Direction(IntEnum):
 AnnotationPair = namedtuple("AnnotationPair", "name, direction")
 
 
-# Click Parameter: Choice of an Enum from a list.
-class AnnotationPairParameter(click.ParamType):
-	name = "Annotation Information"
-
-	def convert(self, value, param, ctx):
-		source_pair = value.split(":")
-
-		try:
-			name = source_pair[0]
-			direction = getattr(Direction, source_pair[1])
-		except ValueError:
-			self.fail(f'{value} is not an annotation pair, of format name:<FORWARD/BACKWARD>')
-
-		return AnnotationPair(name, direction)
-
-
-ANNOTATION_PAIR = AnnotationPairParameter()
+ANNOTATION_PAIR = DelimitedRecord(
+	AnnotationPair,
+	[str, lambda value: getattr(Direction, value)],
+	name="Annotation Information",
+)
 
 
 @click.command()
@@ -42,13 +32,6 @@ ANNOTATION_PAIR = AnnotationPairParameter()
 				help="Name of new, merged annotation.")
 @click.argument("source_annotations", type=ANNOTATION_PAIR, nargs=-1)
 def point_merge(json_file: Path, json_result: Path, target_name: str, source_annotations: tuple):
-	""" Merge 2+ annotation layers contained in a neuroglancer json file into a new layer.
-		Each SOURCE_ANNOTATION should be a name, followed by a colon and then whether to
-		add the points in FORWARD or BACKWARD order, e.g. R2-Root:FORWARD.
-
-		Example run:
-			python point_merge.py -j R2_L3.json -r R2_L3_Upd.json -t R2_L3 R2A-Root:FORWARD L3B-Root:BACKWARD
-		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 

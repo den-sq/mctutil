@@ -5,6 +5,8 @@ import re
 
 import click
 
+from shared.cli import DelimitedRecord
+
 
 @dataclass(frozen=True)
 class ColorPair:
@@ -17,22 +19,7 @@ class ColorPair:
 			raise ValueError(f"{self.hval} is not a valid hexcolor.")
 
 
-# Click Parameter: Pair of segment ID and color
-class ColorPairParameter(click.ParamType):
-	name = "Annotation Information"
-
-	def convert(self, value, param, ctx):
-		source_pair = value.split(":")
-
-		try:
-			pair = ColorPair(segment=int(source_pair[0]), hval=source_pair[1])
-		except ValueError as ve:
-			self.fail(f'{value} is not a color pair, of format segment:hexcolor.\n{ve}')
-
-		return pair
-
-
-COLOR_PAIR = ColorPairParameter()
+COLOR_PAIR = DelimitedRecord(ColorPair, [int, str], name="Annotation Information")
 
 
 @click.command()
@@ -44,11 +31,6 @@ COLOR_PAIR = ColorPairParameter()
 				required=True, help="Name of annotation to update the segment colors for.")
 @click.argument("SEGMENT_COLORS", type=COLOR_PAIR, nargs=-1)
 def change_color(json_file: Path, json_result: Path, annotation: str, segment_colors: ColorPair):
-	""" Changes segmentation colors for an annotation in a neuroglancer file.
-
-		Example:
-			python change_color.py -j Octo_Subv.json -r Octo_Subv_Recolor.json 2166:#ff0000 2021:#00ff00
-	"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
