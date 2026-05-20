@@ -1,87 +1,60 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
 
-[project]
+[tool.poetry]
 name = "mctutil"
 version = "0.0.0"
 description = "MicroCT data tooling used by the Cheng Lab at PSU."
+authors = ["Cheng Lab contributors"]
 readme = "README.md"
-requires-python = ">=3.10"
-authors = [
-  { name = "Cheng Lab contributors" },
-]
-dependencies = [
-  "click>=8",
-  "numpy",
-  "natsort",
-  "opencv-python",
-  "psutil",
-  "ruamel.yaml",
-  "tifffile",
-  # TomoPy is used by transform/transform.py but is not currently installable
-  # from PyPI in a way that keeps `pip install -e .[dev]` viable. Documented in
-  # the README until a packageable installation path is chosen.
+packages = [
+	{ include = "mctutil" },
 ]
 
-[project.optional-dependencies]
-aws = [
-  "boto3",
-  "brotli",
-]
-cloud = [
-  "cloud-volume",
-]
-dev = [
-  "flake8",
-  "pytest",
-]
-dicom = [
-  "dicom2jpg",
-]
-dragonfly = []
-gdal = [
-  "gdal",
-]
-gsheets = [
-  "google-auth",
-  "google-auth-oauthlib",
-  "google-api-python-client",
-]
-hpc = [
-  "ipyslurm",
-]
-mesh = [
-  "igneous-pipeline",
-  "task-queue",
-]
-ng = [
-  "neuroglancer-scripts",
-]
-sino = [
-  "scikit-image",
-]
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+click = ">=8,<9"
+numpy = "*"
+natsort = "*"
+opencv-python = "*"
+psutil = "*"
+ruamel-yaml = "*"
+tifffile = "*"
+boto3 = { version = "*", optional = true }
+brotli = { version = "*", optional = true }
+cloud-volume = { version = "*", optional = true }
+dicom2jpg = { version = "*", optional = true }
+gdal = { version = "*", optional = true }
+google-auth = { version = "*", optional = true }
+google-auth-oauthlib = { version = "*", optional = true }
+google-api-python-client = { version = "*", optional = true }
+igneous-pipeline = { version = "*", optional = true }
+ipyslurm = { version = "*", optional = true }
+neuroglancer-scripts = { version = "*", optional = true }
+scikit-image = { version = "*", optional = true }
+task-queue = { version = "*", optional = true }
 
-[project.scripts]
+[tool.poetry.group.dev.dependencies]
+flake8 = "*"
+pytest = "*"
+
+[tool.poetry.extras]
+aws = ["boto3", "brotli"]
+cloud = ["cloud-volume"]
+dicom = ["dicom2jpg"]
+gdal = ["gdal"]
+gsheets = ["google-auth", "google-auth-oauthlib", "google-api-python-client"]
+hpc = ["ipyslurm"]
+mesh = ["igneous-pipeline", "task-queue"]
+ng = ["neuroglancer-scripts"]
+sino = ["scikit-image"]
+
+[tool.poetry.scripts]
 mctutil = "mctutil.cli:main"
 
-[project.urls]
+[tool.poetry.urls]
 Repository = "https://github.com/den-sq/mctutil"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = [
-  "hpc_env*",
-  "hpc_work*",
-  "mem*",
-  "mctutil*",
-  "ng*",
-  "parsing*",
-  "shared*",
-  "transform*",
-  "transport*",
-]
-namespaces = true

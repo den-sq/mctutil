@@ -24,15 +24,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          cache: poetry
+
+      - name: Install Poetry
+        run: python -m pip install poetry
 
       - name: Install package
-        run: python -m pip install -e .[dev]
+        run: poetry install --with dev
 
       - name: Lint
         run: |
-          flake8 mctutil scripts tests
-          python3 scripts/check_python_tabs.py
+          poetry run flake8 mctutil scripts tests
+          poetry run python scripts/check_python_tabs.py
 
       - name: Smoke tests
-        run: pytest tests/
+        run: poetry run pytest tests/

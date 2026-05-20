@@ -14,16 +14,16 @@ layout yet.
 
 ## Installation
 
-Core editable install:
+Core Poetry install:
 
 ```bash
-python -m pip install -e .[dev]
+poetry install --with dev
 ```
 
 Optional extras for heavier stacks:
 
 ```bash
-python -m pip install -e .[dev,aws,cloud,dicom,gdal,gsheets,hpc,mesh,ng,sino]
+poetry install --with dev -E aws -E cloud -E dicom -E gdal -E gsheets -E hpc -E mesh -E ng -E sino
 ```
 
 Notes:
@@ -31,12 +31,14 @@ Notes:
 - No autoformatter is configured at this time.
 - Linting is enforced with `flake8`, the pre-commit hooks in
   `.pre-commit-config.yaml`, and `scripts/check_python_tabs.py`.
-- `transform/transform.py` also needs TomoPy. TomoPy is not currently wired
-  into `pyproject.toml` because there is no clean PyPI install path that keeps
-  `pip install -e .[dev]` working in CI.
+- `transform/transform.py` also needs TomoPy. Poetry is now the dependency
+  manager, but `poetry add tomopy` still fails for the same reason: TomoPy is
+  not published on a standard Python package index that Poetry can resolve in
+  this environment. It remains documented instead of declared so the base
+  install and CI stay usable.
 - The `mctutil` console script is intentionally a stub for now. The current
-  command surface still lives at `python -m <module>`; Phase 4 will unify it
-  under `mctutil <category> <task>`.
+  command surface still lives at `python -m <module>` from a repo checkout;
+  Phase 4 will unify it under `mctutil <category> <task>`.
 
 ## Quickstart
 
