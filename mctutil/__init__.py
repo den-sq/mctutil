@@ -1,1 +1,1 @@
-"""mctutil package scaffold for the Phase 0 packaging pass."""
+"""mctutil package and unified CLI scaffold."""

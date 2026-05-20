@@ -39,7 +39,20 @@ Notes:
 
 ## Quickstart
 
-Most tools are still run as module entrypoints:
+Phase 4 introduces the unified CLI surface:
+
+```bash
+mctutil transform trim --help
+mctutil transform normalize --help
+mctutil sino convert --help
+mctutil ng point-add --help
+mctutil transport s3-upload --help
+mctutil mem clean --help
+mctutil mem from-file --help
+mctutil parse meta-shift --help
+```
+
+The legacy module entrypoints still exist for now while the unified CLI settles:
 
 ```bash
 python -m transform.trim --help
@@ -70,10 +83,12 @@ python -m transform.trim \
   --z-trim 803,0
 ```
 
-The placeholder future entrypoint is already reserved:
+The unified entrypoint is now live:
 
 ```bash
 mctutil --help
+mctutil transform --help
+mctutil ng --help
 ```
 
 ## Project map
