@@ -27,4 +27,13 @@ testpaths = ["tests"]
 where = ["."]
 include = [
   "mctutil*",
+  "chenglab*",
+  "hpc_env*",
+  "hpc_work*",
+  "mem*",
+  "ng*",
+  "parsing*",
+  "shared*",
+  "transform*",
+  "transport*",
 ]
