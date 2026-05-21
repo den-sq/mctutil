@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 from psutil import cpu_count
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.mem import SharedNP
 
 FlatPair = namedtuple("FlatPair", ["Index", "Offset"])
@@ -79,14 +79,14 @@ def distribute_read(target_mem: SharedNP, pj: Mapping, window, int_window,
 		return [{"source": pj["offset"] + window.start * h_step, "target": int(base_offset + i * proj_block_size)}]
 
 	if sino_order:
-		log.log("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
-			+ f" to {base_offset + len(int_window) * sino_block_size}", log_level=log.DEBUG.INFO)
+		log.write("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
+			+ f" to {base_offset + len(int_window) * sino_block_size}", log_level=LOG.INFO)
 		pairs_func = generate_offset_pairs_sino
 		size = h_step
 	else:
-		log.log("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
+		log.write("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
 			+ f" to {base_offset + len(int_window) * proj_block_size} out of {target_mem[int_window].buffer_address}",
-			log_level=log.DEBUG.INFO)
+			log_level=LOG.INFO)
 		pairs_func = generate_offset_pairs_proj
 		size = proj_block_size
 

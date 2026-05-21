@@ -6,7 +6,7 @@ import click
 from osgeo import gdal
 import tifffile
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 startTime = datetime.now()
 gdal.UseExceptions() 	# Throws many warnings if we don't set whether we want exceptions.
@@ -31,19 +31,19 @@ def image_conv(image_path: Path, target_dir: Path, execute: bool = True):
 	target_path = target_dir.joinpath(image_path.with_suffix(".tiff").name)
 
 	if not execute:
-		log.log("HDF Convert", f"Would convert {image_path} -> {target_path}", log_level=log.DEBUG.INFO)
+		log.write("HDF Convert", f"Would convert {image_path} -> {target_path}", log_level=LOG.INFO)
 		return
 
 	with open(target_dir.parent.joinpath(f"{target_dir.name}.log"), "a") as logfile:
 		src_ds = gdal.Open(str(image_path))
-		log.log("HDF Convert", f"{image_path} read", log_level=log.DEBUG.STATUS)
+		log.write("HDF Convert", f"{image_path} read", log_level=LOG.STATUS)
 		logfile.write(f"{image_path} Read\n")
 
 		out_ds = gdal.Translate('/vsimem/in_memory_output.tif', src_ds, format='GTiff', bandList=[1])
 		out_arr = out_ds.ReadAsArray()
 
 		tifffile.imwrite(target_path, out_arr)
-		log.log("HDF Convert", f"{target_path} written", log_level=log.DEBUG.STATUS)
+		log.write("HDF Convert", f"{target_path} written", log_level=LOG.STATUS)
 		logfile.write(f"{target_path} Written\n")
 
 
@@ -65,13 +65,13 @@ def hdf_convert(target_dir, processes, execute, input):
 		total = len(file_paths)
 
 		if total == 0:
-			log.log("HDF Convert", f"{proj_dir}: No images found, skipping.", log_level=log.DEBUG.WARN)
+			log.write("HDF Convert", f"{proj_dir}: No images found, skipping.", log_level=LOG.WARN)
 			continue
 		else:
 			target_subdir = target_dir.joinpath("tiff_sets", proj_dir.parent.name, proj_dir.name)
-			log.log("HDF Convert",
+			log.write("HDF Convert",
 					f"{proj_dir}: {total} images found; writing to {target_subdir}",
-					log_level=log.DEBUG.STATUS)
+					log_level=LOG.STATUS)
 			if execute:
 				target_subdir.mkdir(parents=True, exist_ok=True)
 
@@ -86,9 +86,9 @@ def hdf_convert(target_dir, processes, execute, input):
 			with Pool(processes=processes) as pool:
 				pool.starmap(image_conv, [(file_path, target_subdir, execute) for file_path in file_paths])
 
-	log.log("HDF Convert",
+	log.write("HDF Convert",
 			f"HDF Convert {'complete' if execute else 'planned'}: {datetime.now() - startTime}",
-			log_level=log.DEBUG.STATUS)
+			log_level=LOG.STATUS)
 
 
 if __name__ == '__main__':

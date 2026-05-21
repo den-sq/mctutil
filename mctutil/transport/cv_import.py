@@ -8,16 +8,16 @@ import numpy as np
 import psutil
 import tifffile
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared import cli
 
 
 def fetch_slices(remote, use_https, region, bin_power, output_dir, execute=True):
-	log.log("Fetching Slices", f"{remote}: {region} with {bin_power}")
+	log.write("Fetching Slices", f"{remote}: {region} with {bin_power}")
 	if not execute:
-		log.log("Fetching Slices",
+		log.write("Fetching Slices",
 				f"Would fetch slices {region[0].start}..{region[0].stop} to {output_dir}",
-				log_level=log.DEBUG.INFO)
+				log_level=LOG.INFO)
 		return
 	vol = CloudVolume(remote, mip=bin_power, use_https=use_https, progress=True)
 	for i, slice_data in enumerate(vol[region], start=region[0].start):
@@ -32,7 +32,7 @@ def bin_slices(base_slice, bin_power, base_dim):
 			new_start = 0 if slice_dim.start is None else slice_dim.start // (2 ** bin_power)
 			new_stop = base_dim[i] if slice_dim.stop is None else slice_dim.stop // (2 ** bin_power)
 			out_slice += (np.s_[new_start: new_stop], )
-		log.log("Slice Calculation", out_slice)
+		log.write("Slice Calculation", out_slice)
 		return out_slice
 	else:
 		return base_slice
@@ -52,7 +52,7 @@ def bin_slices(base_slice, bin_power, base_dim):
 				help="Whether to actually fetch and write slices or just plan the work.")
 @click.argument("output-dir")
 def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, num_processes, execute, output_dir):
-	log.log("Start")
+	log.write("Start")
 
 	cloud_slice = bin_slices(cloud_slice, bin_power,
 							CloudVolume(cloud_url, mip=bin_power, use_https=use_https, progress=True).shape)
@@ -65,14 +65,14 @@ def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, 
 	if execute:
 		output_dir.mkdir(parents=True, exist_ok=True)
 	else:
-		log.log("Cloudvolume Fetch", f"Would create {output_dir}", log_level=log.DEBUG.INFO)
+		log.write("Cloudvolume Fetch", f"Would create {output_dir}", log_level=LOG.INFO)
 
 	with Pool(num_processes) as pool:
 		pool.starmap(fetch_slices,
 			[(cloud_url, use_https, (np.s_[i:min(i + batch_size, cloud_slice[0].stop)],) + cloud_slice[1:],
 				bin_power, output_dir, execute) for i in range(cloud_slice[0].start, cloud_slice[0].stop, batch_size)])
 
-	log.log("Complete")
+	log.write("Complete")
 
 
 if __name__ == '__main__':

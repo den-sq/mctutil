@@ -4,7 +4,7 @@ from shutil import copy
 import click
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -17,14 +17,14 @@ def get_conf(source, target, execute):
 	if execute:
 		Path(target).mkdir(exist_ok=True, parents=True)
 	else:
-		log.log("Pull Config", f"Would create {target}", log_level=log.DEBUG.INFO)
+		log.write("Pull Config", f"Would create {target}", log_level=LOG.INFO)
 	for conf in source_conf_set:
 		dest = Path(target, f"{conf.parent.name}_{conf.name}")
 		if execute:
-			log.log("Pull Config", f"{conf.parent.name}_{conf.name}", log_level=log.DEBUG.STATUS)
+			log.write("Pull Config", f"{conf.parent.name}_{conf.name}", log_level=LOG.STATUS)
 			copy(conf, dest)
 		else:
-			log.log("Pull Config", f"Would copy {conf} -> {dest}", log_level=log.DEBUG.INFO)
+			log.write("Pull Config", f"Would copy {conf} -> {dest}", log_level=LOG.INFO)
 
 
 if __name__ == "__main__":

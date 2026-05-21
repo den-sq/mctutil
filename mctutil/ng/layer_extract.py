@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -21,15 +21,15 @@ def layer_extract(json_file: Path, json_result: Path, layers: str):
 		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
-	log.log("Layer Extract", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Layer Extract", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	source_layers = {layer["name"]: layer for layer in json_data["layers"]}
 	copy_layers = []
 	for layer in layers:
 		if layer not in source_layers:
-			log.log("Layer Extract", f"{layer} not found in source.", log_level=log.DEBUG.WARN)
+			log.write("Layer Extract", f"{layer} not found in source.", log_level=LOG.WARN)
 		else:
-			log.log("Layer Extract", f"{layer} retained.", log_level=log.DEBUG.STATUS)
+			log.write("Layer Extract", f"{layer} retained.", log_level=LOG.STATUS)
 			copy_layers.append(source_layers[layer])
 
 	json_data["layers"] = copy_layers
@@ -37,7 +37,7 @@ def layer_extract(json_file: Path, json_result: Path, layers: str):
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Layer Extract", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Layer Extract", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -25,7 +25,7 @@ def layer_copy(json_file: Path, json_result: Path, json_target: Path, source_ann
 		json_source = json.load(json_handle)
 	with open(json_target) as json_handle:
 		json_target = json.load(json_handle)
-	log.log("Layer Copy", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Layer Copy", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	existing_annotations = [layer["name"] for layer in json_source["layers"]]
 	if len(source_annotations) > 0:
@@ -36,15 +36,15 @@ def layer_copy(json_file: Path, json_result: Path, json_target: Path, source_ann
 	annotations = [layer for layer in json_source["layers"] if
 					((layer["name"] in source_annotations) or (len(source_annotations) == 0))]
 
-	log.log("Layer Copy", f"{len(annotations)} found to copy", log_level=log.DEBUG.STATUS)
+	log.write("Layer Copy", f"{len(annotations)} found to copy", log_level=LOG.STATUS)
 
 	if len(source_annotations) > len(annotations):
 		missing_annotations = [layer_name for layer_name in source_annotations if layer_name not in existing_annotations]
-		log.log("Layer Copy", f"Annotations missing: {missing_annotations}", log_level=log.DEBUG.ERROR)
+		log.write("Layer Copy", f"Annotations missing: {missing_annotations}", log_level=LOG.ERROR)
 		return -1
 
 	if len(duplicate_layers) > 0:
-		log.log("Layer Copy", f"Some layers already exist in target: {duplicate_layers}", log_level=log.DEBUG.ERROR)
+		log.write("Layer Copy", f"Some layers already exist in target: {duplicate_layers}", log_level=LOG.ERROR)
 		return -1
 
 	json_target["layers"].extend(annotations)
@@ -52,7 +52,7 @@ def layer_copy(json_file: Path, json_result: Path, json_target: Path, source_ann
 	with open(json_result, "w") as handle:
 		json.dump(json_target, handle)
 
-	log.log("Layer Copy", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Layer Copy", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

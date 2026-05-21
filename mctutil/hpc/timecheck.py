@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -35,10 +35,10 @@ def timecheck(scan_root):
 				f"{scan_label},{projection_size:.1f}MB"
 			)
 		except Exception as ex:
-			log.log("Time Check", f"{ex}", log_level=log.DEBUG.ERROR)
+			log.write("Time Check", f"{ex}", log_level=LOG.ERROR)
 	scandatalist.sort()
 	for line in scandatalist:
-		log.log("Time Check", line, log_level=log.DEBUG.INFO)
+		log.write("Time Check", line, log_level=LOG.INFO)
 
 
 if __name__ == '__main__':

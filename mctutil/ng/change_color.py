@@ -5,7 +5,7 @@ import re
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.cli import DelimitedRecord
 
 
@@ -35,14 +35,14 @@ def change_color(json_file: Path, json_result: Path, annotation: str, segment_co
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	log.log("Change Color", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Change Color", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	layer_names = [layer["name"] for layer in json_data["layers"]]
 	if annotation not in layer_names:
-		log.log("Change Color", f"Annotation {annotation} not found in JSON.", log_level=log.DEBUG.ERROR)
+		log.write("Change Color", f"Annotation {annotation} not found in JSON.", log_level=LOG.ERROR)
 		exit(1)
 	elif "segmentColors" not in json_data["layers"][layer_names.index(annotation)]:
-		log.log("Change Color", f"No segmentation colors in layer {annotation}", log_level=log.DEBUG.ERROR)
+		log.write("Change Color", f"No segmentation colors in layer {annotation}", log_level=LOG.ERROR)
 		exit(1)
 	else:
 		color_layer = json_data["layers"][layer_names.index(annotation)]["segmentColors"]
@@ -50,15 +50,15 @@ def change_color(json_file: Path, json_result: Path, annotation: str, segment_co
 			if str(color_pair.segment) in color_layer:
 				color_layer[str(color_pair.segment)] = color_pair.hval
 			else:
-				log.log("Change Color",
+				log.write("Change Color",
 						f"Segmentation ID {color_pair.segment} not found in layer {annotation}.",
-						log_level=log.DEBUG.WARN)
+						log_level=LOG.WARN)
 		json_data["layers"][layer_names.index(annotation)]["segmentColors"] = color_layer
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Change Color", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Change Color", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

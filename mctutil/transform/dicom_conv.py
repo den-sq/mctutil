@@ -4,7 +4,7 @@ import click
 import dicom2jpg
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log
 
 
 @click.command
@@ -16,7 +16,7 @@ def dicom_conv(input_loc: Path, output_loc: Path):
 	path_list = input_loc.iterdir() if input_loc.is_dir() else [input_loc]
 	for path in path_list:
 		dicom2jpg.dicom2tiff(path, output_loc.joinpath(*path.parts[-2:]))
-		log.log("File Written", path.parts[-2:])
+		log.write("File Written", path.parts[-2:])
 
 
 if __name__ == "__main__":

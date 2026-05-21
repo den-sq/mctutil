@@ -7,7 +7,7 @@ import psutil
 import tifffile as tf
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log
 from mctutil.shared.io_helpers import byteread_helper
 from mctutil.shared.mem import SharedNP, ReconOrder
 
@@ -74,7 +74,7 @@ def transpose_stack(mode, path, stack_start, stack_levels, pixel_shift, out_name
 
 	recon_dtype, recon_shape, base_offset = get_details(path, stack_levels)
 	im_list = sorted(list(Path(path).iterdir()))
-	log.log("Setup", f"Shape {recon_shape}; Type {recon_dtype}; offset {base_offset}")
+	log.write("Setup", f"Shape {recon_shape}; Type {recon_dtype}; offset {base_offset}")
 	with SharedNP("Tranpose_Source", recon_dtype, recon_shape, create=True) as tp_mem:
 		itemsize = np.dtype(recon_dtype).itemsize
 		source_offset = base_offset + recon_shape.X * itemsize * stack_start
@@ -82,7 +82,7 @@ def transpose_stack(mode, path, stack_start, stack_levels, pixel_shift, out_name
 		line_size = recon_shape.X * itemsize
 		chunk_size = line_size * recon_shape.Z
 
-		log.log("Setup", f"Itemsize {itemsize}; Offset {source_offset}; Line Size {line_size}")
+		log.write("Setup", f"Itemsize {itemsize}; Offset {source_offset}; Line Size {line_size}")
 
 		with Pool(psutil.cpu_count()) as pool:
 			def get_offset(i):
@@ -92,14 +92,14 @@ def transpose_stack(mode, path, stack_start, stack_levels, pixel_shift, out_name
 			pool.starmap(byteread_helper, [(tp_mem.name, im_list[i], recon_dtype, get_offset(i), chunk_size)
 										for i in range(len(im_list))])
 
-		log.log("Images Loaded")
+		log.write("Images Loaded")
 		Path(out_path).mkdir(parents=True, exist_ok=True)
 
 		with Pool(psutil.cpu_count()) as pool:
 			pool.starmap(transpose_write, [(tp_mem, Path(out_path, f"{out_name}_{i}.tif"), i)
 										for i in range(recon_shape.Z)])
 
-		log.log("Images Written")
+		log.write("Images Written")
 
 
 if __name__ == "__main__":

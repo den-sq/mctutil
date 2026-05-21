@@ -7,14 +7,42 @@ from mctutil.mem import main as mem_group
 from mctutil.mesh import main as mesh_group
 from mctutil.ng import main as ng_group
 from mctutil.parse import main as parse_group
+from mctutil.shared.log import log, LOG_MASK_QUIET, LOG_MASK_DEFAULT, LOG_MASK_VERBOSE, LOG_MASK_ALL
 from mctutil.sino import main as sino_group
 from mctutil.transform import main as transform_group
 from mctutil.transport import main as transport_group
 
 
+_LOG_LEVEL_MASKS = {
+	"quiet": LOG_MASK_QUIET,
+	"default": LOG_MASK_DEFAULT,
+	"verbose": LOG_MASK_VERBOSE,
+	"debug": LOG_MASK_ALL,
+}
+
+
 @click.group(help="Unified mctutil command surface.")
-def main():
+@click.option(
+	"--log-level",
+	type=click.Choice(list(_LOG_LEVEL_MASKS), case_sensitive=False),
+	default="default",
+	show_default=True,
+	help=(
+		"Verbosity for stdout. quiet=ERROR only; default adds STATUS/TIME/WARN; "
+		"verbose adds INFO; debug adds DEBUG."
+	),
+)
+@click.option("--quiet", "-q", "quiet_flag", is_flag=True,
+				help="Shorthand for --log-level quiet.")
+@click.option("--verbose", "-v", "verbose_flag", is_flag=True,
+				help="Shorthand for --log-level verbose.")
+def main(log_level, quiet_flag, verbose_flag):
 	"""Root command for the Phase 4 unified CLI."""
+	if quiet_flag:
+		log_level = "quiet"
+	elif verbose_flag:
+		log_level = "verbose"
+	log.set_threshold(_LOG_LEVEL_MASKS[log_level.lower()])
 
 
 main.add_command(transform_group, "transform")

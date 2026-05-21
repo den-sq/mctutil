@@ -4,7 +4,7 @@ from subprocess import run
 import click
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 def collect_idle_nodes(node_file: Path):
@@ -31,9 +31,9 @@ def from_file(sbatch_script: Path, execute: bool, node_file: Path):
 	for node in collect_idle_nodes(node_file):
 		if execute:
 			run(["sbatch", "-w", node, str(sbatch_script)])
-			log.log("Mem From File", f"sbatch -w {node} {sbatch_script}", log_level=log.DEBUG.STATUS)
+			log.write("Mem From File", f"sbatch -w {node} {sbatch_script}", log_level=LOG.STATUS)
 		else:
-			log.log("Mem From File", f"Would sbatch -w {node} {sbatch_script}", log_level=log.DEBUG.INFO)
+			log.write("Mem From File", f"Would sbatch -w {node} {sbatch_script}", log_level=LOG.INFO)
 
 
 if __name__ == "__main__":

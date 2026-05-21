@@ -3,7 +3,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -24,18 +24,18 @@ def position_copy(json_file, json_result, json_target):
 	with open(json_target) as json_handle:
 		json_upd = json.load(json_handle)
 
-	log.log("Position Copy", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Position Copy", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	for field in ["position", "crossSectionOrientation", "crossSectionScale",
 					"projectionOrientation", "projectionScale", "layout", "layerListPanel"]:
 		json_upd[field] = json_data[field]
 
-	log.log("Position Copy", "Orientation updated", log_level=log.DEBUG.STATUS)
+	log.write("Position Copy", "Orientation updated", log_level=LOG.STATUS)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_upd, handle)
 
-	log.log("Position Copy", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Position Copy", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

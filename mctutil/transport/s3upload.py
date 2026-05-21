@@ -9,7 +9,7 @@ import click
 import igneous.task_creation as tc
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 _session = None
 
@@ -23,7 +23,7 @@ def _get_session():
 
 def upload_file_to_s3(file_path, key, bucket_name, content_encoding, execute=True):
 	if not execute:
-		log.log("S3 Upload", f"Would upload {file_path} -> s3://{bucket_name}/{key}", log_level=log.DEBUG.INFO)
+		log.write("S3 Upload", f"Would upload {file_path} -> s3://{bucket_name}/{key}", log_level=LOG.INFO)
 		return
 
 	s3 = _get_session().client('s3')
@@ -31,9 +31,9 @@ def upload_file_to_s3(file_path, key, bucket_name, content_encoding, execute=Tru
 		try:
 			s3.put_object(Bucket=bucket_name, Key=f"{key}/")
 		except ClientError as e:
-			log.log("S3 Upload", f"ClientError: {e.response}", log_level=log.DEBUG.ERROR)
+			log.write("S3 Upload", f"ClientError: {e.response}", log_level=LOG.ERROR)
 		except Exception as e:
-			log.log("S3 Upload", f"{e}", log_level=log.DEBUG.ERROR)
+			log.write("S3 Upload", f"{e}", log_level=LOG.ERROR)
 	else:  # Handle file
 		extra_args = {}
 		if content_encoding is not None:
@@ -41,10 +41,10 @@ def upload_file_to_s3(file_path, key, bucket_name, content_encoding, execute=Tru
 		try:
 			s3.upload_file(file_path, bucket_name, str(key), ExtraArgs=extra_args)
 		except ClientError as e:
-			log.log("S3 Upload", f"ClientError: {e.response}", log_level=log.DEBUG.ERROR)
+			log.write("S3 Upload", f"ClientError: {e.response}", log_level=LOG.ERROR)
 		except Exception as e:
-			log.log("S3 Upload", f"{e}", log_level=log.DEBUG.ERROR)
-	log.log("S3 Upload", f"uploaded: {key}", log_level=log.DEBUG.STATUS)
+			log.write("S3 Upload", f"{e}", log_level=LOG.ERROR)
+	log.write("S3 Upload", f"uploaded: {key}", log_level=LOG.STATUS)
 
 
 def upload_folder_to_s3_parallel(folder_path, target_folder, bucket_name, num_processes, execute=True):
@@ -73,20 +73,20 @@ def s3upload(bucket_prefix, bucket_name, process_count, mesh, execute, source_fo
 
 	target_full = bucket_prefix.joinpath(target_folder)
 
-	log.log("S3 Upload", f"target bucket: {bucket_name}", log_level=log.DEBUG.STATUS)
-	log.log("S3 Upload", f"target folder: {target_full}", log_level=log.DEBUG.STATUS)
+	log.write("S3 Upload", f"target bucket: {bucket_name}", log_level=LOG.STATUS)
+	log.write("S3 Upload", f"target folder: {target_full}", log_level=LOG.STATUS)
 
 	if execute:
 		s3 = _get_session().client('s3')
 		s3.put_object(Bucket=bucket_name, Key=f"{target_full}/")
 	else:
-		log.log("S3 Upload", f"Would create prefix s3://{bucket_name}/{target_full}/", log_level=log.DEBUG.INFO)
+		log.write("S3 Upload", f"Would create prefix s3://{bucket_name}/{target_full}/", log_level=LOG.INFO)
 
 	upload_folder_to_s3_parallel(source_folder, target_full, bucket_name, num_processes=process_count, execute=execute)
 
 	if mesh:
 		mesh_path = f"precomputed://s3://{bucket_name}/{target_full}"
-		log.log("S3 Upload", f"full remote path: {mesh_path}", log_level=log.DEBUG.STATUS)
+		log.write("S3 Upload", f"full remote path: {mesh_path}", log_level=LOG.STATUS)
 		if execute:
 			tq = LocalTaskQueue(parallel=process_count // 4)
 			tq.insert(tc.create_meshing_tasks(mesh_path, mip=0))
@@ -94,7 +94,7 @@ def s3upload(bucket_prefix, bucket_name, process_count, mesh, execute, source_fo
 			tq.insert(tc.create_unsharded_multires_mesh_tasks(mesh_path, num_lod=4))
 			tq.execute()
 		else:
-			log.log("S3 Upload", f"Would mesh {mesh_path}", log_level=log.DEBUG.INFO)
+			log.write("S3 Upload", f"Would mesh {mesh_path}", log_level=LOG.INFO)
 
 
 if __name__ == '__main__':

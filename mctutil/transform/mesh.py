@@ -9,7 +9,7 @@ import click
 import igneous.task_creation as tc
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -21,9 +21,9 @@ def mesh(proj_dir, layer_path, execute):
 	mip = 0
 
 	if not execute:
-		log.log("Mesh",
+		log.write("Mesh",
 				f"Would create meshing tasks for {layer_path} (mip={mip}, shape=512^3) and follow with manifest tasks",
-				log_level=log.DEBUG.INFO)
+				log_level=LOG.INFO)
 		return
 
 	with LocalTaskQueue(parallel=8) as tq:
@@ -44,13 +44,13 @@ def mesh(proj_dir, layer_path, execute):
 			sharded=False,					# generate intermediate shard fragments for later processing into sharded format
 		)
 		tq.insert_all(tasks)
-	log.log("Mesh", "create_meshing_tasks complete", log_level=log.DEBUG.STATUS)
+	log.write("Mesh", "create_meshing_tasks complete", log_level=LOG.STATUS)
 
 	with LocalTaskQueue(parallel=8) as tq:
 		tasks = tc.create_mesh_manifest_tasks(layer_path, magnitude=3) 	# Second Pass
 		tq.insert_all(tasks)
 
-	log.log("Mesh", "create_mesh_manifest_tasks complete", log_level=log.DEBUG.STATUS)
+	log.write("Mesh", "create_mesh_manifest_tasks complete", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

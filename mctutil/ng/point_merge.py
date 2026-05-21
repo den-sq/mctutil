@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.cli import DelimitedRecord
 
 
@@ -36,13 +36,13 @@ def point_merge(json_file: Path, json_result: Path, target_name: str, source_ann
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	log.log("Point Merge", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Point Merge", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	annotation_names = [layer["name"] for layer in json_data["layers"]]
 
 	for pair in source_annotations:
 		if pair.name not in annotation_names:
-			log.log("Point Merge", f"Annotation {pair.name} missing.", log_level=log.DEBUG.ERROR)
+			log.write("Point Merge", f"Annotation {pair.name} missing.", log_level=LOG.ERROR)
 			return
 
 	new_annotation_layer = {
@@ -54,21 +54,21 @@ def point_merge(json_file: Path, json_result: Path, target_name: str, source_ann
 		"name": target_name,
 	}
 
-	log.log("Point Merge", "Base annotation created", log_level=log.DEBUG.STATUS)
+	log.write("Point Merge", "Base annotation created", log_level=LOG.STATUS)
 
 	for pair in source_annotations:
 		base_annotations = json_data["layers"][annotation_names.index(pair.name)]["annotations"]
 		in_order = base_annotations if pair.direction else list(reversed(base_annotations))
 		new_annotation_layer["annotations"] += in_order
 
-	log.log("Point Merge", "Merged annotation created", log_level=log.DEBUG.STATUS)
+	log.write("Point Merge", "Merged annotation created", log_level=LOG.STATUS)
 
 	json_data["layers"].append(new_annotation_layer)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Point Merge", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Point Merge", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

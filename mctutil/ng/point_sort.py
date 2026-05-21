@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.cli import DelimitedRecord
 
 
@@ -35,25 +35,25 @@ def point_sort(json_file: Path, json_result: Path, axis: int, source_annotations
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	log.log("Point Sort", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Point Sort", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	annotation_names = [layer["name"] for layer in json_data["layers"]]
 
 	for pair in source_annotations:
 		if pair.name not in annotation_names:
-			log.log("Point Sort", f"Annotation {pair.name} missing.", log_level=log.DEBUG.WARN)
+			log.write("Point Sort", f"Annotation {pair.name} missing.", log_level=LOG.WARN)
 		else:
 			base_annotations = json_data["layers"][annotation_names.index(pair.name)]["annotations"]
 			sorted_annotations = sorted(base_annotations, key=lambda x: x['point'][axis])
 			final_annotations = sorted_annotations if pair.direction else reversed(sorted_annotations)
 			json_data["layers"][annotation_names.index(pair.name)]["annotations"] = list(final_annotations)
 
-	log.log("Point Sort", "Annotations updated", log_level=log.DEBUG.STATUS)
+	log.write("Point Sort", "Annotations updated", log_level=LOG.STATUS)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Point Sort", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Point Sort", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

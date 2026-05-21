@@ -5,7 +5,7 @@ import shutil
 import brotli
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -26,7 +26,7 @@ def gunzip(root_path, target_path):
 				else:
 					shutil.copy(fname, target_file)
 			except BaseException:
-				log.log("Quick Gunzip", f"Failed file: {fname}|{target_file}", log_level=log.DEBUG.ERROR)
+				log.write("Quick Gunzip", f"Failed file: {fname}|{target_file}", log_level=LOG.ERROR)
 
 
 if __name__ == '__main__':

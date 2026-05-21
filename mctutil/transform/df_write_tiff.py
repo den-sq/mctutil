@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 def _env_path(name: str, default: str) -> Path:
@@ -30,7 +30,7 @@ def set_df_environment():
 		ana_dir.joinpath("Lib\\site-packages\\pywin32_system32"),
 		ors_dir.joinpath("pythonAllUsersExtensions"), user_dir.joinpath("pythonUserExtensions")]])
 
-	log.log("DF Write TIFF", f"Python {sys.version} on {sys.platform}", log_level=log.DEBUG.INFO)
+	log.write("DF Write TIFF", f"Python {sys.version} on {sys.platform}", log_level=LOG.INFO)
 
 
 set_df_environment()
@@ -61,9 +61,9 @@ def df_write_tiff(df_source, df_object, df_title, df_id, execute, outputdir):
 	target = outputdir.joinpath(f"{source.getTitle()}.tif")
 	if execute:
 		tf.imwrite(target, source.getAsNDArray(0))
-		log.log("DF Write TIFF", f"Wrote {target}", log_level=log.DEBUG.STATUS)
+		log.write("DF Write TIFF", f"Wrote {target}", log_level=LOG.STATUS)
 	else:
-		log.log("DF Write TIFF", f"Would write {target}", log_level=log.DEBUG.INFO)
+		log.write("DF Write TIFF", f"Would write {target}", log_level=LOG.INFO)
 
 
 if __name__ == "__main__":

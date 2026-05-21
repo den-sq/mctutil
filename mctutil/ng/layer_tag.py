@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 import numpy as np
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.cli import DelimitedRecord
 
 
@@ -43,7 +43,7 @@ TAGGEDLAYER = DelimitedRecord(
 def layer_tag(json_file: Path, json_result: Path, segment_radius, tagged_layer: TaggedLayer):
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
-	log.log("Layer Tag", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Layer Tag", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	preset_intensities = [layer.intensity for layer in tagged_layer]
 	intensity_step = np.iinfo(np.uint16).max // (len(tagged_layer) + 2)
@@ -52,7 +52,7 @@ def layer_tag(json_file: Path, json_result: Path, segment_radius, tagged_layer: 
 	source_layers = {layer["name"]: layer for layer in json_data["layers"]}
 	for t_layer in tagged_layer:
 		if t_layer.name not in source_layers:
-			log.log("Layer Tag", f"{t_layer} not found in source.", log_level=log.DEBUG.WARN)
+			log.write("Layer Tag", f"{t_layer} not found in source.", log_level=LOG.WARN)
 		else:
 			if t_layer.intensity == -1:
 				t_layer = replace(t_layer, intensity=next(intensity_gen))
@@ -64,14 +64,14 @@ def layer_tag(json_file: Path, json_result: Path, segment_radius, tagged_layer: 
 
 			source_layers[t_layer.name]["name"] = str(t_layer)
 
-			log.log("Layer Tag", f"{t_layer.name} updated: {t_layer}.", log_level=log.DEBUG.STATUS)
+			log.write("Layer Tag", f"{t_layer.name} updated: {t_layer}.", log_level=LOG.STATUS)
 
 	json_data["layers"] = list(source_layers.values())
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Layer Tag", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Layer Tag", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

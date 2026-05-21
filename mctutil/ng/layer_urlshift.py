@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 def upd_layer(name, source, shifted_layers):
@@ -39,7 +39,7 @@ def layer_urlshift(json_file: Path, json_result: Path):
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	log.log("Layer URLShift", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Layer URLShift", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	shifted_layers = {layer["name"]: layer for layer in json_data["layers"]}
 	for name, layer in shifted_layers.items():
@@ -51,7 +51,7 @@ def layer_urlshift(json_file: Path, json_result: Path):
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Layer URLShift", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Layer URLShift", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":
