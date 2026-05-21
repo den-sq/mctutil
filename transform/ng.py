@@ -9,6 +9,8 @@ import json
 import tifffile
 import click
 
+from shared import log
+
 
 @click.command()
 @click.option('-c', '--chunk-size', type=click.INT, show_default=True, default=128,
@@ -27,14 +29,14 @@ import click
 @click.option('-o', '--output-location', type=click.Path(), required=True)
 def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, metadata_info, compress_info,
 				output_location):
-	print(f'input folder: {input_path}')
+	log.log("Neuroglance", f"Input folder: {input_path}", log_level=log.DEBUG.STATUS)
 	image_paths = natsorted(Path(input_path).glob("**/*.tif*"))
 
 	memmap_ = tifffile.memmap(image_paths[0])
 	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
 	dtype_ = str(memmap_.dtype)
 
-	print(f'volume size is :{size} datatype is {dtype_}')
+	log.log("Neuroglance", f"Volume size is {size}, datatype is {dtype_}", log_level=log.DEBUG.STATUS)
 
 	if segmentation:
 		json_metadata = {

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from shared import log
 from shared.cli import DelimitedRecord
 
 
@@ -35,13 +36,13 @@ def point_merge(json_file: Path, json_result: Path, target_name: str, source_ann
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	print("json loaded")
+	log.log("Point Merge", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
 
 	annotation_names = [layer["name"] for layer in json_data["layers"]]
 
 	for pair in source_annotations:
 		if pair.name not in annotation_names:
-			print(f"Annotation {pair.name} missing.")
+			log.log("Point Merge", f"Annotation {pair.name} missing.", log_level=log.DEBUG.ERROR)
 			return
 
 	new_annotation_layer = {
@@ -53,21 +54,21 @@ def point_merge(json_file: Path, json_result: Path, target_name: str, source_ann
 		"name": target_name,
 	}
 
-	print("base new annotation created")
+	log.log("Point Merge", "Base annotation created", log_level=log.DEBUG.STATUS)
 
 	for pair in source_annotations:
 		base_annotations = json_data["layers"][annotation_names.index(pair.name)]["annotations"]
 		in_order = base_annotations if pair.direction else list(reversed(base_annotations))
 		new_annotation_layer["annotations"] += in_order
 
-	print("new annotation created")
+	log.log("Point Merge", "Merged annotation created", log_level=log.DEBUG.STATUS)
 
 	json_data["layers"].append(new_annotation_layer)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	print(f"new annotation written to {json_result}")
+	log.log("Point Merge", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":

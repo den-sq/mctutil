@@ -4,6 +4,8 @@ from pathlib import Path
 
 import click
 
+from shared import log
+
 
 @click.command()
 @click.option("--json-file", "-j", type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
@@ -19,15 +21,15 @@ def layer_extract(json_file: Path, json_result: Path, layers: str):
 		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
-	print("json loaded")
+	log.log("Layer Extract", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
 
 	source_layers = {layer["name"]: layer for layer in json_data["layers"]}
 	copy_layers = []
 	for layer in layers:
 		if layer not in source_layers:
-			print(f"{layer} not found in source.")
+			log.log("Layer Extract", f"{layer} not found in source.", log_level=log.DEBUG.WARN)
 		else:
-			print(f"{layer} retained.")
+			log.log("Layer Extract", f"{layer} retained.", log_level=log.DEBUG.STATUS)
 			copy_layers.append(source_layers[layer])
 
 	json_data["layers"] = copy_layers
@@ -35,7 +37,7 @@ def layer_extract(json_file: Path, json_result: Path, layers: str):
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	print(f"new annotation written to {json_result}")
+	log.log("Layer Extract", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":
