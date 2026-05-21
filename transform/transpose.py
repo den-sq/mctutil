@@ -14,6 +14,9 @@ from shared.io_helpers import byteread_helper 	# noqa::E402
 from shared.mem import SharedNP, ReconOrder 	# noqa::E402
 
 
+MODE = click.Choice(["shared", "naive"], case_sensitive=False)
+
+
 def get_details(path, stack_levels):
 	flist = list(Path(path).iterdir())
 	with tf.TiffFile(flist[0]) as tif:
@@ -27,15 +30,50 @@ def transpose_write(recon_mem: SharedNP, path, i):
 		tf.imwrite(path, view[i, :, :])
 
 
+def transpose_write_array(view, path, i):
+	tf.imwrite(path, view[i, :, :])
+
+
+def transpose_naive(path: Path, output_path: Path, out_name: str):
+	im_list = sorted(list(path.iterdir()))
+	with tf.TiffFile(im_list[0]) as im:
+		old_shape = (len(im_list), im.pages[0].shape[0], im.pages[0].shape[1])
+		old_dtype = im.pages[0].dtype
+
+	full_data = np.empty(old_shape, dtype=old_dtype)
+	for i, image in enumerate(im_list):
+		full_data[i, :, :] = tf.imread(image)
+	transposed_data = np.transpose(full_data, [2, 1, 0])
+
+	output_path.mkdir(parents=True, exist_ok=True)
+	for i in range(old_shape[2]):
+		tf.imwrite(output_path.joinpath(f"{out_name}_{str(i).zfill(4)}.tif"), transposed_data[i])
+
+
+def validate_shared_mode(mode: str, stack_start, stack_levels):
+	if mode == "shared":
+		if stack_start is None:
+			raise click.UsageError("--stack-start is required when --mode=shared.")
+		if stack_levels is None:
+			raise click.UsageError("--stack-levels is required when --mode=shared.")
+
+
 @click.command()
-@click.option("-p", "--path", type=click.Path(), help="Reconstruction Path", required=True)
-@click.option("-s", "--stack-start", type=click.INT, help="Y value to start reading from images.", required=True)
-@click.option("-l", "--stack-levels", type=click.INT, help="Vertical Stacks to use for transpose.", required=True)
+@click.option("--mode", type=MODE, default="shared", show_default=True)
+@click.option("-p", "--path", type=click.Path(exists=True, path_type=Path), help="Reconstruction path", required=True)
+@click.option("-s", "--stack-start", type=click.INT, help="Y value to start reading from images.", required=False)
+@click.option("-l", "--stack-levels", type=click.INT, help="Vertical stacks to use for transpose.", required=False)
 @click.option("-x", "--pixel-shift", type=click.FLOAT, default=0.0,
 				help="Vertical shift per pixel to track angular movement")
-@click.option("-n", "--out-name", type=click.STRING, help="Name Prefix for Files", required=True)
-@click.argument("out-path", required=True)
-def transpose_stack(path, stack_start, stack_levels, pixel_shift, out_name, out_path):
+@click.option("-n", "--out-name", type=click.STRING, help="Name prefix for files", default="tp", show_default=True)
+@click.argument("out-path", required=True, type=click.Path(path_type=Path))
+def transpose_stack(mode, path, stack_start, stack_levels, pixel_shift, out_name, out_path):
+	mode = mode.lower()
+	validate_shared_mode(mode, stack_start, stack_levels)
+	if mode == "naive":
+		transpose_naive(path, out_path, out_name)
+		return
+
 	recon_dtype, recon_shape, base_offset = get_details(path, stack_levels)
 	im_list = sorted(list(Path(path).iterdir()))
 	log.log("Setup", f"Shape {recon_shape}; Type {recon_dtype}; offset {base_offset}")
@@ -57,7 +95,6 @@ def transpose_stack(path, stack_start, stack_levels, pixel_shift, out_name, out_
 										for i in range(len(im_list))])
 
 		log.log("Images Loaded")
-
 		Path(out_path).mkdir(parents=True, exist_ok=True)
 
 		with Pool(psutil.cpu_count()) as pool:

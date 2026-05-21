@@ -19,6 +19,9 @@ from shared.io_helpers import FLAT, distribute_read 	# noqa::E402
 from shared.mem import SharedNP, ProjOrder, SinoOrder 	# noqa::E402
 
 
+MODE = click.Choice(["full", "preproc"], case_sensitive=False)
+
+
 def weighted_normalize(sino_mem: SharedNP, input_mem: SharedNP, flats_mem: SharedNP, window, int_window,
 					projection: int, projection_count: int, debug_folder: Path = None):
 	"""Normalizes single projection using weighted pre/post flats."""
@@ -28,7 +31,6 @@ def weighted_normalize(sino_mem: SharedNP, input_mem: SharedNP, flats_mem: Share
 		gain_map = np.subtract(np.average(flats[FLAT.PREGAIN.index:FLAT.POSTGAIN.index + 1, window, :], axis=0,
 							weights=[projection_count - projection, projection]), dark_map)
 		gain_map[gain_map == 0] = np.min(gain_map[gain_map != 0])
-
 		temp = np.subtract(source[projection, int_window, :].astype(sino_mem.dtype), dark_map)
 		sino[int_window, projection, :] = np.divide(temp, gain_map)
 
@@ -41,7 +43,10 @@ def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = N
 			tf.imwrite(path, out_type.convert_ar(sino[i, :, :]))
 
 
-def image_bounds(sino_mem: SharedNP, i: int):
+def image_bounds(sino_mem: SharedNP, i: int = None):
+	if i is None:
+		with sino_mem as sino:
+			return np.array([np.min(sino), np.max(sino)])
 	with sino_mem[i] as sino:
 		if np.max(sino) > 2:
 			print(np.max(sino))
@@ -75,32 +80,14 @@ def sh_imread(sino_mem, i, path):
 		sino[:, :] = tf.imread(path)
 
 
-@click.command()
-@click.option("-i", "--input-dir", type=click.Path(path_type=Path, file_okay=False), required=True,
-				help="Directory of Input Projections.")
-@click.option("-o", "--output-dir", type=click.Path(path_type=Path, file_okay=False), required=True,
-				help="Directory of Output Sinograms.")
-@click.option("-f", "--flat-dir", type=click.Path(path_type=Path, file_okay=False), required=True,
-				help="Directory of Flats.")
-@click.option("-p", "--process-count", type=click.INT, default=cpu_count(),
-				help="# of simulatenous processes during conversion.  Also used as window size.")
-@click.option("-c", "--complete-preprocess", type=click.BOOL, default=False,
-				help="Whether to perform complete preprocessing steps on sinogram data,"
-				"including 0.0-1.0 normalization and denoise_nl_means.")
-@click.option("-l", "--outlier-cuts", type=click.INT, default=15,
-				help="Number of outlier values on each side to throw out for min/max across entire set."
-				" Necessary for certain instances where gains match darks.")
-@click.option("-s", "--sectioning", type=click.INT, required=False,
-				help="Divide results into serial sections of this size (optional).")
-@click.option("-r", "--sino_range", type=cli.RANGE, required=False,
-				help="Sinogram (Projection Y Dimension) Range to Create")
-@click.option("-h", "--hard-cut", type=click.FLOAT, default=None,
-				help="Hard absolute values for minimum/maximum bounds for normalizing.")
-def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int,
-					complete_preprocess: bool, outlier_cuts: int, sectioning: int,
-					sino_range: range, hard_cut: float):
-	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
+def validate_mode(mode: str, flat_dir: Path | None):
+	if mode == "full" and flat_dir is None:
+		raise click.UsageError("--flat-dir is required when --mode=full.")
 
+
+def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int, sectioning: int,
+			sino_range: range):
+	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
 	segment_id = str(uuid.uuid4())
 	internal_dtype = np.float32
 
@@ -123,16 +110,11 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 
 	sino_shape = SinoOrder(process_count, len(image_paths), pj["x"])
 	proj_shape = ProjOrder(len(image_paths), process_count, pj["x"])
-
-	bounds = []
-
 	log.log("Setup", f"{pj}")
 
-	with (SharedNP(f'flats_{segment_id}', pj["dtype"], ProjOrder(len(FLAT), pj["y"], pj["x"]),
-			create=True) as flats_mem,
+	with (SharedNP(f'flats_{segment_id}', pj["dtype"], ProjOrder(len(FLAT), pj["y"], pj["x"]), create=True) as flats_mem,
 			SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem,
 			SharedNP(f"input_{segment_id}", pj["dtype"], proj_shape, create=True) as input_mem):
-
 		with flats_mem as flat_set:
 			for flat in list(FLAT):
 				flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tiff")).astype(internal_dtype)
@@ -140,33 +122,105 @@ def sino_convert(input_dir: Path, output_dir: Path, flat_dir: Path, process_coun
 		for x in sino_split:
 			window = range(x, min(x + process_count, sino_split.stop))
 			internal_window = range(0, len(window))
-
 			log.log("Cycle Start", f"Window {window}; Internal {internal_window}; Shape {sino_shape} from {proj_shape}")
-
-			distribute_read(input_mem, pj, window, internal_window, enumerate(image_paths),
-							thread_max=process_count, sino_order=False)
-
+			distribute_read(
+				input_mem,
+				pj,
+				window,
+				internal_window,
+				enumerate(image_paths),
+				thread_max=process_count,
+				sino_order=False,
+			)
 			log.log("Files Read", f"Window {window}; Shape {proj_shape}")
-
 			with Pool(process_count) as pool:
 				pool.starmap(weighted_normalize, [(sino_mem, input_mem, flats_mem, window, internal_window, i, sino_mem.shape.Theta)
 										for i in range(sino_mem.shape.Theta)])
-
-			log.log("Gain Correction", f"{window}", log.DEBUG.TIME)
-
-			with Pool(process_count) as pool:
-				bounds += pool.starmap(image_bounds, [(sino_mem, i) for i in internal_window])
-
-			log.log("Bounds Calculated", f"{window}", log.DEBUG.TIME)
-
 			for section_dir in set([fullpath.parent for fullpath in output_paths[window.start:window.stop]]):
 				section_dir.mkdir(parents=True, exist_ok=True)
-
 			with Pool(process_count) as pool:
 				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
-
 			log.log("Files Written", f"{output_dir} : {window}", log.DEBUG.TIME)
 
-	bounds = np.array(bounds)
-	print(np.sort(bounds, axis=None))
-	print(bounds.shape)
+
+def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: float | None, max_val: float | None):
+	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
+	output_dir.mkdir(parents=True, exist_ok=True)
+	output_paths = [output_dir.joinpath(x.name) for x in image_paths]
+
+	segment_id = str(uuid.uuid4())
+	internal_dtype = np.float32
+
+	with tf.TiffFile(image_paths[0]) as tif:
+		page = tif.pages[0]
+		pj = {"dtype": page.dtype, "bytesize": page.dtype.itemsize, "offset": page.dataoffsets[0],
+				"x": page.shape[1], "y": page.shape[0]}
+
+	sino_shape = SinoOrder(process_count, pj["y"], pj["x"])
+	bounds = []
+	log.log("Setup", f"{pj}")
+
+	if min_val is None or max_val is None:
+		with SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem:
+			for x in range(0, len(image_paths), process_count):
+				window = range(x, min(x + process_count, len(image_paths)))
+				internal_window = range(0, len(window))
+				with Pool(process_count) as pool:
+					pool.starmap(sh_imread, [(sino_mem, i, image_paths[window[i]]) for i in internal_window])
+				bounds.append(image_bounds(sino_mem))
+		bounds = np.asarray(bounds)
+		min_val = np.min(bounds[:, 0])
+		max_val = np.max(bounds[:, 1])
+		log.log("Final Bounds Calculated", f"{min_val} : {max_val}", log.DEBUG.TIME)
+
+	with SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem:
+		for x in range(0, len(image_paths), process_count):
+			window = range(x, min(x + process_count, len(image_paths)))
+			internal_window = range(0, len(window))
+			with Pool(process_count) as pool:
+				pool.starmap(sh_imread, [(sino_mem, i, image_paths[window[i]]) for i in internal_window])
+			with Pool(process_count) as pool:
+				pool.starmap(preprocess, [(sino_mem, i, min_val, max_val) for i in internal_window])
+			with Pool(process_count) as pool:
+				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
+			log.log("Files Written", f"{output_dir} : {window}", log.DEBUG.TIME)
+
+
+@click.command()
+@click.option("--mode", type=MODE, default="full", show_default=True,
+				help="Whether to build sinograms from projection+flat data or preprocess existing sinograms.")
+@click.option("-i", "--input-dir", type=click.Path(path_type=Path, file_okay=False), required=True,
+				help="Directory of input projections or sinograms.")
+@click.option("-o", "--output-dir", type=click.Path(path_type=Path, file_okay=False), required=True,
+				help="Directory of output sinograms.")
+@click.option("-f", "--flat-dir", type=click.Path(path_type=Path, file_okay=False), required=False,
+				help="Directory of flats (required for full mode).")
+@click.option("-p", "--process-count", type=click.INT, default=cpu_count(),
+				help="# of simultaneous processes during conversion. Also used as window size.")
+@click.option("-s", "--sectioning", type=click.INT, required=False,
+				help="Divide full-mode results into serial sections of this size.")
+@click.option("-r", "--sino_range", type=cli.RANGE, required=False,
+				help="Sinogram (projection Y dimension) range to create in full mode.")
+@click.option("--min-val", type=click.FLOAT, default=None, help="Minimum sinogram value for preproc mode.")
+@click.option("--max-val", type=click.FLOAT, default=None, help="Maximum sinogram value for preproc mode.")
+def sino_convert(
+		mode: str,
+		input_dir: Path,
+		output_dir: Path,
+		flat_dir: Path | None,
+		process_count: int,
+		sectioning: int,
+		sino_range: range,
+		min_val: float | None,
+		max_val: float | None,
+):
+	mode = mode.lower()
+	validate_mode(mode, flat_dir)
+	if mode == "full":
+		run_full(input_dir, output_dir, flat_dir, process_count, sectioning, sino_range)
+	else:
+		run_preproc(input_dir, output_dir, process_count, min_val, max_val)
+
+
+if __name__ == "__main__":
+	sino_convert()
