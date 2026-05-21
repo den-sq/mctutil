@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from taskqueue import LocalTaskQueue
 
@@ -49,17 +48,15 @@ def upload_file_to_s3(file_path, key, bucket_name, content_encoding, execute=Tru
 
 
 def upload_folder_to_s3_parallel(folder_path, target_folder, bucket_name, num_processes, execute=True):
+	folder_path = Path(folder_path)
 	with ProcessPoolExecutor(max_workers=num_processes) as executor:
-		for root, dirs, files in os.walk(str(folder_path)):
-			for dir_name in dirs:
-				dir_path = Path(root).joinpath(dir_name)
-				key = target_folder.joinpath(dir_path.relative_to(folder_path))
-				executor.submit(upload_file_to_s3, dir_path, key, bucket_name, None, execute)
-			for file_name in files:
-				file_path = Path(root).joinpath(file_name)
-				key = target_folder.joinpath(file_path.relative_to(folder_path))
-				content_encoding = 'gzip' if file_name != 'info' else None
-				executor.submit(upload_file_to_s3, file_path, key, bucket_name, content_encoding, execute)
+		for entry in folder_path.rglob("*"):
+			key = target_folder.joinpath(entry.relative_to(folder_path))
+			if entry.is_dir():
+				executor.submit(upload_file_to_s3, entry, key, bucket_name, None, execute)
+			else:
+				content_encoding = 'gzip' if entry.name != 'info' else None
+				executor.submit(upload_file_to_s3, entry, key, bucket_name, content_encoding, execute)
 
 
 @click.command()

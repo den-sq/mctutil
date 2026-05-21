@@ -1,5 +1,4 @@
 from datetime import datetime
-import os
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -22,7 +21,7 @@ def fetch_slices(remote, use_https, region, bin_power, output_dir, execute=True)
 		return
 	vol = CloudVolume(remote, mip=bin_power, use_https=use_https, progress=True)
 	for i, slice_data in enumerate(vol[region], start=region[0].start):
-		tifffile.imwrite(os.path.join(output_dir, f"slice_{str(i).zfill(4)}.tif"), slice_data)
+		tifffile.imwrite(output_dir / f"slice_{str(i).zfill(4)}.tif", slice_data)
 
 
 def bin_slices(base_slice, bin_power, base_dim):
