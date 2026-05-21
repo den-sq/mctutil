@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mctutil"
+version = "0.0.0"
+description = "MicroCT data tooling used by the Cheng Lab at PSU."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Cheng Lab contributors" },
+]
+# Runtime dependencies are managed through environment.yml so TomoPy and other
+# non-PyPI-first packages can be sourced from conda-forge.
+
+[project.scripts]
+mctutil = "mctutil.cli:main"
+
+[project.urls]
+Repository = "https://github.com/den-sq/mctutil"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "mctutil*",
+]

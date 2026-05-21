@@ -1,0 +1,30 @@
+name: mctutil
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - boto3
+  - brotli
+  - click
+  - flake8
+  - gdal
+  - google-api-python-client
+  - google-auth
+  - google-auth-oauthlib
+  - ipyslurm
+  - natsort
+  - numpy
+  - opencv
+  - psutil
+  - pytest
+  - ruamel.yaml
+  - scikit-image
+  - tifffile
+  - tomopy>=1.15
+  - pip:
+      - cloud-volume
+      - dicom2jpg
+      - igneous-pipeline
+      - neuroglancer-scripts
+      - task-queue
