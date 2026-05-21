@@ -1,7 +1,34 @@
 # mctutil — Refactor & Unification Plan
 
-Status: proposal, drafted from a survey of `master` at the time of writing.
-Audience: `den-sq/mctutil` maintainers.
+Status: in-flight. Originally drafted as a proposal from a survey of `master`.
+Annotated 2026-05-21 with phase-by-phase execution status (PR references
+inline). Audience: `den-sq/mctutil` maintainers.
+
+## Status at a glance (2026-05-21)
+
+- **Phase 0** — shipped in PR #48.
+- **Phase 1** — shipped in PR #49 (all §1.1 and §1.2 items).
+- **Phase 2** — shipped in PR #50.
+- **Phase 3** — shipped in PR #51, plus follow-up PR #58 splitting
+  `meta_shift` into a generic engine + `chenglab/` adapter.
+- **Phase 4** — shipped in PR #52.
+- **Phase 5** — shipped across PRs #53–#56 (real tests, full
+  `print` → `shared.log.log` sweep, `--dry-run` on every write-heavy
+  command, restructuring `parsing/empty_dir_removal.py` into
+  `parse prune-empty`).
+- **§1.4 security follow-up** — shipped in PR #57 (deleted
+  `mem/clean_shared.py`, retired its `eval(argv[1])`, merged its extra
+  shm prefixes into `mem/clean.py`).
+
+Intentionally deferred (per maintainer instruction or scope):
+
+- `hpc_work/codeclist.txt` — kept in tree.
+- `parsing/meta_shift.py` repo question — answered: kept in repo behind
+  the chenglab adapter (see PR #58).
+- `shared/log.py` `--quiet` / `--log-level` plumbing — would require a
+  real logger overhaul; out of scope for the print→log sweep.
+- `mem/clean.py` sbatch heredoc per-cluster parameterization (§6.4) —
+  still open.
 
 ## 0. Scope of survey
 
@@ -23,54 +50,62 @@ inline, and a non-trivial fraction of scripts are silently broken.
 
 ### 1.1 Scripts that cannot run as written
 
-| File | Defect |
-|------|--------|
-| `transform/mesh.py:14` | `@click.commmand` (three m's). Decorator throws on import; script unusable. |
-| `transform/upload.py:22,25` | `-s` short flag declared for both `--source-folder` and `--secret-json`. Click raises at CLI build. |
-| `parsing/scanlog_fetch.py:10` | `Path("logs").mkdir(exists_ok=True)` — kwarg should be `exist_ok`. `TypeError` at first call. |
-| `transform/normalize.py:77` | `--processes` option typed as `click.Path` but used as int (default `psutil.cpu_count()`). Will accept anything; downstream usage will fail. |
-| `transform/df_write_tiff.py:52` | `roi.getTitle()` — `roi` is the imported class, not an instance. `AttributeError`. Also hard-codes Windows-only Dragonfly paths. |
-| `transform/hdf_convert.py:19` | `folder.glob('raw\\*.hdf')` uses a literal backslash; never matches on Linux. |
-| `transport/s3upload.py:74` | `s3.close()` — boto3 clients have no `close()` method. `AttributeError`. |
+All resolved.
+
+| File | Defect | Status |
+|------|--------|--------|
+| `transform/mesh.py:14` | `@click.commmand` (three m's). Decorator throws on import; script unusable. | Fixed in #49. |
+| `transform/upload.py:22,25` | `-s` short flag declared for both `--source-folder` and `--secret-json`. Click raises at CLI build. | Moot: `transform/upload.py` deleted in #51 (Phase 3) in favor of `transport/s3upload.py`. |
+| `parsing/scanlog_fetch.py:10` | `Path("logs").mkdir(exists_ok=True)` — kwarg should be `exist_ok`. `TypeError` at first call. | Fixed in #49. |
+| `transform/normalize.py:77` | `--processes` option typed as `click.Path` but used as int (default `psutil.cpu_count()`). Will accept anything; downstream usage will fail. | Fixed in #49 (now `click.INT`). |
+| `transform/df_write_tiff.py:52` | `roi.getTitle()` — `roi` is the imported class, not an instance. `AttributeError`. Also hard-codes Windows-only Dragonfly paths. | Fixed in #49 (uses `source.getTitle()`); Dragonfly paths parameterized via `DRAGONFLY_DIR` / `DRAGONFLY_ORS_DIR` / `DRAGONFLY_USER_DIR` env vars. |
+| `transform/hdf_convert.py:19` | `folder.glob('raw\\*.hdf')` uses a literal backslash; never matches on Linux. | Fixed in #49. |
+| `transport/s3upload.py:74` | `s3.close()` — boto3 clients have no `close()` method. `AttributeError`. | Fixed in #49. |
 
 ### 1.2 Logic bugs that silently produce wrong results
 
-| File | Defect |
-|------|--------|
-| `ng/layer_urlshift.py:47` | `json_data["layers"] == shifted_layers` is a comparison, not an assignment. The output JSON is the original, unmodified. |
-| `ng/layer_tag.py:81-82` | `while …: replace(t_layer, intensity=next(intensity_gen))` discards the return value of `replace`, so the loop condition never changes — infinite loop when collision occurs. |
-| `transform/sino_preproc.py:188-190` | `image_bounds(sino_mem)` computes `np.array([min, max])` but never returns it; callers fill `bounds` with `None`. |
-| `transform/sino_preproc.py:261` | `pool.map(image_bounds, sino_mem)` passes the `SharedNP` object as the iterable; not how the function is shaped. |
-| `transform/multitrim.py:62-63` | `vertical_trim` is applied to `dim[1]` (the horizontal axis) and `horizontal_trim` to `dim[0]`. Inverted. |
-| `transform/find_bounds.py:11-18` | `global count` incremented from a ThreadPool without a lock; progress display is non-deterministic (not catastrophic, but the pattern bites later). |
-| `ng/layer_extract.py:14` | Click command function named `layer_copy` (copy-pasted). Subcommand name will collide once unified. |
-| `ng/point_shift.py:34`, `ng/point_sort.py:44` | Same problem: functions named `point_merge`. |
+All resolved.
+
+| File | Defect | Status |
+|------|--------|--------|
+| `ng/layer_urlshift.py:47` | `json_data["layers"] == shifted_layers` is a comparison, not an assignment. The output JSON is the original, unmodified. | Fixed in #49. |
+| `ng/layer_tag.py:81-82` | `while …: replace(t_layer, intensity=next(intensity_gen))` discards the return value of `replace`, so the loop condition never changes — infinite loop when collision occurs. | Fixed in #49 (return value captured). |
+| `transform/sino_preproc.py:188-190` | `image_bounds(sino_mem)` computes `np.array([min, max])` but never returns it; callers fill `bounds` with `None`. | Moot: `sino_preproc.py` collapsed into `transform/sinogram.py` in #51 (Phase 3), behind `sino convert --mode preproc`. |
+| `transform/sino_preproc.py:261` | `pool.map(image_bounds, sino_mem)` passes the `SharedNP` object as the iterable; not how the function is shaped. | Moot as above. |
+| `transform/multitrim.py:62-63` | `vertical_trim` is applied to `dim[1]` (the horizontal axis) and `horizontal_trim` to `dim[0]`. Inverted. | Moot: `multitrim.py` deleted in #50 (Phase 2) in favor of the canonical `transform/trim.py`. |
+| `transform/find_bounds.py:11-18` | `global count` incremented from a ThreadPool without a lock; progress display is non-deterministic (not catastrophic, but the pattern bites later). | Replaced in #55 (Phase 5): per-image `\r` print swapped for a periodic structured log line every 50 images, removing the race entirely. |
+| `ng/layer_extract.py:14` | Click command function named `layer_copy` (copy-pasted). Subcommand name will collide once unified. | Fixed in #49. |
+| `ng/point_shift.py:34`, `ng/point_sort.py:44` | Same problem: functions named `point_merge`. | Fixed in #49. |
 
 ### 1.3 Hardcoded local state masquerading as scripts
 
-| File | Notes |
-|------|-------|
-| `transform/quick_crop.py` | `xy_crop`, `z_crop`, and `output_dir = "Octo_7_Tight_Orthocrop"` baked into module top-level. Not a tool; an artifact of one run. |
-| `mem/from_list.py` | Hardcoded `psh01com1hcom{16..25}` node list. |
-| `mem/check_nodeinfo.py`, `mem/from_nodeinfo.py` | Hardcoded filenames `node_status.txt`/`node_list.txt`; otherwise identical code paths. |
-| `parsing/meta_list.py`, `parsing/meta_parser.py` | ~95 % identical 360-line Jupyter `# %%` cell scripts; only the execution preamble differs. Contains an embedded list of 11 absolute paths under `/gpfs/Labs/Cheng/phenome/COVID_Influenza_Progression/…` — should not be in a general-purpose tool repo. |
-| `parsing/empty_dir_removal.py` | `Path("/gpfs/Labs/Cheng/phenome/")` hardcoded. |
-| `parsing/meta_parser.py:289-296`, `meta_list.py:289-296` | Embedded Google Sheets spreadsheet ID and sheet name `"GPFS (DEN)"`. Probably want this in config. |
+All resolved.
+
+| File | Notes | Status |
+|------|-------|--------|
+| `transform/quick_crop.py` | `xy_crop`, `z_crop`, and `output_dir = "Octo_7_Tight_Orthocrop"` baked into module top-level. Not a tool; an artifact of one run. | Deleted in #51 (Phase 3); see canonical `transform/trim.py`. |
+| `mem/from_list.py` | Hardcoded `psh01com1hcom{16..25}` node list. | Collapsed in #51 (Phase 3) into `mem/from_range.py` (CLI: `mem from-range`) with `--prefix`, `--start`, `--stop` options. |
+| `mem/check_nodeinfo.py`, `mem/from_nodeinfo.py` | Hardcoded filenames `node_status.txt`/`node_list.txt`; otherwise identical code paths. | Collapsed in #51 (Phase 3) into `mem/from_file.py` (CLI: `mem from-file`) taking the node file as an argument. |
+| `parsing/meta_list.py`, `parsing/meta_parser.py` | ~95 % identical 360-line Jupyter `# %%` cell scripts; only the execution preamble differs. Contains an embedded list of 11 absolute paths under `/gpfs/Labs/Cheng/phenome/COVID_Influenza_Progression/…` — should not be in a general-purpose tool repo. | Collapsed in #51 into `parsing/meta_shift.py`; the embedded path list became `--sample-list-file`. Further refactored in #58 to split the chenglab schema (path conventions, sbatch parser, sheet layout, `STATUS` enum) into a `chenglab/` adapter behind a generic engine seam. |
+| `parsing/empty_dir_removal.py` | `Path("/gpfs/Labs/Cheng/phenome/")` hardcoded. | Restructured in #56 (Phase 5) into a real click command (`parse prune-empty`) that takes `ROOT` as an argument and a `--pattern` option, defaulting to `--dry-run` because `rmdir` is destructive. |
+| `parsing/meta_parser.py:289-296`, `meta_list.py:289-296` | Embedded Google Sheets spreadsheet ID and sheet name `"GPFS (DEN)"`. Probably want this in config. | Moved in #51 to env-var overrides (`MCTUTIL_GSHEET_ID` / `MCTUTIL_GSHEET_SHEET`); in #58 removed from engine defaults entirely and pushed into the chenglab adapter as `default_spreadsheet` / `default_sheet` attributes. |
 
 ### 1.4 Security / footguns
 
-| File | Notes |
-|------|-------|
-| `mem/clean_shared.py:22` | `eval(argv[1])` for an apply/dry-run boolean. Comment already admits this is "Very Stupid". |
-| `transform/upload.py`, `transport/s3upload.py` | Both ingest AWS credentials in different ways (JSON file vs `boto3.Session(profile_name='chenglab')`). Pick one. Don't pass credentials via JSON if a profile already works. |
+All resolved.
+
+| File | Notes | Status |
+|------|-------|--------|
+| `mem/clean_shared.py:22` | `eval(argv[1])` for an apply/dry-run boolean. Comment already admits this is "Very Stupid". | Resolved in #57: `mem/clean_shared.py` deleted, its four extra shm prefixes (`sino`, `work`, `center`, `input`) merged into `mem/clean.py` so the canonical `mem clean --apply` is a strict superset, and the two consumer sbatch scripts (`mem/memcheck.sbatch`, `mem/memclean.sbatch`) switched to `python clean.py [--apply] clean`. |
+| `transform/upload.py`, `transport/s3upload.py` | Both ingest AWS credentials in different ways (JSON file vs `boto3.Session(profile_name='chenglab')`). Pick one. Don't pass credentials via JSON if a profile already works. | Resolved in #51 (Phase 3): `transform/upload.py` deleted; `transport/s3upload.py` is the one S3 path, using the chenglab boto profile. |
 
 ### 1.5 Lint / hygiene
 
-- Mixed tabs (most files) and 4-space (e.g., `transform/gz_strip.py`); `.flake8` already ignores `W191` so flake8 doesn't flag it, but it makes diffs noisy.
-- Mixed `os.path` and `pathlib` use within single files (e.g., `transform/quick_crop.py`, `transform/upload.py`).
-- Mixed `print` and `shared.log.log` for diagnostic output.
-- `sys.path.append(parents[1])` boilerplate at the top of nearly every script — symptom of the lack of a real package.
-- README is empty for practical purposes.
+- Mixed tabs (most files) and 4-space (e.g., `transform/gz_strip.py`); `.flake8` already ignores `W191` so flake8 doesn't flag it, but it makes diffs noisy. **Resolved in #48 (Phase 0):** `scripts/check_python_tabs.py` rejects leading-spaces indentation; CI enforces it.
+- Mixed `os.path` and `pathlib` use within single files (e.g., `transform/quick_crop.py`, `transform/upload.py`). Partial: `quick_crop.py` and `upload.py` both deleted (#51); not systematically swept elsewhere. **Open.**
+- Mixed `print` and `shared.log.log` for diagnostic output. **Resolved in #55–#56 (Phase 5):** every remaining diagnostic `print()` in the unified-CLI surface now goes through `shared.log.log`. `shared/log.py` still needs `--quiet` / `--log-level` plumbing for the original full benefit — **open**.
+- `sys.path.append(parents[1])` boilerplate at the top of nearly every script — symptom of the lack of a real package. Partial: Phase 4 (#52) added a real `mctutil/` package and a console script, but the leaf modules under `transform/`, `ng/`, `parsing/`, `mem/`, `transport/`, `shared/`, `hpc_work/`, `chenglab/` still live at top level and still carry the shim. **Open** — would need a follow-up to move the leaves under `mctutil/` properly.
+- README is empty for practical purposes. **Resolved in #48 (Phase 0):** README rewritten with overview + install + `mctutil --help` example.
 
 ---
 
@@ -78,25 +113,31 @@ inline, and a non-trivial fraction of scripts are silently broken.
 
 ### 2.1 Twin pairs (copy-paste evolution)
 
-| Pair | Diff scope | Resolution |
-|------|------------|------------|
-| `parsing/meta_list.py` ↔ `parsing/meta_parser.py` | Only execution preamble + hardcoded path list. | Collapse to one module + CLI; load sample list from a file/argument. |
-| `mem/check_nodeinfo.py` ↔ `mem/from_nodeinfo.py` | Filename literal (`node_status.txt` vs `node_list.txt`). | Single `mem nodes-mark` command taking a path argument. |
-| `transform/sinogram.py` ↔ `transform/sino_preproc.py` | ~150 lines of `weighted_normalize`, `memmap_helper`, `byteread_helper`, `distribute_read`, `sino_write`, `minmaxscale`, `remove_outlier`, `preprocess`, `sh_imread`, `FLAT` enum verbatim. `sino_preproc.py` is a stripped no-flats variant of `sinogram.py` — and the variant that omits flats is also where `image_bounds` was broken (1.2). | Make `sinogram` the one module; `--no-flats` (or `--source proj/sino`) flag selects the preproc-only path. |
-| `transform/transpose.py` ↔ `transform/f_transpose.py` | Shared-memory vs RAM-only. | Keep both behaviors, but expose them as `transform transpose --mode shared|naive` (default `shared`). `f_transpose` was a workaround; document it as such or drop. |
+All resolved in #51 (Phase 3); `meta_shift.py` further refactored in #58.
+
+| Pair | Diff scope | Resolution | Status |
+|------|------------|------------|--------|
+| `parsing/meta_list.py` ↔ `parsing/meta_parser.py` | Only execution preamble + hardcoded path list. | Collapse to one module + CLI; load sample list from a file/argument. | Shipped in #51 as `parsing/meta_shift.py` (CLI: `parse meta-shift`); embedded sample list became `--sample-list-file`. In #58 the file was further split into a generic engine + `chenglab/` adapter so the chenglab-specific schema lives behind a swappable seam. |
+| `mem/check_nodeinfo.py` ↔ `mem/from_nodeinfo.py` | Filename literal (`node_status.txt` vs `node_list.txt`). | Single `mem nodes-mark` command taking a path argument. | Shipped in #51 as `mem/from_file.py` (CLI: `mem from-file`) taking the node file as an argument. |
+| `transform/sinogram.py` ↔ `transform/sino_preproc.py` | ~150 lines of `weighted_normalize`, `memmap_helper`, `byteread_helper`, `distribute_read`, `sino_write`, `minmaxscale`, `remove_outlier`, `preprocess`, `sh_imread`, `FLAT` enum verbatim. `sino_preproc.py` is a stripped no-flats variant of `sinogram.py` — and the variant that omits flats is also where `image_bounds` was broken (1.2). | Make `sinogram` the one module; `--no-flats` (or `--source proj/sino`) flag selects the preproc-only path. | Shipped in #51 as `transform/sinogram.py` with `--mode full|preproc`. |
+| `transform/transpose.py` ↔ `transform/f_transpose.py` | Shared-memory vs RAM-only. | Keep both behaviors, but expose them as `transform transpose --mode shared|naive` (default `shared`). `f_transpose` was a workaround; document it as such or drop. | Shipped in #51 as `transform/transpose.py` with `--mode shared|naive` (default `shared`); `f_transpose.py` deleted. |
 
 ### 2.2 Three+ implementations of the same idea
 
-| Concept | Implementations | Pick |
-|---------|-----------------|------|
-| Crop / trim | `transform/trim.py` (CropNumber pair-type, good), `transform/multitrim.py` (axis-confused, single-float), `transform/quick_crop.py` (hardcoded run), `transform/transform.py` (string→float comma-split inline) | `transform/trim.py` is closest to right. Promote its `CropNumberType` into `shared/cli.py`; everyone else delegates to it. |
-| Normalize / convert dtype | `transform/normalize.py`, `transform/transform.py::norm`, `transform/convert.py::np_convert`, `shared/cli.py::NumpyCLI.convert_ar` | `convert.np_convert` is the cleanest pure helper; promote to `shared/np_convert.py`. Pin a single `normalize` command that uses it. |
-| Decompress / unzip | `transform/uncompress.py` (rewrites TIFFs uncompressed), `transform/gz_strip.py` (just renames `.gz` → strips suffix), `transform/quickgunzip.py` (real gunzip + brotli) | Three different things mislabeled with similar names. Rename: `decompress-tiff`, `strip-gz-suffix`, `gunzip`. Keep all three under one verb group with distinct subcommands. |
-| S3 upload | `transform/upload.py`, `transport/s3upload.py` | `transport/s3upload.py` is the more complete one (uses profile, optionally meshes after upload). Retire `transform/upload.py`. |
-| Mesh generation | `transform/mesh.py` (broken, has hardcoded params), `transform/mesh_ig.py` (clean), `transport/s3upload.py --mesh` (inline) | Fix `transform/mesh.py` or drop it. `mesh_ig.py` and the `s3upload --mesh` path both call the same `tc.create_meshing_tasks` API; factor into one helper. |
-| `cleanup_mem` / `exit_cleanly` | Defined verbatim in both `shared/log.py` and `shared/mem.py`. | Pick one location (`shared/mem.py` — it's the natural owner of shared-memory cleanup). `shared/log.py` should import from `mem`, not redefine. |
+| Concept | Implementations | Pick | Status |
+|---------|-----------------|------|--------|
+| Crop / trim | `transform/trim.py` (CropNumber pair-type, good), `transform/multitrim.py` (axis-confused, single-float), `transform/quick_crop.py` (hardcoded run), `transform/transform.py` (string→float comma-split inline) | `transform/trim.py` is closest to right. Promote its `CropNumberType` into `shared/cli.py`; everyone else delegates to it. | Shipped in #50 (Phase 2). `multitrim.py` and `quick_crop.py` deleted; `transform/trim.py` is the canonical (CLI: `transform trim`). |
+| Normalize / convert dtype | `transform/normalize.py`, `transform/transform.py::norm`, `transform/convert.py::np_convert`, `shared/cli.py::NumpyCLI.convert_ar` | `convert.np_convert` is the cleanest pure helper; promote to `shared/np_convert.py`. Pin a single `normalize` command that uses it. | Shipped in #50: `shared/np_convert.py` is the helper; `transform normalize` is the one normalize command. |
+| Decompress / unzip | `transform/uncompress.py` (rewrites TIFFs uncompressed), `transform/gz_strip.py` (just renames `.gz` → strips suffix), `transform/quickgunzip.py` (real gunzip + brotli) | Three different things mislabeled with similar names. Rename: `decompress-tiff`, `strip-gz-suffix`, `gunzip`. Keep all three under one verb group with distinct subcommands. | Shipped in #52 (Phase 4): all three registered under `transform` as `decompress-tiff`, `strip-gz-suffix`, `gunzip`. |
+| S3 upload | `transform/upload.py`, `transport/s3upload.py` | `transport/s3upload.py` is the more complete one (uses profile, optionally meshes after upload). Retire `transform/upload.py`. | Shipped in #51: `transform/upload.py` deleted, `transport/s3upload.py` is the single S3 path (CLI: `transport s3-upload`). |
+| Mesh generation | `transform/mesh.py` (broken, has hardcoded params), `transform/mesh_ig.py` (clean), `transport/s3upload.py --mesh` (inline) | Fix `transform/mesh.py` or drop it. `mesh_ig.py` and the `s3upload --mesh` path both call the same `tc.create_meshing_tasks` API; factor into one helper. | Partial: `transform/mesh.py` typo fixed in #49 and both registered separately (`mesh build`, `mesh build-igneous`); the `s3-upload --mesh` inline path was not factored into a shared helper. **Open.** |
+| `cleanup_mem` / `exit_cleanly` | Defined verbatim in both `shared/log.py` and `shared/mem.py`. | Pick one location (`shared/mem.py` — it's the natural owner of shared-memory cleanup). `shared/log.py` should import from `mem`, not redefine. | Shipped in #50: `shared/log.py` now imports the canonical implementations from `shared/mem.py`. |
 
 ### 2.3 Repeated Click `ParamType` patterns
+
+**Resolved in #50 (Phase 2):** `shared/cli.py::DelimitedRecord` ships as the
+canonical delimiter-coerced ParamType helper, and the `ng/` + `parsing/` call
+sites listed below were ported. The original survey for posterity:
 
 Every NG/parsing/transform script reinvents the same `"foo:bar"` or
 `"a,b,c"` parse-and-validate pattern:
@@ -121,6 +162,10 @@ ParamType, then port the call sites.
 ## 3. Existing CLI surface vs proposed unified surface
 
 ### 3.1 Current command-name / file-name drift
+
+**Resolved in #52 (Phase 4):** the unified `mctutil <category> <task>`
+surface gives every leaf a consistent verb name, regardless of the underlying
+file name. The drift described below was the pre-Phase-4 state on `master`.
 
 The Click command name almost never matches the filename, and almost
 never matches the directory. Sample:
@@ -152,16 +197,16 @@ mctutil <category> <task> [options]
 with categories taken from the existing directory layout, so the
 mapping stays familiar:
 
-| Category | Tasks (proposed, post-cleanup) |
-|----------|---------------------------------|
-| `transform` | `normalize`, `trim`, `transpose`, `downsample`, `channelize`, `convert`, `find-bounds`, `denoise`, `stitch`, `decompress-tiff`, `gunzip`, `strip-gz-suffix` |
-| `sino` | `convert` (full flats), `preprocess` (no flats), `find-bounds` |
-| `ng` | `layer copy`, `layer extract`, `layer tag`, `layer urlshift`, `layer recolor`, `point add`, `point merge`, `point sort`, `point shift`, `position copy`, `shift-angle`, `build` (= current `transform/ng.py`) |
-| `mesh` | `build`, `manifest` (the two-pass igneous flow) |
-| `transport` | `s3 upload`, `cv fetch` |
-| `mem` | `clean`, `mark`, `list` |
-| `parse` | `meta-shift` (the consolidated `meta_*.py`), `scanlog-fetch`, `pull-config`, `find-errs`, `prune-empty` |
-| `hpc` | `cuda-check`, `time-check` |
+| Category | Tasks (proposed) | Tasks (shipped) |
+|----------|------------------|-----------------|
+| `transform` | `normalize`, `trim`, `transpose`, `downsample`, `channelize`, `convert`, `find-bounds`, `denoise`, `stitch`, `decompress-tiff`, `gunzip`, `strip-gz-suffix` | All shipped (#52), plus `df-write-tiff`, `dicom-conv`, `fix-name`, `hdf-convert`, and `neuroglance` (was `transform/ng.py`). |
+| `sino` | `convert` (full flats), `preprocess` (no flats), `find-bounds` | `sino convert` shipped in #52 with `--mode full|preproc`; `find-bounds` lives under `transform find-bounds` instead. |
+| `ng` | `layer copy`, `layer extract`, `layer tag`, `layer urlshift`, `layer recolor`, `point add`, `point merge`, `point sort`, `point shift`, `position copy`, `shift-angle`, `build` (= current `transform/ng.py`) | All shipped (#52); `ng build` wraps the former `transform/ng.py`. |
+| `mesh` | `build`, `manifest` (the two-pass igneous flow) | `mesh build` and `mesh build-igneous` shipped (#52); the two-pass manifest variant runs inside `mesh build`. |
+| `transport` | `s3 upload`, `cv fetch` | Shipped as `transport s3-upload` and `transport cv-fetch` (#52). |
+| `mem` | `clean`, `mark`, `list` | `mem clean`, `mem mark`, `mem from-file`, `mem from-range` shipped (#52). `list` not implemented — **open**. |
+| `parse` | `meta-shift` (the consolidated `meta_*.py`), `scanlog-fetch`, `pull-config`, `find-errs`, `prune-empty` | `parse meta-shift`, `parse pull-config`, `parse scanlog-fetch` shipped (#52); `parse prune-empty` shipped in #56. `find-errs` not implemented — **open**. |
+| `hpc` | `cuda-check`, `time-check` | `hpc time-check` shipped (#52); `cuda-check` not registered (`hpc_env/cuda.py` is a 2-line script) — **open**. |
 
 Implementation: one Click `Group` per category, registered into the
 top-level `Group` via `add_command`. Each leaf is the existing
@@ -170,6 +215,11 @@ the per-task logic needs to change for the CLI rewrite — only the
 decorator and import location.
 
 ### 3.3 Packaging
+
+**Resolved: option (a) shipped in #48 (Phase 0) and #52 (Phase 4).**
+`pyproject.toml` declares `mctutil = "mctutil.cli:main"`; `pip install -e .`
+gives users a real `mctutil` console script. The original tradeoff for
+posterity:
 
 Two equally valid options. I lean toward (a) for this size:
 
@@ -189,6 +239,18 @@ Either way: declare optional-dependencies groups (`ng`, `sino`, `mesh`,
 `dragonfly`, `aws`) so installs don't drag in GDAL+ORS for someone who
 just wants `transform trim`.
 
+Optional-dependencies groups are **not yet declared** in `pyproject.toml`;
+the runtime depends on `environment.yml` (conda) for the heavy
+GDAL / igneous / neuroglancer-scripts deps. Splitting these into pip
+extras remains **open**.
+
+The "remove every `sys.path.append(parents[1])`" part of option (a) is
+**partial** — the unified CLI is in place, but the leaf modules still
+live at top-level (`transform/`, `ng/`, `parsing/`, `mem/`, `transport/`,
+`shared/`, `hpc_work/`, `chenglab/`) rather than under `mctutil/`, so the
+shim is still in every leaf. Moving leaves under `mctutil/` is a separate
+follow-up (see §1.5 status).
+
 ---
 
 ## 4. Phased plan
@@ -197,6 +259,10 @@ Each phase is independently shippable. Order is "make it correct → make
 it un-duplicated → make it unified".
 
 ### Phase 0 — Project hygiene (½ day)
+
+**Status: shipped in #48.** Optional-dependencies groups and the GitHub Actions
+workflow item remain open — runtime deps live in `environment.yml` (conda) and
+CI is not yet wired up.
 
 - Add `pyproject.toml` (PEP 621), declare runtime deps (click, numpy,
   tifffile, psutil, natsort, ruamel.yaml, …) and extras
@@ -215,33 +281,42 @@ Separate commit, no logic changes.
 
 ### Phase 1 — Fix the broken-on-arrival scripts (1 day)
 
+**Status: shipped in #49.** All checkboxes below are checked. Phase 1.4 §1
+(`mem/clean_shared.py` `eval(argv[1])`) shipped separately in #57.
+
 Strict scope: only the bugs in §1.1 and §1.2. No refactors yet.
 
-- [ ] `transform/mesh.py:14` — `@click.commmand` → `@click.command`
-- [ ] `transform/upload.py:25` — rename `-s` to e.g. `-k` for
-      `--secret-json`
-- [ ] `parsing/scanlog_fetch.py:10` — `exists_ok` → `exist_ok`
-- [ ] `transform/normalize.py:77` — `click.Path` → `click.INT`
-- [ ] `transform/df_write_tiff.py` — either fix `roi.getTitle()` (likely
+- [x] `transform/mesh.py:14` — `@click.commmand` → `@click.command`
+- [x] `transform/upload.py:25` — rename `-s` to e.g. `-k` for
+      `--secret-json` (later moot: `upload.py` deleted in #51)
+- [x] `parsing/scanlog_fetch.py:10` — `exists_ok` → `exist_ok`
+- [x] `transform/normalize.py:77` — `click.Path` → `click.INT`
+- [x] `transform/df_write_tiff.py` — either fix `roi.getTitle()` (likely
       `source.getTitle()`) and parameterize the Dragonfly path block,
       or move the file into a `dragonfly/` subdir gated behind an
-      extra and skipped on import failure
-- [ ] `transform/hdf_convert.py:19` — `'raw\\*.hdf'` → `'raw/*.hdf'`
-- [ ] `transport/s3upload.py:74` — drop `s3.close()` (or
+      extra and skipped on import failure (chose: `source.getTitle()`
+      + `DRAGONFLY_DIR` / `DRAGONFLY_ORS_DIR` / `DRAGONFLY_USER_DIR`
+      env-var parameterization)
+- [x] `transform/hdf_convert.py:19` — `'raw\\*.hdf'` → `'raw/*.hdf'`
+- [x] `transport/s3upload.py:74` — drop `s3.close()` (or
       `del s3` if a session-clean intent existed)
-- [ ] `ng/layer_urlshift.py:47` — `==` → `=`
-- [ ] `ng/layer_tag.py:81-82` — capture `replace(...)` return value
-- [ ] `transform/sino_preproc.py:188-190` — return the array;
+- [x] `ng/layer_urlshift.py:47` — `==` → `=`
+- [x] `ng/layer_tag.py:81-82` — capture `replace(...)` return value
+- [x] `transform/sino_preproc.py:188-190` — return the array;
       and fix the `pool.map(image_bounds, sino_mem)` call shape
-- [ ] `transform/multitrim.py:62-63` — swap `vertical_trim` /
-      `horizontal_trim` application
-- [ ] `ng/layer_extract.py`, `ng/point_shift.py`, `ng/point_sort.py` —
+      (later moot: `sino_preproc.py` collapsed into `sinogram.py` in #51)
+- [x] `transform/multitrim.py:62-63` — swap `vertical_trim` /
+      `horizontal_trim` application (later moot: `multitrim.py`
+      deleted in #50)
+- [x] `ng/layer_extract.py`, `ng/point_shift.py`, `ng/point_sort.py` —
       rename the click command function to match the file
 
 These are mechanical and should land as one or several focused PRs,
 each with a regression test under `tests/`.
 
 ### Phase 2 — De-duplicate the helper layer (1–2 days)
+
+**Status: shipped in #50.**
 
 - Promote `transform/convert.py::np_convert` to `shared/np_convert.py`;
   port `transform/normalize.py`, `transform/transform.py`,
@@ -265,6 +340,12 @@ Tests added per helper.
 
 ### Phase 3 — Collapse twin scripts (1 day)
 
+**Status: shipped in #51**, with a follow-up in #58 splitting
+`parsing/meta_shift.py` into a generic engine plus a `chenglab/` adapter so
+the chenglab-specific schema (folder layout, sbatch parser, `STATUS` enum,
+sheet row format) lives behind a swappable seam. The `[gsheets]` extra still
+isn't declared in `pyproject.toml`.
+
 - `parsing/meta_list.py` + `parsing/meta_parser.py` → `parsing/meta_shift.py`,
   with the sample list passed as a file/CLI argument instead of
   embedded. Extract the Google Sheets bits behind an optional `[gsheets]`
@@ -283,6 +364,15 @@ Tests added per helper.
 
 ### Phase 4 — Unified entrypoint (1–2 days)
 
+**Status: shipped in #52** with a lazy-loading variant that imports each leaf
+only when its subcommand is invoked (so `mctutil --help` doesn't pull in
+igneous / GDAL / Dragonfly). The "move leaves into `mctutil/<category>/<task>.py`"
+restructure was **not** done; leaves still live at top-level (`transform/`,
+`ng/`, etc.) and the lazy CLI imports them by their existing module path. The
+`sys.path.append(parents[1])` shim therefore still exists in every leaf.
+Subsequent additions: `parse prune-empty` (#56), `parse meta-shift --schema`
+(#58).
+
 - Create `mctutil/__init__.py` and `mctutil/cli.py` with the top-level
   Click group.
 - For each leaf command, move it into `mctutil/<category>/<task>.py`
@@ -300,34 +390,56 @@ Tests added per helper.
 
 ### Phase 5 — Coverage & polish (open-ended)
 
-- Real tests for the math-heavy verbs (`normalize`, `trim`, `sino
-  convert`) against small fixture tiffs.
-- Replace `print` calls with `shared.log.log` everywhere, so
-  `--quiet` / `--log-level` work uniformly.
-- Add a `--dry-run` flag to anything that writes files, mirroring the
-  `mem clean --apply` pattern.
-- Consider whether `parsing/meta_shift.py` even belongs in this repo
+**Status: shipped across #53–#56.** Per-bullet annotations below.
+
+- [x] Real tests for the math-heavy verbs (`normalize`, `trim`, `sino
+  convert`) against small fixture tiffs. **Shipped in #53.** Test count
+  grew from 0 → 70 across Phase 0–5; 77 after #58.
+- [x] Replace `print` calls with `shared.log.log` everywhere, so
+  `--quiet` / `--log-level` work uniformly. **Shipped in #55 + #56** for
+  the print substitution. The `--quiet` / `--log-level` plumbing on
+  `shared/log.py` itself is **open** — would need a real logger overhaul.
+- [x] Add a `--dry-run` flag to anything that writes files, mirroring the
+  `mem clean --apply` pattern. **Shipped across #54, #55, #56.** Coverage:
+  `transform trim`, `transform normalize`, `sino convert`,
+  `transform decompress-tiff`, `transform hdf-convert`,
+  `transform stitch`, `transform channelize`, `transform df-write-tiff`,
+  `mesh build`, `transport s3-upload`, `transport cv-fetch`,
+  `parse pull-config`, `parse scanlog-fetch`, `parse prune-empty`,
+  `mem from-file`, `mem from-range`. `mem clean` keeps its existing
+  `--apply` flag rather than gaining a parallel `--dry-run`.
+- [x] Consider whether `parsing/meta_shift.py` even belongs in this repo
   vs the chenglab automation; if it's Cheng-Lab specific, move it.
-- Decide what to do with `hpc_work/codeclist.txt` (a 449-line ffmpeg
+  **Answered in #58:** kept in repo, but the chenglab schema lives in a
+  dedicated top-level `chenglab/` adapter behind a generic engine seam;
+  a second lab adapter can land without touching the engine.
+- [ ] Decide what to do with `hpc_work/codeclist.txt` (a 449-line ffmpeg
   codec dump that has no consumer in the repo) — almost certainly
-  delete.
+  delete. **Deferred per maintainer instruction:** stays in tree.
 
 ---
 
 ## 5. Risk notes
 
+These remain relevant for any future restructuring.
+
 - The shared-memory machinery in `shared/mem.py` initializes a global
   `mem_tracker` at import time. Any refactor that changes import order
   (e.g., moving things into a package) must preserve "the first import
   of anything from `mctutil` allocates this segment". Worth a test that
-  asserts the tracker exists post-import.
+  asserts the tracker exists post-import. (Especially relevant for the
+  pending "move leaves under `mctutil/`" follow-up.)
 - `transform/sinogram.py` is the most subtle code in the repo; tread
   carefully when factoring out `distribute_read`. The function's
   `generate_offset_pairs_*` closures depend on `target_mem[…].buffer_address.start`
-  which is itself non-trivial — keep its tests close.
+  which is itself non-trivial — keep its tests close. (Phase 2 #50
+  moved the helpers into `shared/io_helpers.py` and the closures still
+  work; the warning carries forward.)
 - The Google Sheets path in `parsing/meta_*.py` has a real credential
   shape (`creds`, `GSCOPES`, token files). Whoever owns that flow should
-  confirm whether anything still calls it before removing it.
+  confirm whether anything still calls it before removing it. (After #58
+  this lives in `parsing/meta_shift.py` engine + `chenglab/meta_shift.py`
+  adapter; still active.)
 
 ---
 
@@ -335,21 +447,33 @@ Tests added per helper.
 
 1. Are any external scripts / sbatch files calling `python
    transform/<x>.py` directly? If yes, Phase 4 needs a deprecation
-   period; if no, do it as a hard cut.
+   period; if no, do it as a hard cut. **Partial answer:** the only
+   in-tree direct invocations found were `mem/memcheck.sbatch` and
+   `mem/memclean.sbatch` calling `clean_shared.py`, which were updated
+   in #57. The "move leaves under `mctutil/`" follow-up still depends
+   on this — out-of-tree sbatch / cluster scripts could still reference
+   `python transform/<x>.py`.
 2. Is `parsing/meta_*.py` still in active use, or a snapshot of a
-   one-time migration? If snapshot, archive and remove.
+   one-time migration? If snapshot, archive and remove. **Answered:**
+   active. Kept in tree; #58 split the chenglab schema into a dedicated
+   `chenglab/` adapter behind a generic engine seam.
 3. `transform/df_write_tiff.py` is Windows-only and depends on a
    specific Dragonfly install. Is it actually a CLI tool or a script
    that gets pasted into the Dragonfly console? That changes whether
-   it belongs under `mctutil` at all.
+   it belongs under `mctutil` at all. **Answered in #49:** kept under
+   `transform/` and registered as `transform df-write-tiff`; Dragonfly
+   paths now read from `DRAGONFLY_DIR` / `DRAGONFLY_ORS_DIR` /
+   `DRAGONFLY_USER_DIR` env vars instead of being hardcoded.
 4. Where do `mem/clean.py`'s sbatch templates run today, and against
    which scheduler version? That code embeds an heredoc with module
    loads (`module load miniconda/3`, `source activate recon`) — worth
-   parameterizing per-cluster.
+   parameterizing per-cluster. **Open.**
 
 ---
 
 ## 7. TL;DR
+
+Original plan (preserved for context):
 
 - Ship Phase 0 + Phase 1 as a single bug-fix PR; the seven
   broken-on-arrival scripts and ten silent-bug scripts get fixed and
@@ -361,3 +485,16 @@ Tests added per helper.
   its CLI verb and the per-file `sys.path.append` block disappears.
 - Phase 5 is the long tail: tests, logging consistency, and trimming
   files that have no business being in a shared toolbox.
+
+What actually happened (2026-05-21):
+
+- Phases 0–5 shipped as a linear PR chain (#48 → #56), with two
+  follow-ups (#57 retiring `clean_shared.py`'s `eval(argv[1])`, #58
+  splitting `meta_shift` into an engine + chenglab adapter).
+- Phase 4 chose lazy command loading rather than physically moving
+  leaves under `mctutil/`, so the `sys.path.append` blocks survive.
+  That restructure remains the largest concrete follow-up.
+- Phase 5's `--quiet` / `--log-level` plumbing on `shared/log.py`
+  remains the largest concrete follow-up on the polish side.
+- Phase 5's `hpc_work/codeclist.txt` decision was: keep, per maintainer
+  instruction.
