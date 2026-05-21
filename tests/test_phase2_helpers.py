@@ -9,8 +9,8 @@ import tifffile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from shared.cli import CROP_NUMBER, DelimitedRecord, crop_val  # noqa: E402
-from shared.np_convert import np_convert  # noqa: E402
+from mctutil.shared.cli import CROP_NUMBER, DelimitedRecord, crop_val  # noqa: E402
+from mctutil.shared.np_convert import np_convert  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ def test_delimited_record_supports_optional_fields():
 
 
 def test_downsample_uses_shared_np_convert_scaling(load_module, tmp_path):
-	module = load_module("transform/downsample.py")
+	module = load_module("mctutil/transform/downsample.py")
 	input_dir = tmp_path / "input"
 	output_dir = tmp_path / "output"
 	input_dir.mkdir()

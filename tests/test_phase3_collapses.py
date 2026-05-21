@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 
 def test_collect_idle_nodes_merges_the_old_nodeinfo_scripts(load_module, tmp_path):
-	module = load_module("mem/from_file.py")
+	module = load_module("mctutil/mem/from_file.py")
 	node_file = tmp_path / "nodes.txt"
 	node_file.write_text("NODE PART STATE\nnode-a sas idle\nnode-b sas alloc\nnode-c gpu mix\n")
 
@@ -16,12 +16,12 @@ def test_collect_idle_nodes_merges_the_old_nodeinfo_scripts(load_module, tmp_pat
 
 
 def test_expand_node_range_replaces_hardcoded_from_list(load_module):
-	module = load_module("mem/from_range.py")
+	module = load_module("mctutil/mem/from_range.py")
 	assert module.expand_node_range("node", 3, 5) == ["node3", "node4", "node5"]
 
 
 def test_parse_sample_list_replaces_embedded_meta_paths(load_module, tmp_path):
-	module = load_module("parsing/meta_shift.py")
+	module = load_module("mctutil/parse/meta_shift.py")
 	list_file = tmp_path / "samples.txt"
 	list_file.write_text("/tmp/one.yaml\n\n/tmp/two.yaml\n")
 
@@ -29,7 +29,7 @@ def test_parse_sample_list_replaces_embedded_meta_paths(load_module, tmp_path):
 
 
 def test_sinogram_full_mode_requires_flat_dir(load_module, tmp_path):
-	module = load_module("transform/sinogram.py")
+	module = load_module("mctutil/transform/sinogram.py")
 	input_dir = tmp_path / "input"
 	output_dir = tmp_path / "output"
 	input_dir.mkdir()
@@ -42,7 +42,7 @@ def test_sinogram_full_mode_requires_flat_dir(load_module, tmp_path):
 
 
 def test_transpose_naive_mode_replaces_f_transpose(load_module, tmp_path):
-	module = load_module("transform/transpose.py")
+	module = load_module("mctutil/transform/transpose.py")
 	input_dir = tmp_path / "input"
 	output_dir = tmp_path / "output"
 	input_dir.mkdir()

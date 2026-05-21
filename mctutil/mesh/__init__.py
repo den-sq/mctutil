@@ -6,7 +6,7 @@ main = LazyGroup(
 	name="mesh",
 	help="Meshing helpers for igneous/neuroglancer workflows.",
 	lazy_subcommands={
-		"build": "transform.mesh:mesh",
-		"build-igneous": "transform.mesh_ig:mesh_ig",
+		"build": "mctutil.transform.mesh:mesh",
+		"build-igneous": "mctutil.transform.mesh_ig:mesh_ig",
 	},
 )

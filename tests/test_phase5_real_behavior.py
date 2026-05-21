@@ -32,7 +32,7 @@ def fake_distribute_read(target_mem, _pj, window, _int_window, image_order, **_k
 
 
 def test_trim_crops_xy_and_z_ranges(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/trim.py")
+	module = load_module("mctutil/transform/trim.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "start", lambda: None)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
@@ -64,7 +64,7 @@ def test_trim_crops_xy_and_z_ranges(load_module, tmp_path, monkeypatch):
 
 
 def test_trim_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/trim.py")
+	module = load_module("mctutil/transform/trim.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "start", lambda: None)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
@@ -84,7 +84,7 @@ def test_trim_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
 
 
 def test_normalize_handles_partial_final_batch(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/normalize.py")
+	module = load_module("mctutil/transform/normalize.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "start", lambda: None)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
@@ -113,7 +113,7 @@ def test_normalize_handles_partial_final_batch(load_module, tmp_path, monkeypatc
 
 
 def test_normalize_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/normalize.py")
+	module = load_module("mctutil/transform/normalize.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "start", lambda: None)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
@@ -139,7 +139,7 @@ def test_normalize_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
 
 
 def test_sinogram_preproc_normalizes_small_real_input(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/sinogram.py")
+	module = load_module("mctutil/transform/sinogram.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
 	monkeypatch.setattr(module, "estimate_sigma", lambda *_args, **_kwargs: 0.0)
@@ -169,7 +169,7 @@ def test_sinogram_preproc_normalizes_small_real_input(load_module, tmp_path, mon
 
 
 def test_sinogram_full_mode_normalizes_small_real_input(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/sinogram.py")
+	module = load_module("mctutil/transform/sinogram.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
 	monkeypatch.setattr(module, "distribute_read", fake_distribute_read)
@@ -207,7 +207,7 @@ def test_sinogram_full_mode_normalizes_small_real_input(load_module, tmp_path, m
 
 
 def test_sinogram_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
-	module = load_module("transform/sinogram.py")
+	module = load_module("mctutil/transform/sinogram.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
 	monkeypatch.setattr(module.log, "log", lambda *_args, **_kwargs: None)
 	monkeypatch.setattr(module, "estimate_sigma", lambda *_args, **_kwargs: 0.0)

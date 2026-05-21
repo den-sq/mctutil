@@ -30,7 +30,7 @@ def _write_sample_conf(path: Path, energy: str = "35", inner: str = "left", proj
 
 
 def test_load_adapter_returns_chenglab_by_default(load_module):
-	engine = load_module("parsing/meta_shift.py")
+	engine = load_module("mctutil/parse/meta_shift.py")
 	adapter = engine.load_adapter("chenglab")
 	assert type(adapter).__name__ == "ChenglabMicroCTAdapter"
 	assert adapter.default_spreadsheet
@@ -38,7 +38,7 @@ def test_load_adapter_returns_chenglab_by_default(load_module):
 
 
 def test_load_adapter_rejects_unknown_schema(load_module):
-	engine = load_module("parsing/meta_shift.py")
+	engine = load_module("mctutil/parse/meta_shift.py")
 	with pytest.raises(click.BadParameter):
 		engine.load_adapter("does-not-exist")
 
@@ -103,7 +103,7 @@ def test_chenglab_adapter_builds_sheet_row(load_module, tmp_path):
 
 
 def test_engine_shift_old_new_honors_dry_run_default(load_module, tmp_path):
-	engine = load_module("parsing/meta_shift.py")
+	engine = load_module("mctutil/parse/meta_shift.py")
 	chenglab = load_module("chenglab/meta_shift.py")
 	adapter = chenglab.ChenglabMicroCTAdapter()
 	drive = tmp_path
