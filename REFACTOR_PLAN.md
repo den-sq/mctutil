@@ -1,34 +1,56 @@
 # mctutil — Refactor & Unification Plan
 
-Status: in-flight. Originally drafted as a proposal from a survey of `master`.
-Annotated 2026-05-21 with phase-by-phase execution status (PR references
-inline). Audience: `den-sq/mctutil` maintainers.
+Status: substantively done. Originally drafted as a proposal from a survey of
+`master`. Annotated 2026-05-21 with phase-by-phase execution status (PR
+references inline). Audience: `den-sq/mctutil` maintainers.
 
 ## Status at a glance (2026-05-21)
 
-- **Phase 0** — shipped in PR #48.
+- **Phase 0** — shipped in PR #48. (CI was finished separately by the
+  maintainer; closes issue #13.)
 - **Phase 1** — shipped in PR #49 (all §1.1 and §1.2 items).
 - **Phase 2** — shipped in PR #50.
 - **Phase 3** — shipped in PR #51, plus follow-up PR #58 splitting
   `meta_shift` into a generic engine + `chenglab/` adapter.
-- **Phase 4** — shipped in PR #52.
+- **Phase 4** — shipped in PR #52, with two follow-ups: PR #62 made
+  `pip install -e .` actually ship the leaves (top-level leaf packages
+  weren't being picked up by setuptools-find), and PR #63 finished the
+  long-deferred restructure — every CLI-registered leaf moved from
+  top-level `<category>/<task>.py` to `mctutil/<category>/<task>.py`,
+  every `sys.path.append(parents[1])` shim removed, every intra-codebase
+  import rewritten to the `mctutil.*` form, and the lazy CLI registries
+  updated to match. Closes issues #38, #39, #40, and #41.
 - **Phase 5** — shipped across PRs #53–#56 (real tests, full
   `print` → `shared.log.log` sweep, `--dry-run` on every write-heavy
   command, restructuring `parsing/empty_dir_removal.py` into
-  `parse prune-empty`).
+  `parse prune-empty`), with two follow-ups: PR #66 swept the remaining
+  `os.path` / `os.walk` call-sites to pathlib, and PR #68 ported
+  den-sq/lftomo's `Logger` class wholesale, renamed `log.log` ->
+  `log.write` across all 115 call-sites, and wired `--log-level` /
+  `--quiet` / `--verbose` on the top-level `mctutil` CLI group.
 - **§1.4 security follow-up** — shipped in PR #57 (deleted
   `mem/clean_shared.py`, retired its `eval(argv[1])`, merged its extra
   shm prefixes into `mem/clean.py`).
 
-Intentionally deferred (per maintainer instruction or scope):
+Still open after the chain:
+
+- Issue **#37** — Unify mesh build paths. `transform/mesh.py`,
+  `transform/mesh_ig.py`, and `transport/s3upload.py --mesh` all call
+  `tc.create_meshing_tasks` directly; factoring requires CloudVolume
+  network access to verify end-to-end.
+- Issue **#64** — `mem/clean.py` revision pass. Covers the §6.4 sbatch
+  heredoc per-cluster parameterization plus several other ergonomic
+  defects in `mem/clean.py` that the refactor chain didn't sweep up.
+- Optional-dependencies groups in `pyproject.toml` (§3.3 / Phase 0
+  partial). `[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]` extras
+  were planned but never declared; runtime deps still source from
+  `environment.yml` (conda).
+
+Intentionally deferred (per maintainer instruction):
 
 - `hpc_work/codeclist.txt` — kept in tree.
 - `parsing/meta_shift.py` repo question — answered: kept in repo behind
   the chenglab adapter (see PR #58).
-- `shared/log.py` `--quiet` / `--log-level` plumbing — would require a
-  real logger overhaul; out of scope for the print→log sweep.
-- `mem/clean.py` sbatch heredoc per-cluster parameterization (§6.4) —
-  still open.
 
 ## 0. Scope of survey
 
@@ -102,9 +124,9 @@ All resolved.
 ### 1.5 Lint / hygiene
 
 - Mixed tabs (most files) and 4-space (e.g., `transform/gz_strip.py`); `.flake8` already ignores `W191` so flake8 doesn't flag it, but it makes diffs noisy. **Resolved in #48 (Phase 0):** `scripts/check_python_tabs.py` rejects leading-spaces indentation; CI enforces it.
-- Mixed `os.path` and `pathlib` use within single files (e.g., `transform/quick_crop.py`, `transform/upload.py`). Partial: `quick_crop.py` and `upload.py` both deleted (#51); not systematically swept elsewhere. **Open.**
-- Mixed `print` and `shared.log.log` for diagnostic output. **Resolved in #55–#56 (Phase 5):** every remaining diagnostic `print()` in the unified-CLI surface now goes through `shared.log.log`. `shared/log.py` still needs `--quiet` / `--log-level` plumbing for the original full benefit — **open**.
-- `sys.path.append(parents[1])` boilerplate at the top of nearly every script — symptom of the lack of a real package. Partial: Phase 4 (#52) added a real `mctutil/` package and a console script, but the leaf modules under `transform/`, `ng/`, `parsing/`, `mem/`, `transport/`, `shared/`, `hpc_work/`, `chenglab/` still live at top level and still carry the shim. **Open** — would need a follow-up to move the leaves under `mctutil/` properly.
+- Mixed `os.path` and `pathlib` use within single files (e.g., `transform/quick_crop.py`, `transform/upload.py`). **Resolved in #66:** the worst offenders (`quick_crop.py`, `upload.py`) were already deleted in #51; #66 swept the remaining `os.path.join` / `os.walk` call-sites in `transport/cv_import.py`, `parse/find_err_general.py`, `transport/s3upload.py`, and `hpc/timecheck.py` to pathlib. `os.environ` and `from os import PathLike` (type hints) are left alone since they have no pathlib equivalent.
+- Mixed `print` and `shared.log.log` for diagnostic output. **Resolved in #55–#56 (Phase 5)** for the substitution and **#68** for the threshold plumbing: `shared/log.py` was rewritten on the den-sq/lftomo Logger class shape, every call-site was renamed from `log.log("step", ...)` to `log.write("step", ...)`, the `DEBUG` enum was replaced by a `LOG` IntFlag at `0/1/2/4/8/16/32`, and bitwise per-destination filtering was wired through `set_threshold()` / `set_screen()`. The top-level `mctutil` CLI gained `--log-level [quiet|default|verbose|debug]` plus `-q` / `-v` shorthands; the group callback applies the threshold before subcommand dispatch.
+- `sys.path.append(parents[1])` boilerplate at the top of nearly every script — symptom of the lack of a real package. **Resolved in #63:** every CLI-registered leaf moved from top-level to `mctutil/<category>/<task>.py`, the shim is gone from every leaf, and intra-codebase imports use the `mctutil.*` form throughout. `chenglab/` stays at top level by design (host for the meta_shift adapter); `hpc_env/` and `hpc_work/` stay at top level as non-Python data buckets (sbatch + yaml configs).
 - README is empty for practical purposes. **Resolved in #48 (Phase 0):** README rewritten with overview + install + `mctutil --help` example.
 
 ---
@@ -245,11 +267,12 @@ GDAL / igneous / neuroglancer-scripts deps. Splitting these into pip
 extras remains **open**.
 
 The "remove every `sys.path.append(parents[1])`" part of option (a) is
-**partial** — the unified CLI is in place, but the leaf modules still
-live at top-level (`transform/`, `ng/`, `parsing/`, `mem/`, `transport/`,
-`shared/`, `hpc_work/`, `chenglab/`) rather than under `mctutil/`, so the
-shim is still in every leaf. Moving leaves under `mctutil/` is a separate
-follow-up (see §1.5 status).
+**resolved in #63** — every CLI-registered leaf moved into
+`mctutil/<category>/<task>.py` and the shim was removed from every leaf.
+`chenglab/` stays at top level by design (it hosts the meta_shift adapter
+and is referenced from `mctutil.parse.meta_shift`'s adapter registry);
+`hpc_env/` and `hpc_work/` stay at top level as non-Python data buckets
+(sbatch templates + yaml configs + the 2-line `cuda.py` probe).
 
 ---
 
@@ -260,9 +283,10 @@ it un-duplicated → make it unified".
 
 ### Phase 0 — Project hygiene (½ day)
 
-**Status: shipped in #48.** Optional-dependencies groups and the GitHub Actions
-workflow item remain open — runtime deps live in `environment.yml` (conda) and
-CI is not yet wired up.
+**Status: shipped in #48.** The maintainer subsequently wired up the GitHub
+Actions workflow (`Phase 0 CI`: lint + smoke matrix on Python 3.10 / 3.11 /
+3.12) on a separate change, closing issue #13. Optional-dependencies groups
+remain open — runtime deps still source from `environment.yml` (conda).
 
 - Add `pyproject.toml` (PEP 621), declare runtime deps (click, numpy,
   tifffile, psutil, natsort, ruamel.yaml, …) and extras
@@ -366,10 +390,20 @@ isn't declared in `pyproject.toml`.
 
 **Status: shipped in #52** with a lazy-loading variant that imports each leaf
 only when its subcommand is invoked (so `mctutil --help` doesn't pull in
-igneous / GDAL / Dragonfly). The "move leaves into `mctutil/<category>/<task>.py`"
-restructure was **not** done; leaves still live at top-level (`transform/`,
-`ng/`, etc.) and the lazy CLI imports them by their existing module path. The
-`sys.path.append(parents[1])` shim therefore still exists in every leaf.
+igneous / GDAL / Dragonfly). Two follow-ups completed the rest:
+
+- **PR #62** patched packaging so `pip install -e .` actually ships the
+  leaf modules. The top-level leaf directories were implicit namespace
+  packages (no `__init__.py`) and `pyproject.toml`'s `packages.find`
+  only listed `mctutil*`, so the install registered the console script
+  but the leaves it imported were missing from any non-repo cwd.
+- **PR #63** finished the long-deferred leaves-under-mctutil restructure
+  — every CLI-registered leaf moved from top-level to
+  `mctutil/<category>/<task>.py`, every `sys.path.append(parents[1])`
+  shim removed, every intra-codebase import rewritten to the `mctutil.*`
+  form, every lazy CLI registry updated to match. Closes issues #38,
+  #39, #40, #41.
+
 Subsequent additions: `parse prune-empty` (#56), `parse meta-shift --schema`
 (#58).
 
@@ -390,15 +424,23 @@ Subsequent additions: `parse prune-empty` (#56), `parse meta-shift --schema`
 
 ### Phase 5 — Coverage & polish (open-ended)
 
-**Status: shipped across #53–#56.** Per-bullet annotations below.
+**Status: shipped across #53–#56**, with two follow-ups: **#66** swept the
+remaining `os.path` / `os.walk` call-sites to pathlib and **#68** rewrote
+`shared/log.py` on the den-sq/lftomo `Logger` class shape (renaming
+`log.log("step", ...)` to `log.write("step", ...)` across all 115 call-sites
+and wiring `--log-level` / `--quiet` / `--verbose` through to the top-level
+CLI group).
 
 - [x] Real tests for the math-heavy verbs (`normalize`, `trim`, `sino
   convert`) against small fixture tiffs. **Shipped in #53.** Test count
   grew from 0 → 70 across Phase 0–5; 77 after #58.
 - [x] Replace `print` calls with `shared.log.log` everywhere, so
   `--quiet` / `--log-level` work uniformly. **Shipped in #55 + #56** for
-  the print substitution. The `--quiet` / `--log-level` plumbing on
-  `shared/log.py` itself is **open** — would need a real logger overhaul.
+  the print substitution, **#68** for the threshold plumbing. The
+  rewritten `shared/log.py` now honors a per-destination `LOG` IntFlag
+  bitmask via `set_threshold()` / `set_screen()`; the top-level CLI's
+  `--log-level [quiet|default|verbose|debug]` (with `-q` / `-v`
+  shorthands) applies the threshold before subcommand dispatch.
 - [x] Add a `--dry-run` flag to anything that writes files, mirroring the
   `mem clean --apply` pattern. **Shipped across #54, #55, #56.** Coverage:
   `transform trim`, `transform normalize`, `sino convert`,
@@ -427,8 +469,9 @@ These remain relevant for any future restructuring.
   `mem_tracker` at import time. Any refactor that changes import order
   (e.g., moving things into a package) must preserve "the first import
   of anything from `mctutil` allocates this segment". Worth a test that
-  asserts the tracker exists post-import. (Especially relevant for the
-  pending "move leaves under `mctutil/`" follow-up.)
+  asserts the tracker exists post-import. (#63 moved this into
+  `mctutil/shared/mem.py` and the existing tests passed unchanged, but
+  the invariant still applies to any future restructure.)
 - `transform/sinogram.py` is the most subtle code in the repo; tread
   carefully when factoring out `distribute_read`. The function's
   `generate_offset_pairs_*` closures depend on `target_mem[…].buffer_address.start`
@@ -447,12 +490,17 @@ These remain relevant for any future restructuring.
 
 1. Are any external scripts / sbatch files calling `python
    transform/<x>.py` directly? If yes, Phase 4 needs a deprecation
-   period; if no, do it as a hard cut. **Partial answer:** the only
-   in-tree direct invocations found were `mem/memcheck.sbatch` and
-   `mem/memclean.sbatch` calling `clean_shared.py`, which were updated
-   in #57. The "move leaves under `mctutil/`" follow-up still depends
-   on this — out-of-tree sbatch / cluster scripts could still reference
-   `python transform/<x>.py`.
+   period; if no, do it as a hard cut. **Answered (hard cut taken in
+   #63):** the only in-tree direct invocations found were
+   `mem/memcheck.sbatch` / `mem/memclean.sbatch` calling
+   `clean_shared.py`, which were updated in #57 to `clean.py [--apply]
+   clean`. #63 then moved every CLI-registered leaf into
+   `mctutil/<category>/<task>.py` and deleted the top-level
+   `transform/`, `ng/`, `parsing/`, `mem/`, `transport/`, `shared/`
+   directories outright. Any out-of-tree caller that imported a leaf by
+   its old top-level path now needs to switch to either the installed
+   console script (`mctutil <verb>`) or the `mctutil.<category>.<task>`
+   import.
 2. Is `parsing/meta_*.py` still in active use, or a snapshot of a
    one-time migration? If snapshot, archive and remove. **Answered:**
    active. Kept in tree; #58 split the chenglab schema into a dedicated
@@ -467,7 +515,10 @@ These remain relevant for any future restructuring.
 4. Where do `mem/clean.py`'s sbatch templates run today, and against
    which scheduler version? That code embeds an heredoc with module
    loads (`module load miniconda/3`, `source activate recon`) — worth
-   parameterizing per-cluster. **Open.**
+   parameterizing per-cluster. **Open — tracked in issue #64** as part
+   of a broader `mem/clean.py` revision pass (also covers the inverted
+   `--apply` semantics, the half-finished `mark` argument surface, and
+   several other ergonomic defects the refactor chain didn't sweep).
 
 ---
 
@@ -488,13 +539,21 @@ Original plan (preserved for context):
 
 What actually happened (2026-05-21):
 
-- Phases 0–5 shipped as a linear PR chain (#48 → #56), with two
-  follow-ups (#57 retiring `clean_shared.py`'s `eval(argv[1])`, #58
-  splitting `meta_shift` into an engine + chenglab adapter).
-- Phase 4 chose lazy command loading rather than physically moving
-  leaves under `mctutil/`, so the `sys.path.append` blocks survive.
-  That restructure remains the largest concrete follow-up.
-- Phase 5's `--quiet` / `--log-level` plumbing on `shared/log.py`
-  remains the largest concrete follow-up on the polish side.
-- Phase 5's `hpc_work/codeclist.txt` decision was: keep, per maintainer
+- Phases 0–5 shipped as a linear PR chain (#48 → #56), with four
+  follow-ups: #57 retired `clean_shared.py`'s `eval(argv[1])`, #58 split
+  `meta_shift` into an engine + chenglab adapter, #62 patched packaging
+  so `pip install -e .` actually shipped the leaves, #63 moved every
+  CLI-registered leaf into `mctutil/<category>/<task>.py` while removing
+  every `sys.path.append` shim, #66 swept the remaining `os.path` /
+  `os.walk` call-sites to pathlib, and #68 ported den-sq/lftomo's
+  `Logger` class wholesale (renaming `log.log` -> `log.write` across all
+  115 call-sites and wiring `--log-level` / `--quiet` / `--verbose` on
+  the top-level CLI).
+- The maintainer separately wired up the Phase 0 CI workflow (lint +
+  smoke matrix on Python 3.10 / 3.11 / 3.12), closing issue #13.
+- Remaining concrete follow-ups: mesh-helper factoring (issue #37,
+  needs network), `mem/clean.py` revision pass (issue #64, including
+  the §6.4 sbatch heredoc per-cluster parameterization), and
+  optional-dependencies groups in `pyproject.toml`.
+- `hpc_work/codeclist.txt` decision was: keep, per maintainer
   instruction.
