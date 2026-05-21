@@ -5,6 +5,8 @@ from pathlib import Path
 import click
 import numpy as np
 
+from shared.cli import DelimitedRecord
+
 
 @dataclass(frozen=True)
 class TaggedLayer:
@@ -16,32 +18,17 @@ class TaggedLayer:
 		return f"{self.name} ID{self.intensity}r{self.radius}"
 
 
-# Click Parameter: Pair of segment ID and color
-class TaggedLayerParameter(click.ParamType):
-	name = "Annotation Information"
-
-	def convert(self, value, param, ctx):
-		tagged_layer = value.split(":")
-
-		try:
-			if len(tagged_layer) == 0:
-				self.fail("Layer Name Empty")
-			if len(tagged_layer) == 1:
-				return TaggedLayer(name=tagged_layer[0], intensity=-1, radius=-1)
-			elif len(tagged_layer) == 2:
-				intensity = int(tagged_layer[1]) if len(tagged_layer[1]) > 0 else -1
-				return TaggedLayer(name=tagged_layer[0], intensity=intensity, radius=-1)
-			elif len(tagged_layer) == 3:
-				intensity = int(tagged_layer[1]) if len(tagged_layer[1]) > 0 else -1
-				radius = int(tagged_layer[2]) if len(tagged_layer[2]) > 0 else -1
-				return TaggedLayer(name=tagged_layer[0], intensity=intensity, radius=radius)
-			else:
-				self.fail("Too many fields in tagged layer.")
-		except ValueError as ve:
-			self.fail(f'{value} is not a tagged layer.\n{ve}')
-
-
-TAGGEDLAYER = TaggedLayerParameter()
+TAGGEDLAYER = DelimitedRecord(
+	TaggedLayer,
+	[
+		lambda value: value if len(value) > 0 else (_ for _ in ()).throw(ValueError("Layer Name Empty")),
+		lambda value: int(value) if len(value) > 0 else -1,
+		lambda value: int(value) if len(value) > 0 else -1,
+	],
+	defaults=(None, "", ""),
+	min_fields=1,
+	name="Annotation Information",
+)
 
 
 @click.command()
@@ -53,15 +40,6 @@ TAGGEDLAYER = TaggedLayerParameter()
 				help="Segmentation radius used if not specified individually.")
 @click.argument("tagged_layer", type=TAGGEDLAYER, nargs=-1)
 def layer_tag(json_file: Path, json_result: Path, segment_radius, tagged_layer: TaggedLayer):
-	""" Tag layers with ID and radius for Dan's scripts.  Layer format is 
-			name:intensity:radius
-		Intensity and radius can be left empty, in which case defaults will be assigned.
-			- Generated intensities will be unique values spaced across 16 bit uint space.
-			- Radius will default to segment_radius parameter.
-
-		Example run:
-			python layer_tag.py -j Untagged.json -r Tagged.json -s 30 LSVL_CC_A::20 Cross_Conn:570
-		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 	print("json loaded")
@@ -76,13 +54,11 @@ def layer_tag(json_file: Path, json_result: Path, segment_radius, tagged_layer: 
 			print(f"{t_layer} not found in source.")
 		else:
 			if t_layer.intensity == -1:
-				# Generate an intensity that's not a repeat.
 				t_layer = replace(t_layer, intensity=next(intensity_gen))
 				while t_layer.intensity in preset_intensities:
 					t_layer = replace(t_layer, intensity=next(intensity_gen))
 
 			if t_layer.radius == -1:
-				# Update with default intensity.
 				t_layer = replace(t_layer, radius=segment_radius)
 
 			source_layers[t_layer.name]["name"] = str(t_layer)

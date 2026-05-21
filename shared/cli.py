@@ -4,6 +4,8 @@ import click
 import numpy as np
 from ruamel.yaml import YAML, yaml_object
 
+from shared.np_convert import np_convert
+
 yaml = YAML()
 
 
@@ -56,22 +58,14 @@ class NumpyCLI:
 		return self._nptype
 
 	def convert_ar(self, alt_ar):
-		if np.issubdtype(self._nptype, np.integer):
-			dtype_range = np.iinfo(self._nptype).max - np.iinfo(self._nptype).min
-			source_range = int(np.max(alt_ar) - np.min(alt_ar))
-			if source_range == 0:
-				source_range = dtype_range
-			return (alt_ar * (dtype_range // source_range))
-		elif np.issubdtype(self._nptype, np.floating):
-			return alt_ar.astype(self._nptype)
-		else:
-			raise TypeError(f"Cannot convert to non-numeric datatype {self._nptype}.")
+		if np.issubdtype(self._nptype, np.number) or self._nptype == np.dtype(bool):
+			return np_convert(self._nptype, alt_ar)
+		raise TypeError(f"Cannot convert to non-numeric datatype {self._nptype}.")
 
 	def __str__(self):
 		return f"{self._nptype}"
 
 
-# Click Parameter: Comma-separated key=value list of options.
 class OptionList(click.ParamType):
 	name = "Option List"
 
@@ -82,7 +76,6 @@ class OptionList(click.ParamType):
 			self.fail(f'{value} is not a list of comma-separated options.')
 
 
-# Click Parameter:
 class Range(click.ParamType):
 	name = "Integer Range"
 
@@ -95,7 +88,6 @@ class Range(click.ParamType):
 			self.fail(f'{value} is not a python range.')
 
 
-# Click Parameter: Float Range (Imitated by linspace).
 class Frange(click.ParamType):
 	name = "Float Range"
 
@@ -108,7 +100,6 @@ class Frange(click.ParamType):
 			self.fail(f'{value} cannot be evaluated as a float range.')
 
 
-# Click Parameter: Choice of an Enum from a list.
 class EnumParameter(click.Choice):
 	name = "Enumerated Value"
 
@@ -120,7 +111,6 @@ class EnumParameter(click.Choice):
 		return self.__enum[super().convert(value, param, ctx)]
 
 
-# Click Parameter: Choice of an Enum from a list.
 class NumPyType(click.ParamType):
 	name = "Numpy Datatype"
 
@@ -132,7 +122,57 @@ class NumPyType(click.ParamType):
 			self.fail(f'{value} is not a valid numpy datatype.')
 
 
-# Click Parameter: Indexing Slice
+class DelimitedRecord(click.ParamType):
+	def __init__(self, record_type, field_parsers, delimiter=":", defaults=None, min_fields=None, name=None):
+		self.record_type = record_type
+		self.field_parsers = tuple(field_parsers)
+		self.delimiter = delimiter
+		self.defaults = tuple(defaults) if defaults is not None else (None,) * len(self.field_parsers)
+		self.min_fields = len(self.field_parsers) if min_fields is None else min_fields
+		self.name = name if name is not None else getattr(record_type, "__name__", "Delimited Record")
+
+		if len(self.defaults) != len(self.field_parsers):
+			raise ValueError("defaults must match the parser count.")
+
+	def convert(self, value, param, ctx):
+		fields = str(value).split(self.delimiter)
+
+		if len(fields) < self.min_fields or len(fields) > len(self.field_parsers):
+			self.fail(f"{value} must have between {self.min_fields} and {len(self.field_parsers)} fields.")
+
+		fields += [self.defaults[i] for i in range(len(fields), len(self.field_parsers))]
+
+		try:
+			return self.record_type(*[
+				parser(field)
+				for parser, field in zip(self.field_parsers, fields)
+			])
+		except (AttributeError, KeyError, TypeError, ValueError) as ex:
+			self.fail(str(ex))
+
+
+class CropNumberType(click.ParamType):
+	name = "CropNumber"
+
+	def convert(self, value, param, ctx):
+		pair = str(value).split(",")
+		if len(pair) == 1:
+			pair = [pair[0], pair[0]]
+		elif len(pair) != 2:
+			self.fail(f"{value} must be a single or pair of values.")
+
+		converted = []
+		for item in pair:
+			if str(item).isnumeric():
+				converted.append(int(item))
+			else:
+				try:
+					converted.append(float(item))
+				except ValueError:
+					self.fail(f"{value} must contain ints or floats: {item} is not.")
+		return converted
+
+
 class SLICE(click.ParamType):
 	name = "Index Slice"
 
@@ -160,7 +200,6 @@ class SLICE(click.ParamType):
 			self.fail(f'{value} is not formatted as a valid slice; e.g. [1,2:7,4:] - {ex}')
 
 
-# Different projection types for CUDA reconstruction algorithms.
 class PROJ(Enum):
 	PB_LINE = "line"
 	PB_STRIP = "strip"
@@ -174,7 +213,6 @@ class PROJ(Enum):
 		return str(self.value)
 
 
-# Different reconstruction algorithm choices.
 class RA(Enum):
 	GRIDREC = "GRIDREC"
 	FP_CUDA = "FP_CUDA"
@@ -203,14 +241,20 @@ class CF(Enum):
 
 
 class RFLAG(Flag):
-	LOCAL_GAINS = auto()					# Use local gains normalization algorithm.
-	LOCAL_THETA = auto()					# Use local theta calclation based on shutter timings.
-	SKIP_CENTER_NORMALIZATION = auto()		# Whether to normalize before center finding.
-	THREAD_READ = auto()					# Whether to use a thread pool instead of a process pool for reading.
+	LOCAL_GAINS = auto()
+	LOCAL_THETA = auto()
+	SKIP_CENTER_NORMALIZATION = auto()
+	THREAD_READ = auto()
+
+
+def crop_val(crop, dim):
+	return np.s_[int(crop[0] * dim) if isinstance(crop[0], float) else crop[0]:
+			int((1.0 - crop[1]) * dim) if isinstance(crop[1], float) else dim - crop[1]]
 
 
 OPTION_LIST = OptionList()
 RANGE = Range()
 FRANGE = Frange()
 NUMPYTYPE = NumPyType()
-FLAGS = []							# List of toggle flags set on command line.
+CROP_NUMBER = CropNumberType()
+FLAGS = []

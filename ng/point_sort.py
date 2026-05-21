@@ -1,10 +1,11 @@
-
 from collections import namedtuple
 from enum import IntEnum
 import json
 from pathlib import Path
 
 import click
+
+from shared.cli import DelimitedRecord
 
 
 class Direction(IntEnum):
@@ -15,23 +16,11 @@ class Direction(IntEnum):
 AnnotationPair = namedtuple("AnnotationPair", "name, direction")
 
 
-# Click Parameter: Choice of an Enum from a list.
-class AnnotationPairParameter(click.ParamType):
-	name = "Annotation Information"
-
-	def convert(self, value, param, ctx):
-		source_pair = value.split(":")
-
-		try:
-			name = source_pair[0]
-			direction = getattr(Direction, source_pair[1])
-		except ValueError:
-			self.fail(f'{value} is not an annotation pair, of format name:<FORWARD/BACKWARD>')
-
-		return AnnotationPair(name, direction)
-
-
-ANNOTATION_PAIR = AnnotationPairParameter()
+ANNOTATION_PAIR = DelimitedRecord(
+	AnnotationPair,
+	[str, lambda value: getattr(Direction, value)],
+	name="Annotation Information",
+)
 
 
 @click.command()
@@ -42,13 +31,6 @@ ANNOTATION_PAIR = AnnotationPairParameter()
 @click.option("--axis", "-a", type=click.INT, required=True, help="Axis (0-2 for X/Y/Z) to sort on.")
 @click.argument("source_annotations", type=ANNOTATION_PAIR, nargs=-1)
 def point_sort(json_file: Path, json_result: Path, axis: int, source_annotations: tuple):
-	""" Sort one or more annotation layers in a JSON file, according to one (X/Y/Z) dimension.
-		Each SOURCE_ANNOTATION should be a name, followed by a colon and then whether to
-		sort the points in FORWARD or BACKWARD order, e.g. R2-Root:FORWARD.
-
-		Example run:
-			python point_sort.py -j R2_L3.json -r R2_L3_Upd.json -a 0 R2A-Root:FORWARD L3B-Root:BACKWARD
-		"""
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 

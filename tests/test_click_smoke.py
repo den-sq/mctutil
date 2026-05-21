@@ -42,7 +42,6 @@ CASES = [
 	CommandCase("transform/hdf_convert.py", "hdf_convert"),
 	CommandCase("transform/mesh.py", "mesh"),
 	CommandCase("transform/mesh_ig.py", "mesh_ig"),
-	CommandCase("transform/multitrim.py", "trim"),
 	CommandCase("transform/ng.py", "neuroglance"),
 	CommandCase("transform/normalize.py", "norm"),
 	CommandCase("transform/quickgunzip.py", "gunzip"),

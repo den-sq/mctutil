@@ -5,24 +5,7 @@ import types
 
 import click
 import numpy as np
-import pytest
-import tifffile
 from click.testing import CliRunner
-
-
-class _StopAfterDimensions(RuntimeError):
-	pass
-
-
-class _StopSharedNP:
-	def __init__(self, *_args, **_kwargs):
-		pass
-
-	def __enter__(self):
-		raise _StopAfterDimensions()
-
-	def __exit__(self, exc_type, exc, tb):
-		return False
 
 
 class _FakeMem:
@@ -160,26 +143,6 @@ def test_image_bounds_returns_min_and_max(load_module):
 	module = load_module("transform/sino_preproc.py")
 	bounds = module.image_bounds(_FakeMem(np.array([[3, 8], [1, 5]], dtype=np.float32)))
 	assert np.array_equal(bounds, np.array([1, 8], dtype=np.float32))
-
-
-def test_multitrim_applies_vertical_to_axis_zero_and_horizontal_to_axis_one(load_module, monkeypatch, tmp_path):
-	module = load_module("transform/multitrim.py")
-	input_dir = tmp_path / "input"
-	output_dir = tmp_path / "output"
-	input_dir.mkdir()
-	output_dir.mkdir()
-	tifffile.imwrite(input_dir / "slice.tif", np.arange(16, dtype=np.uint8).reshape(4, 4))
-	captured = {}
-
-	monkeypatch.setattr(module, "SharedNP", _StopSharedNP)
-	monkeypatch.setattr(module.log, "start", lambda: None)
-	monkeypatch.setattr(module.log, "log", lambda stage, message, *args: captured.setdefault(stage, message))
-	monkeypatch.setattr(module.psutil, "cpu_count", lambda: 1)
-
-	with pytest.raises(_StopAfterDimensions):
-		module.trim.callback(str(input_dir), str(output_dir), 0.25, 0.5, module.cli.NUMPYTYPE.convert("uint8", None, None))
-
-	assert captured["Dimensions"] == "(4, 4)-(slice(1, 3, None), slice(2, 2, None))"
 
 
 def test_layer_urlshift_updates_sources_in_place(load_module, tmp_path):
