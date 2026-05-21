@@ -3,10 +3,14 @@ from pathlib import Path
 import sys
 
 
+def _env_path(name: str, default: str) -> Path:
+	return Path(os.environ.get(name, default))
+
+
 def set_df_environment():
-	df_dir = Path("C:\\Program Files\\Dragonfly")
-	ors_dir = Path("C:\\ProgramData\\ORS\\Dragonfly2024.1")
-	user_dir = Path("C:\\Users\\dnorthover\\AppData\\Local\\ORS\\Dragonfly2024.1")
+	df_dir = _env_path("DRAGONFLY_DIR", "C:\\Program Files\\Dragonfly")
+	ors_dir = _env_path("DRAGONFLY_ORS_DIR", "C:\\ProgramData\\ORS\\Dragonfly2024.1")
+	user_dir = _env_path("DRAGONFLY_USER_DIR", "C:\\Users\\dnorthover\\AppData\\Local\\ORS\\Dragonfly2024.1")
 	ana_dir = df_dir.joinpath("Anaconda3")
 
 	os.environ["orspath"] = str(df_dir)
@@ -49,7 +53,7 @@ def df_write_tiff(df_source, df_object, df_title, df_id, outputdir):
 	else:
 		source = orsObj(df_id)
 
-	tf.imwrite(outputdir.joinpath(f"{roi.getTitle()}.tif"), source.getAsNDArray(0))
+	tf.imwrite(outputdir.joinpath(f"{source.getTitle()}.tif"), source.getAsNDArray(0))
 
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ def mem_write(mem: SharedNP, path: PathLike, i, dtype):
 @click.option('-d', '--data-dir', type=click.Path(exists=True), help='Input path for noisy dataset')
 @click.option('-o', '--output-dir', type=click.Path(),
 				help='Output path for cleaned images', default='data/clean/')
-@click.option('-p', '--processes', type=click.Path(), default=psutil.cpu_count(),
+@click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
 def norm(normalize_over, data_dir, output_dir, processes):
 	log.start()

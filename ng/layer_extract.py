@@ -11,7 +11,7 @@ import click
 @click.option("--json-result", "-r", type=click.Path(path_type=Path, exists=False),
 				required=True, help="Neuroglancer JSON file to write to.")
 @click.argument("layers", type=str, nargs=-1)
-def layer_copy(json_file: Path, json_result: Path, layers: str):
+def layer_extract(json_file: Path, json_result: Path, layers: str):
 	""" Extract layers contained in a neuroglancer json file into a new file.
 
 		Example run:
@@ -39,4 +39,4 @@ def layer_copy(json_file: Path, json_result: Path, layers: str):
 
 
 if __name__ == "__main__":
-	layer_copy()
+	layer_extract()

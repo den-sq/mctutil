@@ -71,7 +71,6 @@ def s3upload(bucket_prefix, bucket_name, process_count, mesh, source_folder, tar
 
 	s3 = session.client('s3')
 	s3.put_object(Bucket=bucket_name, Key=f"{target_full}/")
-	s3.close()
 
 	upload_folder_to_s3_parallel(source_folder, target_full, bucket_name, num_processes=process_count)
 

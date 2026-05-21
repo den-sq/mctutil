@@ -41,7 +41,7 @@ ANNOTATION_PAIR = AnnotationPairParameter()
 				required=True, help="Neuroglancer JSON file to write sorted annotation(s).")
 @click.option("--axis", "-a", type=click.INT, required=True, help="Axis (0-2 for X/Y/Z) to sort on.")
 @click.argument("source_annotations", type=ANNOTATION_PAIR, nargs=-1)
-def point_merge(json_file: Path, json_result: Path, axis: int, source_annotations: tuple):
+def point_sort(json_file: Path, json_result: Path, axis: int, source_annotations: tuple):
 	""" Sort one or more annotation layers in a JSON file, according to one (X/Y/Z) dimension.
 		Each SOURCE_ANNOTATION should be a name, followed by a colon and then whether to
 		sort the points in FORWARD or BACKWARD order, e.g. R2-Root:FORWARD.
@@ -74,4 +74,4 @@ def point_merge(json_file: Path, json_result: Path, axis: int, source_annotation
 
 
 if __name__ == "__main__":
-	point_merge()
+	point_sort()

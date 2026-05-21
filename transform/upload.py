@@ -22,7 +22,7 @@ def upload_file_to_s3(session, file_path, key, bucket_name, content_encoding):
 @click.option("-s", "--source-folder", type=click.Path(), required=True, help="Data folder to upload.")
 @click.option("-t", "--target-folder", type=click.Path(readable=False), required=True, help="Target folder name on S3")
 @click.option("-b", "--bucket", type=click.STRING, required=True, help="Name of S3 bucket to upload to.")
-@click.option("-s", "--secret-json", type=click.File(), required=True,
+@click.option("-k", "--secret-json", type=click.File(), required=True,
 				help="Location of json file to load AWS credentials from.")
 @click.option("-p", "--process-count", type=click.INT, default=60, show_default=True, help="Simultaneous Uploads.")
 def upload(source_folder, target_folder, bucket, secret_json, process_count):

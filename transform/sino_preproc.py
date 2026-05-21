@@ -187,7 +187,7 @@ def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = N
 
 def image_bounds(sino_mem: SharedNP):
 	with sino_mem as sino:
-		np.array([np.min(sino), np.max(sino)])
+		return np.array([np.min(sino), np.max(sino)])
 
 
 def minmaxscale(sino_mem, i, minval=None, maxval=None):
@@ -257,11 +257,11 @@ def sino_convert(input_dir: Path, output_dir: Path, process_count: int, min_val:
 
 				log.log("Files Read", f"Window {window}; Shape {sino_shape}")
 
-				with Pool(process_count) as pool:
-					bounds += pool.map(image_bounds, sino_mem)
+				bounds.append(image_bounds(sino_mem))
 
 				log.log("Bounds Calculated", f"{window}", log.DEBUG.TIME)
 
+		bounds = np.asarray(bounds)
 		min_val = np.min(bounds[:, 0])
 		max_val = np.max(bounds[:, 1])
 		log.log("Final Bounds Calculated", f"{min_val} : {max_val}", log.DEBUG.TIME)
