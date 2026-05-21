@@ -2,20 +2,33 @@
 Supported Formats: None (precomputed), graphene, precomputed, boss, n5
 Supported Protocols: gs, file, s3, http, https, mem, matrix, tigerdata
 '''
+from pathlib import Path
+import sys
+
 from taskqueue import LocalTaskQueue
 import click
 
 import igneous.task_creation as tc
 
-# layer_path = os.path.join(proj_dir, '33dpf_seg_test')
-# layer_path = 'precomputed://s3://3d.fish/assets/precomputed_repository/B2_daphnia/AAA399/AAA399_seg_out/'
+# Needed to run script from subfolder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared import log 	# noqa::E402
 
 
 @click.command()
 @click.option("-p", "--proj-dir", type=click.Path(file_okay=False), required=True, help="Path of input data.")
 @click.option("-l", "--layer-path", type=click.STRING, required=True, help="Path of Layer data, including remote URLs.")
-def mesh(proj_dir, layer_path):
+@click.option('--execute/--dry-run', default=True,
+				help="Whether to actually enqueue meshing tasks or just describe the planned passes.")
+def mesh(proj_dir, layer_path, execute):
 	mip = 0
+
+	if not execute:
+		log.log("Mesh",
+				f"Would create meshing tasks for {layer_path} (mip={mip}, shape=512^3) and follow with manifest tasks",
+				log_level=log.DEBUG.INFO)
+		return
 
 	with LocalTaskQueue(parallel=8) as tq:
 		tasks = tc.create_meshing_tasks( 	# First Pass
@@ -35,13 +48,13 @@ def mesh(proj_dir, layer_path):
 			sharded=False,					# generate intermediate shard fragments for later processing into sharded format
 		)
 		tq.insert_all(tasks)
-	print("Done create_meshing_tasks !!")
+	log.log("Mesh", "create_meshing_tasks complete", log_level=log.DEBUG.STATUS)
 
 	with LocalTaskQueue(parallel=8) as tq:
 		tasks = tc.create_mesh_manifest_tasks(layer_path, magnitude=3) 	# Second Pass
 		tq.insert_all(tasks)
 
-	print("Done create_mesh_manifest_tasks !!")
+	log.log("Mesh", "create_mesh_manifest_tasks complete", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from multiprocessing import Pool, shared_memory
+from multiprocessing import Pool
 from pathlib import Path
 import sys
 
@@ -7,11 +7,14 @@ import numpy as np
 import psutil
 import tifffile as tf
 
-# Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from shared import log 	# noqa::E402
+from shared.io_helpers import byteread_helper 	# noqa::E402
 from shared.mem import SharedNP, ReconOrder 	# noqa::E402
+
+
+MODE = click.Choice(["shared", "naive"], case_sensitive=False)
 
 
 def get_details(path, stack_levels):
@@ -21,55 +24,62 @@ def get_details(path, stack_levels):
 		return page.dtype, (ReconOrder(len(flist), stack_levels, page.shape[1])), page.dataoffsets[0]
 
 
-def byteread_helper(target, image, i_dtype, offsets, size):
-	""" Sinogram order-capable reader using direct buffer reading.
-
-		TODO: Figure out if you can get rid of for loop - order matters.
-
-		:param target: Shared memory to read into.
-		:param image: Path to image to read from.
-		:param i_dtype: Data type of image.  Unused here, since reading is direct buffer.
-		:param offsets: Array of memory offsets to read into.  Should be sequential in file.
-		:param size: Size of chunk of memory to read.
-	"""
-	sm = shared_memory.SharedMemory(name=target)
-	with open(image, "rb") as handle:
-		handle.seek(offsets[0]["source"])
-		for offset in offsets:
-			handle.readinto(sm.buf[offset["target"]:offset["target"] + size])
-	sm.close()
-
-
 def transpose_write(recon_mem: SharedNP, path, i):
-	""" Writes a portion of reconstruction to disk after transposing it.
-
-		:param recon_mem: Metadata for reconstruction shared memory.
-		:param path: Path on disk to write to.
-		:param i: Vertical slice(s) (y) of reconstruction to write.
-	"""
 	with recon_mem as recon:
 		view = np.transpose(recon, [1, 2, 0])
 		tf.imwrite(path, view[i, :, :])
 
 
+def transpose_write_array(view, path, i):
+	tf.imwrite(path, view[i, :, :])
+
+
+def transpose_naive(path: Path, output_path: Path, out_name: str):
+	im_list = sorted(list(path.iterdir()))
+	with tf.TiffFile(im_list[0]) as im:
+		old_shape = (len(im_list), im.pages[0].shape[0], im.pages[0].shape[1])
+		old_dtype = im.pages[0].dtype
+
+	full_data = np.empty(old_shape, dtype=old_dtype)
+	for i, image in enumerate(im_list):
+		full_data[i, :, :] = tf.imread(image)
+	transposed_data = np.transpose(full_data, [2, 1, 0])
+
+	output_path.mkdir(parents=True, exist_ok=True)
+	for i in range(old_shape[2]):
+		tf.imwrite(output_path.joinpath(f"{out_name}_{str(i).zfill(4)}.tif"), transposed_data[i])
+
+
+def validate_shared_mode(mode: str, stack_start, stack_levels):
+	if mode == "shared":
+		if stack_start is None:
+			raise click.UsageError("--stack-start is required when --mode=shared.")
+		if stack_levels is None:
+			raise click.UsageError("--stack-levels is required when --mode=shared.")
+
+
 @click.command()
-@click.option("-p", "--path", type=click.Path(), help="Reconstruction Path", required=True)
-@click.option("-s", "--stack-start", type=click.INT, help="Y value to start reading from images.", required=True)
-@click.option("-l", "--stack-levels", type=click.INT, help="Vertical Stacks to use for transpose.", required=True)
+@click.option("--mode", type=MODE, default="shared", show_default=True)
+@click.option("-p", "--path", type=click.Path(exists=True, path_type=Path), help="Reconstruction path", required=True)
+@click.option("-s", "--stack-start", type=click.INT, help="Y value to start reading from images.", required=False)
+@click.option("-l", "--stack-levels", type=click.INT, help="Vertical stacks to use for transpose.", required=False)
 @click.option("-x", "--pixel-shift", type=click.FLOAT, default=0.0,
 				help="Vertical shift per pixel to track angular movement")
-@click.option("-n", "--out-name", type=click.STRING, help="Name Prefix for Files", required=True)
-@click.argument("out-path", required=True)
-def transpose_stack(path, stack_start, stack_levels, pixel_shift, out_name, out_path):
+@click.option("-n", "--out-name", type=click.STRING, help="Name prefix for files", default="tp", show_default=True)
+@click.argument("out-path", required=True, type=click.Path(path_type=Path))
+def transpose_stack(mode, path, stack_start, stack_levels, pixel_shift, out_name, out_path):
+	mode = mode.lower()
+	validate_shared_mode(mode, stack_start, stack_levels)
+	if mode == "naive":
+		transpose_naive(path, out_path, out_name)
+		return
+
 	recon_dtype, recon_shape, base_offset = get_details(path, stack_levels)
 	im_list = sorted(list(Path(path).iterdir()))
 	log.log("Setup", f"Shape {recon_shape}; Type {recon_dtype}; offset {base_offset}")
 	with SharedNP("Tranpose_Source", recon_dtype, recon_shape, create=True) as tp_mem:
 		itemsize = np.dtype(recon_dtype).itemsize
 		source_offset = base_offset + recon_shape.X * itemsize * stack_start
-
-		# Find the offset values for start of blocks.
-		# This is hilariouslyy stupid and needs a rewrite
 		target_offset = tp_mem[0].buffer_address.start
 		line_size = recon_shape.X * itemsize
 		chunk_size = line_size * recon_shape.Z
@@ -82,15 +92,14 @@ def transpose_stack(path, stack_start, stack_levels, pixel_shift, out_name, out_
 							"target": target_offset + chunk_size * i}]
 
 			pool.starmap(byteread_helper, [(tp_mem.name, im_list[i], recon_dtype, get_offset(i), chunk_size)
-											for i in range(len(im_list))])
+										for i in range(len(im_list))])
 
 		log.log("Images Loaded")
-
 		Path(out_path).mkdir(parents=True, exist_ok=True)
 
 		with Pool(psutil.cpu_count()) as pool:
 			pool.starmap(transpose_write, [(tp_mem, Path(out_path, f"{out_name}_{i}.tif"), i)
-											for i in range(recon_shape.Z)])
+										for i in range(recon_shape.Z)])
 
 		log.log("Images Written")
 

@@ -8,12 +8,12 @@ import numpy as np
 import psutil
 import tifffile as tf
 
-# Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from shared import log 	# noqa::E402
 from shared.cli import FRANGE 	# noqa::E402
 from shared.mem import SharedNP, ProjOrder 	# noqa::E402
+from shared.np_convert import np_convert 	# noqa::E402
 
 
 def norm_helper(image_mem, i, floor, ceiling):
@@ -26,7 +26,7 @@ def norm_helper(image_mem, i, floor, ceiling):
 
 
 def normalize(image_mem, index, bottom_threshold, top_threshold, thread_max):
-	""" Straightforward image normalization, disposing of values at edges """
+	"""Straightforward image normalization, disposing of values at edges."""
 	with image_mem[index] as image:
 		floor = np.percentile(image, bottom_threshold)
 		ceiling = np.percentile(image, top_threshold)
@@ -58,15 +58,14 @@ def memreader(mem, i, path):
 		mem_array[i] = tf.imread(path)
 
 
-def mem_write(mem: SharedNP, path: PathLike, i, dtype):
-	""" Writes to disk in distributed fashion
-
-		:param mem: Metadata for reconstruction shared memory.
-		:param path: Path on disk to write to.
-		:param i: Vertical slice(s) (y) of reconstruction to write.
-	"""
+def mem_write(mem: SharedNP, path: PathLike, i, dtype, execute=True):
+	"""Writes to disk in distributed fashion."""
 	with mem[i] as out_data:
-		tf.imwrite(path, out_data.astype(dtype), dtype=dtype)
+		if execute:
+			tf.imwrite(path, np_convert(dtype, out_data), dtype=dtype)
+			log.log("File Written", path.name)
+		else:
+			log.log("Dry Run", f"Would write {path.name}")
 
 
 @click.command()
@@ -76,13 +75,14 @@ def mem_write(mem: SharedNP, path: PathLike, i, dtype):
 				help='Output path for cleaned images', default='data/clean/')
 @click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
-def norm(normalize_over, data_dir, output_dir, processes):
+@click.option('--execute/--dry-run', default=True,
+				help='Whether to write normalized files or only log the planned outputs.')
+def norm(normalize_over, data_dir, output_dir, processes, execute):
 	log.start()
 
-	indices = list(range(processes))
-
-	Path(output_dir).mkdir(parents=True, exist_ok=True)
-	inputs = [x for x in Path(data_dir).iterdir() if ".tif" in x.name]
+	if execute:
+		Path(output_dir).mkdir(parents=True, exist_ok=True)
+	inputs = sorted([x for x in Path(data_dir).iterdir() if ".tif" in x.name])
 	batched_input = list(batch(inputs, processes))
 
 	log.log("Initialize", "Inputs Batched")
@@ -95,14 +95,17 @@ def norm(normalize_over, data_dir, output_dir, processes):
 
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:
 		for input_set in batched_input:
+			active_indices = list(range(len(input_set)))
 			with Pool(processes) as pool:
-				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
-			log.log("Image Load", f"{len(indices)} Images Loaded")
-			normalize(norm_mem, indices, normalize_over.start, normalize_over.stop, processes)
-			# log.log("Image Normalization", f"{len(indices)} Images Normalized")
+				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in active_indices])
+			log.log("Image Load", f"{len(active_indices)} Images Loaded")
+			normalize(norm_mem, active_indices, normalize_over.start, normalize_over.stop, processes)
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, dtype) for i in indices])
-			log.log("Image Writing", f"{len(indices)} Images Written")
+				pool.starmap(
+					mem_write,
+					[(norm_mem, Path(output_dir, input_set[i].name), i, dtype, execute) for i in active_indices],
+				)
+			log.log("Image Writing", f"{len(active_indices)} Images {'Written' if execute else 'Planned'}")
 
 
 if __name__ == '__main__':

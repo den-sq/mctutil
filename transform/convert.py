@@ -4,40 +4,12 @@ import sys
 
 import click
 import numpy as np
-import numpy.typing as npt
 import tifffile as tf
 
-# Needed to run script from subfolder
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from shared import log 	# noqa::E402
-
-
-def np_convert(target_dtype: np.dtype, source: npt.ArrayLike, normalize=True, safe_bool=False):
-	""" TODO: Confirm Fix for Negative Values """
-	if safe_bool and target_dtype == bool:
-		return source.astype(target_dtype).astype(np.uint8)
-	elif np.issubdtype(target_dtype, np.integer) and normalize:
-		dtype_range = np.iinfo(target_dtype).max - np.iinfo(target_dtype).min
-		source_floor = np.min(source) * -1
-		source_range = np.max(source) + source_floor
-
-		# Avoid divide by 0, esp. as numpy segfaults when you do.
-		if source_range == 0.0:
-			source_range = 1.0
-
-		return ((source + source_floor) * max(dtype_range / source_range, 1)).astype(target_dtype)
-	elif np.issubdtype(target_dtype, np.floating) and normalize:
-		source_floor = np.min(source) * -1
-		source_range = np.max(source) + source_floor
-
-		# Avoid divide by 0, esp. as numpy segfaults when you do.
-		if source_range == 0.0:
-			source_range = 1.0
-
-		return ((source + source_floor) / source_range).astype(target_dtype)
-	else:
-		return source.astype(target_dtype)
+from shared.np_convert import np_convert 	# noqa::E402
 
 
 def write_split(source: Path, output_folder: Path, sections: int, dtype: type, compression: bool):
@@ -70,7 +42,7 @@ def convert(output_type, horizontal_sections, uncompressed, input_folder, output
 
 	with Pool(24) as pool:
 		pool.starmap(write_split, ([img, output_folder, horizontal_sections, np.dtype(output_type), not uncompressed]
-									for img in input_folder.iterdir()))
+								for img in input_folder.iterdir()))
 
 
 if __name__ == "__main__":

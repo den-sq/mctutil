@@ -39,20 +39,56 @@ Notes:
 
 ## Quickstart
 
-Most tools are still run as module entrypoints:
+Phase 4 introduces the unified CLI surface:
+
+```bash
+mctutil transform trim --help
+mctutil transform normalize --help
+mctutil sino convert --help
+mctutil ng point-add --help
+mctutil transport s3-upload --help
+mctutil mem clean --help
+mctutil mem from-file --help
+mctutil parse meta-shift --help
+```
+
+The legacy module entrypoints still exist for now while the unified CLI settles:
 
 ```bash
 python -m transform.trim --help
 python -m transform.normalize --help
+python -m transform.sinogram --help
 python -m ng.point_add --help
 python -m transport.s3upload --help
 python -m mem.clean --help
+python -m mem.from_file --help
+python -m parsing.meta_shift --help
 ```
 
-The placeholder future entrypoint is already reserved:
+Phase 3 collapsed several duplicate scripts into the surviving module paths above:
+- `transform/sino_preproc.py` folded into `transform/sinogram.py --mode preproc`
+- `transform/f_transpose.py` folded into `transform/transpose.py --mode naive`
+- `transform/upload.py` retired in favor of `transport/s3upload.py`
+- `parsing/meta_list.py` and `parsing/meta_parser.py` folded into `parsing/meta_shift.py`
+- `mem/check_nodeinfo.py`, `mem/from_nodeinfo.py`, and `mem/from_list.py` folded into `mem/from_file.py` and `mem/from_range.py`
+
+A worked trim example equivalent to the old hardcoded `transform/quick_crop.py` shape is:
+
+```bash
+python -m transform.trim \
+  --data-dir /path/to/projections \
+  --output-dir /path/to/projections-tight \
+  --vertical-trim 421,21 \
+  --horizontal-trim 551,389 \
+  --z-trim 803,0
+```
+
+The unified entrypoint is now live:
 
 ```bash
 mctutil --help
+mctutil transform --help
+mctutil ng --help
 ```
 
 ## Project map

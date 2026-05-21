@@ -7,9 +7,11 @@ import numpy as np
 import psutil
 import tifffile as tf
 
+from shared import log
+
 
 def denoise_threshold(input_paths, output_path, threshold):
-	print(input_paths)
+	log.log("Simple Denoise", f"Threshold inputs: {input_paths}", log_level=log.DEBUG.INFO)
 	base_data = np.array([tf.imread(infile) for infile in input_paths]).astype(np.int32)
 
 	floor = np.min(base_data)
@@ -50,11 +52,11 @@ def simple_denoise(threshold, area, num_processes, flat_denoise, inputdir, outpu
 
 	with Pool(num_processes) as pool:
 		if flat_denoise:
-			print("flat")
+			log.log("Simple Denoise", "Mode: flat", log_level=log.DEBUG.STATUS)
 			pool.starmap(denoise_flat, [(input_paths[i - 1: i + 2], outputdir.joinpath(input_paths[i].name), threshold)
 										for i in range(1, len(input_paths) - 1)])
 		else:
-			print(f"threshold {len(input_paths)}")
+			log.log("Simple Denoise", f"Mode: threshold ({len(input_paths)} inputs)", log_level=log.DEBUG.STATUS)
 			pool.starmap(denoise_threshold, [(input_paths[i - 1: i + 2], outputdir.joinpath(input_paths[i].name), threshold)
 											for i in range(1, len(input_paths) - 1)])
 

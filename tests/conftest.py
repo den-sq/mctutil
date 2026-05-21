@@ -78,12 +78,52 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 	gdal = types.SimpleNamespace(UseExceptions=lambda: None)
 
 	google = types.ModuleType("google")
+	google_auth = types.ModuleType("google.auth")
+	google_auth_transport = types.ModuleType("google.auth.transport")
+	google_auth_transport_requests = types.ModuleType("google.auth.transport.requests")
+	google_auth_transport_requests.Request = type("Request", (), {})
+	google.auth = google_auth
+	google_auth.transport = google_auth_transport
+	google_auth_transport.requests = google_auth_transport_requests
+
+	google_oauth2 = types.ModuleType("google.oauth2")
+	google_oauth2_credentials = types.ModuleType("google.oauth2.credentials")
+	google_oauth2_credentials.Credentials = type(
+		"Credentials",
+		(),
+		{
+			"from_authorized_user_file": staticmethod(lambda *_args, **_kwargs: types.SimpleNamespace(valid=True)),
+		},
+	)
+	google.oauth2 = google_oauth2
+	google_oauth2.credentials = google_oauth2_credentials
+
 	google_auth_oauthlib = types.ModuleType("google_auth_oauthlib")
 	google_auth_oauthlib_flow = types.ModuleType("google_auth_oauthlib.flow")
+	google_auth_oauthlib_flow.InstalledAppFlow = type(
+		"InstalledAppFlow",
+		(),
+		{
+			"from_client_secrets_file": staticmethod(
+				lambda *_args, **_kwargs: types.SimpleNamespace(
+					run_local_server=lambda **_kw: types.SimpleNamespace(to_json=lambda: "{}", valid=True)
+				)
+			),
+		},
+	)
 	google_auth_oauthlib.flow = google_auth_oauthlib_flow
 	googleapiclient = types.ModuleType("googleapiclient")
 	googleapiclient_discovery = types.ModuleType("googleapiclient.discovery")
+	googleapiclient_discovery.build = lambda *_args, **_kwargs: types.SimpleNamespace(
+		spreadsheets=lambda: types.SimpleNamespace(
+			values=lambda: types.SimpleNamespace(
+				append=lambda **_kw: types.SimpleNamespace(execute=lambda: None)
+			)
+		)
+	)
 	googleapiclient.discovery = googleapiclient_discovery
+	googleapiclient_errors = types.ModuleType("googleapiclient.errors")
+	googleapiclient_errors.HttpError = type("HttpError", (Exception,), {})
 
 	ipyslurm = types.ModuleType("ipyslurm")
 	ipyslurm.Slurm = type(
@@ -131,10 +171,16 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 		"cv2": cv2,
 		"dicom2jpg": dicom2jpg,
 		"google": google,
+		"google.auth": google_auth,
+		"google.auth.transport": google_auth_transport,
+		"google.auth.transport.requests": google_auth_transport_requests,
+		"google.oauth2": google_oauth2,
+		"google.oauth2.credentials": google_oauth2_credentials,
 		"google_auth_oauthlib": google_auth_oauthlib,
 		"google_auth_oauthlib.flow": google_auth_oauthlib_flow,
 		"googleapiclient": googleapiclient,
 		"googleapiclient.discovery": googleapiclient_discovery,
+		"googleapiclient.errors": googleapiclient_errors,
 		"igneous": igneous,
 		"igneous.task_creation": igneous_task_creation,
 		"ipyslurm": ipyslurm,
@@ -153,10 +199,13 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 
 
 @pytest.fixture()
-def load_module(monkeypatch: pytest.MonkeyPatch):
+def stubbed_modules(monkeypatch: pytest.MonkeyPatch):
 	for name, module in _stub_modules().items():
 		monkeypatch.setitem(sys.modules, name, module)
 
+
+@pytest.fixture()
+def load_module(stubbed_modules):
 	loaded: list[str] = []
 
 	def _load(module_path: str):

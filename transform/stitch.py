@@ -98,7 +98,12 @@ class SampleSet():
 		self._flat_mem.unlink()
 
 
-def stitch_single(samples, overlaps, new_dim, stitch_output, x):
+def stitch_single(samples, overlaps, new_dim, stitch_output, x, execute=True):
+	output_path = Path(stitch_output, f"AAA590_Stitched_{x}.tif")
+	if not execute:
+		log.log("Stitch", f"Would write {output_path}", log_level=log.DEBUG.INFO)
+		return
+
 	stitched = np.zeros(new_dim, dtype=np.uint16)
 
 	for s in samples:
@@ -109,7 +114,6 @@ def stitch_single(samples, overlaps, new_dim, stitch_output, x):
 
 	for i, overlap in enumerate(overlaps):
 		non_overlap = samples[i + 1].proj.shape[0] - overlap
-		# print(f"{offset}|{overlap}|{non_overlap}")
 
 		# Proj Merge
 		stitched[offset - overlap:offset, :] = np.median(
@@ -120,10 +124,10 @@ def stitch_single(samples, overlaps, new_dim, stitch_output, x):
 
 		offset += non_overlap
 
-	tf.imwrite(Path(stitch_output, f"AAA590_Stitched_{x}.tif"), stitched)
+	tf.imwrite(output_path, stitched)
 
 
-def stitch_samples(samples, overlaps, stitch_output):
+def stitch_samples(samples, overlaps, stitch_output, execute=True):
 	new_dim = (np.sum([s.proj.shape[0] for s in samples]) - np.sum(overlaps), samples[0].half_width * 2)
 
 	for s in samples:
@@ -131,14 +135,20 @@ def stitch_samples(samples, overlaps, stitch_output):
 
 	log.log("Dimension", new_dim)
 
-	Path(stitch_output).mkdir(parents=True, exist_ok=True)
+	if execute:
+		Path(stitch_output).mkdir(parents=True, exist_ok=True)
+	else:
+		log.log("Stitch", f"Would create {stitch_output}", log_level=log.DEBUG.INFO)
 
 	log.log("Output Dir", stitch_output)
 
 	with Pool(50) as pool:
-		pool.starmap(stitch_single, [(samples, overlaps, new_dim, stitch_output, x) for x in range(len(samples[0].projs))])
+		pool.starmap(stitch_single,
+					[(samples, overlaps, new_dim, stitch_output, x, execute)
+						for x in range(len(samples[0].projs))])
 
-	log.log("Stitching Complete", f"{len(samples[0].projs)} Projections Stitched")
+	log.log("Stitching Complete",
+			f"{len(samples[0].projs)} projections {'stitched' if execute else 'planned'}")
 
 
 @click.command()
@@ -150,8 +160,9 @@ def stitch_samples(samples, overlaps, stitch_output):
 @click.option("--stitch-range", type=click.FLOAT, default=0.2,
 				help="Maximum range (as percent of height) to scan for overlaps.")
 @click.option("--stitch-output", type=click.Path(), required=True, help="Output path of stitching.")
-def stitch(sample, top_stitch, stitch_range, stitch_output):
-	# samples = [SampleSet(first_sample, first_flat, first_center), SampleSet(second_sample, second_flat, second_center)]
+@click.option('--execute/--dry-run', default=True,
+				help="Whether to actually write stitched output or just plan the writes.")
+def stitch(sample, top_stitch, stitch_range, stitch_output, execute):
 	target_width = min([x.half_width for x in sample])
 
 	for s in sample:
@@ -173,7 +184,7 @@ def stitch(sample, top_stitch, stitch_range, stitch_output):
 
 		overlaps.append(std_set[0][0])
 
-	stitch_samples(sample, overlaps, stitch_output)
+	stitch_samples(sample, overlaps, stitch_output, execute=execute)
 
 	for s in sample:
 		s.unlink()

@@ -2,10 +2,16 @@ from enum import IntEnum
 from multiprocessing import shared_memory
 from io import StringIO
 from pathlib import Path
+import sys
 from subprocess import run, PIPE
 
 import click
 import ipyslurm
+
+# Needed to run script from subfolder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared import log 	# noqa::E402
 
 # Names of shared memory to be script-specific (for now)
 shm = {
@@ -14,7 +20,11 @@ shm = {
 	"fsm": "flat",
 	"ysm": "y_rot",
 	"pfm": "phase",
-	"log": "last_step"
+	"log": "last_step",
+	"ssm": "sino",
+	"wsm": "work",
+	"csm": "center",
+	"inp": "input",
 }
 
 other_shm = "__KMP_REGISTERED_LIB"
@@ -56,7 +66,8 @@ def mem_clean(shared_base, apply, apply_kmp):
 					clean_target = shared_memory.SharedMemory(name=mem_name)
 					clean_target.close()
 					clean_target.unlink()
-				print(f"{host}:{mem_name}:{apply}")
+				log.log("Mem Clean", f"{host}:{mem_name}:{apply}",
+						log_level=log.DEBUG.STATUS if apply else log.DEBUG.INFO)
 			elif mem_name[:len(other_shm)] == other_shm:
 				if apply_kmp:
 					try:
@@ -65,7 +76,8 @@ def mem_clean(shared_base, apply, apply_kmp):
 						clean_target.unlink()
 					except FileNotFoundError:
 						pass
-					print(f"{host}:{mem_name}:{apply}")
+					log.log("Mem Clean", f"{host}:{mem_name}:{apply}",
+							log_level=log.DEBUG.STATUS if apply else log.DEBUG.INFO)
 
 
 @click.group()
@@ -140,7 +152,7 @@ python -X pycache_prefix=~/.pycache ~/mem/clean.py {param_str} clean
 			'--partition', partition,
 			'--nodes', str(len(nodes))
 ])
-			print(f"Job {partition}:{res}")
+			log.log("Mem Clean", f"Job {partition}:{res}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":

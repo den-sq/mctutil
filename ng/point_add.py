@@ -6,6 +6,8 @@ import uuid
 import click
 import numpy as np
 
+from shared import log
+
 
 @click.command()
 @click.option("--json-file", "-j", type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
@@ -26,7 +28,7 @@ def point_add(json_file: Path, json_result: Path, base_layer: str, points: Path,
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	print("json loaded")
+	log.log("Point Add", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
 
 	for layer in json_data["layers"]:
 		if layer["name"] == base_layer:
@@ -54,23 +56,23 @@ def point_add(json_file: Path, json_result: Path, base_layer: str, points: Path,
 			point_reader = csv.reader(csvfile)
 			point_array = np.array([row for row in point_reader])
 	else:
-		print("Points must be in .npy or .csv format.")
+		log.log("Point Add", "Points must be in .npy or .csv format.", log_level=log.DEBUG.ERROR)
 		return
 
 	if len(point_array.shape) != 2 or point_array.shape[-1] != 3:
-		print("Points must be an array of 3D XYZ points.")
+		log.log("Point Add", "Points must be an array of 3D XYZ points.", log_level=log.DEBUG.ERROR)
 		return
 
 	uuids = [uuid.uuid1() for x in range(len(point_array))]
 	new_layer["annotations"] = [{"type": "point", "id": str(idval), "point": list(point)}
 								for point, idval in zip(point_array, uuids)]
 	json_data["layers"].append(new_layer)
-	print("annotation added")
+	log.log("Point Add", "Annotation added", log_level=log.DEBUG.STATUS)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	print(f"new annotation written to {json_result}")
+	log.log("Point Add", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":
