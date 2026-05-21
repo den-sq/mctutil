@@ -199,10 +199,13 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 
 
 @pytest.fixture()
-def load_module(monkeypatch: pytest.MonkeyPatch):
+def stubbed_modules(monkeypatch: pytest.MonkeyPatch):
 	for name, module in _stub_modules().items():
 		monkeypatch.setitem(sys.modules, name, module)
 
+
+@pytest.fixture()
+def load_module(stubbed_modules):
 	loaded: list[str] = []
 
 	def _load(module_path: str):

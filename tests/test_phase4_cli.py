@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from click.testing import CliRunner
+
+from mctutil.cli import main
+
+
+def test_mctutil_root_help_lists_category_groups():
+	result = CliRunner().invoke(main, ["--help"])
+	assert result.exit_code == 0, result.output
+	for name in ["transform", "sino", "ng", "mesh", "transport", "mem", "parse", "hpc"]:
+		assert name in result.output
+
+
+def test_transform_group_help_lists_unified_commands():
+	result = CliRunner().invoke(main, ["transform", "--help"])
+	assert result.exit_code == 0, result.output
+	for name in ["normalize", "trim", "transpose", "gunzip", "strip-gz-suffix"]:
+		assert name in result.output
+
+
+def test_mem_group_help_lists_collapsed_commands():
+	result = CliRunner().invoke(main, ["mem", "--help"])
+	assert result.exit_code == 0, result.output
+	for name in ["clean", "mark", "from-file", "from-range"]:
+		assert name in result.output
+
+
+def test_unified_leaf_help_works(stubbed_modules):
+	result = CliRunner().invoke(main, ["sino", "convert", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "--mode" in result.output
+
+	result = CliRunner().invoke(main, ["ng", "layer-tag", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "--segment_radius" in result.output
