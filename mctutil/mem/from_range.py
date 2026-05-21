@@ -3,7 +3,7 @@ from subprocess import run
 import click
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 def expand_node_range(prefix: str, start: int, stop: int):
@@ -21,9 +21,9 @@ def from_range(prefix: str, start: int, stop: int, sbatch_script: str, execute: 
 	for node in expand_node_range(prefix, start, stop):
 		if execute:
 			run(["sbatch", "-w", node, sbatch_script])
-			log.log("Mem From Range", f"sbatch -w {node} {sbatch_script}", log_level=log.DEBUG.STATUS)
+			log.write("Mem From Range", f"sbatch -w {node} {sbatch_script}", log_level=LOG.STATUS)
 		else:
-			log.log("Mem From Range", f"Would sbatch -w {node} {sbatch_script}", log_level=log.DEBUG.INFO)
+			log.write("Mem From Range", f"Would sbatch -w {node} {sbatch_script}", log_level=LOG.INFO)
 
 
 if __name__ == "__main__":

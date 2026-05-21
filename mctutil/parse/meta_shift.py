@@ -23,7 +23,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 yaml = YAML()
 
@@ -162,7 +162,7 @@ def cleanup_empty_history(drive):
 	for history in list(drive.rglob("*history")):
 		for inner_dir in history.iterdir():
 			if inner_dir.is_dir() and not bool(len(list(inner_dir.iterdir()))):
-				log.log("Meta Shift", f"Removing empty {inner_dir}", log_level=log.DEBUG.STATUS)
+				log.write("Meta Shift", f"Removing empty {inner_dir}", log_level=LOG.STATUS)
 				inner_dir.rmdir()
 
 
@@ -223,8 +223,8 @@ def run_meta_shift(
 					sheet,
 				)
 		except IndexError as ex:
-			log.log("Meta Shift", f"{sample_conf}: {ex}: {traceback.format_exc()}",
-					log_level=log.DEBUG.ERROR)
+			log.write("Meta Shift", f"{sample_conf}: {ex}: {traceback.format_exc()}",
+					log_level=LOG.ERROR)
 		if sleep_seconds > 0:
 			sleep(sleep_seconds)
 

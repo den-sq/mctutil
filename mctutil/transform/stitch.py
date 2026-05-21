@@ -6,7 +6,7 @@ import numpy as np
 import tifffile as tf
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.mem import SharedNP, ProjOrder
 
 
@@ -98,7 +98,7 @@ class SampleSet():
 def stitch_single(samples, overlaps, new_dim, stitch_output, x, execute=True):
 	output_path = Path(stitch_output, f"AAA590_Stitched_{x}.tif")
 	if not execute:
-		log.log("Stitch", f"Would write {output_path}", log_level=log.DEBUG.INFO)
+		log.write("Stitch", f"Would write {output_path}", log_level=LOG.INFO)
 		return
 
 	stitched = np.zeros(new_dim, dtype=np.uint16)
@@ -130,21 +130,21 @@ def stitch_samples(samples, overlaps, stitch_output, execute=True):
 	for s in samples:
 		s.del_proj()
 
-	log.log("Dimension", new_dim)
+	log.write("Dimension", new_dim)
 
 	if execute:
 		Path(stitch_output).mkdir(parents=True, exist_ok=True)
 	else:
-		log.log("Stitch", f"Would create {stitch_output}", log_level=log.DEBUG.INFO)
+		log.write("Stitch", f"Would create {stitch_output}", log_level=LOG.INFO)
 
-	log.log("Output Dir", stitch_output)
+	log.write("Output Dir", stitch_output)
 
 	with Pool(50) as pool:
 		pool.starmap(stitch_single,
 					[(samples, overlaps, new_dim, stitch_output, x, execute)
 						for x in range(len(samples[0].projs))])
 
-	log.log("Stitching Complete",
+	log.write("Stitching Complete",
 			f"{len(samples[0].projs)} projections {'stitched' if execute else 'planned'}")
 
 
@@ -165,19 +165,19 @@ def stitch(sample, top_stitch, stitch_range, stitch_output, execute):
 	for s in sample:
 		s.half_width = target_width
 
-	log.log("Proj Shape", f"HW: {target_width}; P: {[s.proj.shape for s in sample]}")
+	log.write("Proj Shape", f"HW: {target_width}; P: {[s.proj.shape for s in sample]}")
 
 	# Stich the samples in reverse order if we're stitching starting at the top; simpler this way.
 	if top_stitch:
 		sample.reverse()
-		log.log("Reverse", "Reversed to handle top/bottom stitching.")
+		log.write("Reverse", "Reversed to handle top/bottom stitching.")
 
 	overlaps = []
 	stitch_scope = range(20, int(sample[0].proj.shape[0] * stitch_range))
 	for y in range(len(sample) - 1):
 		std_set = [(x, np.std(np.divide(sample[y].proj_bot(x), sample[y + 1].proj_top(x)))) for x in stitch_scope]
 		std_set.sort(key=lambda x: x[1])
-		log.log("Overlap", f"{std_set[0]}")
+		log.write("Overlap", f"{std_set[0]}")
 
 		overlaps.append(std_set[0][0])
 

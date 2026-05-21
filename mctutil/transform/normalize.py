@@ -8,7 +8,7 @@ import psutil
 import tifffile as tf
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared.cli import FRANGE
 from mctutil.shared.mem import SharedNP, ProjOrder
 from mctutil.shared.np_convert import np_convert
@@ -29,15 +29,15 @@ def normalize(image_mem, index, bottom_threshold, top_threshold, thread_max):
 		floor = np.percentile(image, bottom_threshold)
 		ceiling = np.percentile(image, top_threshold)
 
-		log.log('Normalization',
+		log.write('Normalization',
 			f"{np.min(image)}-{np.max(image)}: {bottom_threshold}-{top_threshold} is {floor:.4g}-{ceiling:.4g}",
-			log_level=log.DEBUG.INFO)
+			log_level=LOG.INFO)
 
 		with Pool(thread_max) as pool:
 			pool.starmap(norm_helper, [(image_mem, i, floor, ceiling) for i in index])
-		log.log('Normalization',
+		log.write('Normalization',
 				f"{bottom_threshold} to {top_threshold}: {floor:.4g} to {ceiling:.4g} {(ceiling - floor):.4g}",
-				log_level=log.DEBUG.INFO)
+				log_level=LOG.INFO)
 
 
 def convert(source_mem, target_mem, i, j):
@@ -61,9 +61,9 @@ def mem_write(mem: SharedNP, path: PathLike, i, dtype, execute=True):
 	with mem[i] as out_data:
 		if execute:
 			tf.imwrite(path, np_convert(dtype, out_data), dtype=dtype)
-			log.log("File Written", path.name)
+			log.write("File Written", path.name)
 		else:
-			log.log("Dry Run", f"Would write {path.name}")
+			log.write("Dry Run", f"Would write {path.name}")
 
 
 @click.command()
@@ -83,27 +83,27 @@ def norm(normalize_over, data_dir, output_dir, processes, execute):
 	inputs = sorted([x for x in Path(data_dir).iterdir() if ".tif" in x.name])
 	batched_input = list(batch(inputs, processes))
 
-	log.log("Initialize", "Inputs Batched")
+	log.write("Initialize", "Inputs Batched")
 
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes, tif.pages[0].shape[0], tif.pages[0].shape[1])
 		dtype = tif.pages[0].dtype
 
-	log.log("Initialize", "Tiff Dimensions Fetched")
+	log.write("Initialize", "Tiff Dimensions Fetched")
 
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:
 		for input_set in batched_input:
 			active_indices = list(range(len(input_set)))
 			with Pool(processes) as pool:
 				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in active_indices])
-			log.log("Image Load", f"{len(active_indices)} Images Loaded")
+			log.write("Image Load", f"{len(active_indices)} Images Loaded")
 			normalize(norm_mem, active_indices, normalize_over.start, normalize_over.stop, processes)
 			with Pool(processes) as pool:
 				pool.starmap(
 					mem_write,
 					[(norm_mem, Path(output_dir, input_set[i].name), i, dtype, execute) for i in active_indices],
 				)
-			log.log("Image Writing", f"{len(active_indices)} Images {'Written' if execute else 'Planned'}")
+			log.write("Image Writing", f"{len(active_indices)} Images {'Written' if execute else 'Planned'}")
 
 
 if __name__ == '__main__':

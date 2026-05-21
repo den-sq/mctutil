@@ -8,7 +8,7 @@ import click
 import ipyslurm
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 # Names of shared memory to be script-specific (for now)
 shm = {
@@ -63,8 +63,8 @@ def mem_clean(shared_base, apply, apply_kmp):
 					clean_target = shared_memory.SharedMemory(name=mem_name)
 					clean_target.close()
 					clean_target.unlink()
-				log.log("Mem Clean", f"{host}:{mem_name}:{apply}",
-						log_level=log.DEBUG.STATUS if apply else log.DEBUG.INFO)
+				log.write("Mem Clean", f"{host}:{mem_name}:{apply}",
+						log_level=LOG.STATUS if apply else LOG.INFO)
 			elif mem_name[:len(other_shm)] == other_shm:
 				if apply_kmp:
 					try:
@@ -73,8 +73,8 @@ def mem_clean(shared_base, apply, apply_kmp):
 						clean_target.unlink()
 					except FileNotFoundError:
 						pass
-					log.log("Mem Clean", f"{host}:{mem_name}:{apply}",
-							log_level=log.DEBUG.STATUS if apply else log.DEBUG.INFO)
+					log.write("Mem Clean", f"{host}:{mem_name}:{apply}",
+							log_level=LOG.STATUS if apply else LOG.INFO)
 
 
 @click.group()
@@ -149,7 +149,7 @@ python -X pycache_prefix=~/.pycache ~/mem/clean.py {param_str} clean
 			'--partition', partition,
 			'--nodes', str(len(nodes))
 ])
-			log.log("Mem Clean", f"Job {partition}:{res}", log_level=log.DEBUG.STATUS)
+			log.write("Mem Clean", f"Job {partition}:{res}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ import tifffile as tf
 from tomopy import circ_mask
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared import cli
 from mctutil.shared.cli import FRANGE, CROP_NUMBER
 from mctutil.shared.mem import SharedNP, ProjOrder
@@ -29,13 +29,13 @@ def normalize(image_mem, part, floor, ceiling):
 def normalize_calc(image_mem, index, bottom_threshold, top_threshold, slice):
 	with image_mem[index] as image:
 		im_part = (np.s_[:],) + slice
-		log.log("Normalize Setup", f"{image.shape}:{im_part}")
+		log.write("Normalize Setup", f"{image.shape}:{im_part}")
 		floor = np.percentile(image[im_part], bottom_threshold)
 		ceiling = np.percentile(image[im_part], top_threshold)
-		log.log("Normalization Setup", f"{image.dtype}:{image.dtype.type}")
-		log.log('Normalization Setup',
+		log.write("Normalization Setup", f"{image.dtype}:{image.dtype.type}")
+		log.write('Normalization Setup',
 			f"{np.min(image)}-{np.max(image)}: {bottom_threshold}-{top_threshold} is {floor:.4g}-{ceiling:.4g}",
-			log_level=log.DEBUG.INFO)
+			log_level=LOG.INFO)
 
 	return floor, ceiling
 
@@ -61,14 +61,14 @@ def memreader(mem, i, path):
 def mem_write(mem: SharedNP, path: PathLike, i, xy_slice, dtype, compression):
 	"""Writes to disk in distributed fashion."""
 	with mem[i] as out_data:
-		log.log("Write Target", f"{path}")
+		log.write("Write Target", f"{path}")
 		tf.imwrite(path, np_convert(dtype, out_data[xy_slice]), dtype=dtype, compression=compression)
 
 
 def bin_write(mem: SharedNP, path: PathLike, i: int, xy_slice, dtype, bin_power: int, compression: int):
 	"""Bins data via linear interpolation in the x-y dimension."""
 	with mem[i] as out_data:
-		log.log("Write Target", f"{path}")
+		log.write("Write Target", f"{path}")
 		new_shape = (out_data.shape[0] / 2, out_data.shape[1] / 2)
 		resized = cv2.resize(out_data[xy_slice], new_shape, interpolation=cv2.INTER_AREA)
 		tf.imwrite(path, np_convert(dtype, resized), dtype=dtype, compression=compression)
@@ -109,7 +109,7 @@ def norm(  # noqa: C901
 	normalize_interval = int(np.ceil(len(inputs) / processes))
 	batched_input = list(batch(inputs, processes, mips_offset))
 
-	log.log("Initialize", f"Inputs Batched; Normalize Interval {normalize_interval}")
+	log.write("Initialize", f"Inputs Batched; Normalize Interval {normalize_interval}")
 
 	with tf.TiffFile(inputs[0]) as tif:
 		mem_shape = ProjOrder(processes + mips_offset, tif.pages[0].shape[0], tif.pages[0].shape[1])
@@ -124,9 +124,9 @@ def norm(  # noqa: C901
 			out_dim = np.s_[int(dim[0] * top_trim):int(dim[0] * (1 - bottom_trim)),
 				int(dim[1] * left_trim):int(dim[1] * (1 - right_trim))]
 
-		log.log("Dimensions", f"{dim}-{out_dim}")
+		log.write("Dimensions", f"{dim}-{out_dim}")
 
-	log.log("Initialize", "Tiff Dimensions Fetched")
+	log.write("Initialize", "Tiff Dimensions Fetched")
 
 	if circ_mask_ratio:
 		actual_start = normalize_over.start + 100 * (1.0 - np.pi * ((circ_mask_ratio / 2) ** 2))
@@ -136,17 +136,17 @@ def norm(  # noqa: C901
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:
 		with Pool(processes) as pool:
 			image_count = len(inputs) // normalize_interval
-			log.log("Image Load", f"{len(inputs)}:{normalize_interval}:{processes}:{len(inputs) // normalize_interval}")
+			log.write("Image Load", f"{len(inputs)}:{normalize_interval}:{processes}:{len(inputs) // normalize_interval}")
 
 			pool.starmap(memreader, [(norm_mem, i, inputs[j]) for i, j in enumerate(range(0, len(inputs), normalize_interval))])
-			log.log("Image Load",
+			log.write("Image Load",
 				f"{len(range(0, len(inputs), len(inputs) // normalize_interval))}|{normalize_interval}"
 				" Images Loaded For Normalization")
 
 			if circ_mask_ratio:
 				with norm_mem as mips_mem:
 					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio, val=np.min(mips_mem[0:image_count]))
-				log.log("Image Masking", f"Images Masked at {circ_mask_ratio}")
+				log.write("Image Masking", f"Images Masked at {circ_mask_ratio}")
 
 			floor, ceiling = normalize_calc(norm_mem, np.s_[0:image_count], actual_start, normalize_over.stop, np.s_[:, :])
 
@@ -156,15 +156,15 @@ def norm(  # noqa: C901
 			try:
 				with Pool(processes) as pool:
 					pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
-				log.log("Image Load", f"{len(indices)}|{len(input_set)} Images Loaded")
+				log.write("Image Load", f"{len(indices)}|{len(input_set)} Images Loaded")
 			except Exception as ex:
-				log.log("Image Load", f"Fail: {ex}")
+				log.write("Image Load", f"Fail: {ex}")
 				continue
 
 			if circ_mask_ratio:
 				with norm_mem as mips_mem:
 					circ_mask(mips_mem, axis=0, ratio=circ_mask_ratio, val=floor)
-				log.log("Image Masking", f"Images Masked at {circ_mask_ratio}")
+				log.write("Image Masking", f"Images Masked at {circ_mask_ratio}")
 
 			if mips > 1:
 				with norm_mem as mips_mem:
@@ -178,15 +178,15 @@ def norm(  # noqa: C901
 			with Pool(processes) as pool:
 				pool.starmap(normalize, [(norm_mem, i, floor, ceiling) for i in indices[mips_offset:]])
 
-			log.log("Image Normalization",
+			log.write("Image Normalization",
 				f"{len(indices[mips_offset:])} Images Normalized at {floor:.4g} to {ceiling:.4g} over {(ceiling - floor):.4g}")
 
 			with Pool(processes) as pool:
 				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, out_dim, out_dtype.nptype, compression)
 								for i in indices[mips_offset:]])
 
-			log.log("Image Writing", f"{len([i for i in indices[mips_offset:]])} Images Written")
-	log.log("Complete")
+			log.write("Image Writing", f"{len([i for i in indices[mips_offset:]])} Images Written")
+	log.write("Complete")
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@ from pathlib import Path
 import click
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -21,10 +21,10 @@ def prune_empty(pattern: str, execute: bool, root: Path):
 		for inner_dir in outer.iterdir():
 			if inner_dir.is_dir() and not any(inner_dir.iterdir()):
 				if execute:
-					log.log("Prune Empty", f"Removing empty {inner_dir}", log_level=log.DEBUG.STATUS)
+					log.write("Prune Empty", f"Removing empty {inner_dir}", log_level=LOG.STATUS)
 					inner_dir.rmdir()
 				else:
-					log.log("Prune Empty", f"Would remove empty {inner_dir}", log_level=log.DEBUG.INFO)
+					log.write("Prune Empty", f"Would remove empty {inner_dir}", log_level=LOG.INFO)
 
 
 if __name__ == "__main__":

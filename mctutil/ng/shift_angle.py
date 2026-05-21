@@ -3,7 +3,7 @@ from pathlib import Path
 
 import click
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -23,7 +23,7 @@ def shift_angle(json_file, json_result, make_ortho):
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	log.log("Shift Angle", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
+	log.write("Shift Angle", f"Loaded {json_file}", log_level=LOG.STATUS)
 
 	json_data["projectionOrientation"] = [
 		0.3462526500225067,
@@ -32,7 +32,7 @@ def shift_angle(json_file, json_result, make_ortho):
 		0.8535001277923584
 	]
 
-	log.log("Shift Angle", "Orientation updated", log_level=log.DEBUG.STATUS)
+	log.write("Shift Angle", "Orientation updated", log_level=LOG.STATUS)
 
 	if make_ortho:
 		if isinstance(json_data["layout"], str):
@@ -42,12 +42,12 @@ def shift_angle(json_file, json_result, make_ortho):
 			}
 		else:
 			json_data["layout"]["orthographicProjection"] = True
-		log.log("Shift Angle", "Made orthographic, if not already.", log_level=log.DEBUG.STATUS)
+		log.write("Shift Angle", "Made orthographic, if not already.", log_level=LOG.STATUS)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	log.log("Shift Angle", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
+	log.write("Shift Angle", f"Wrote {json_result}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

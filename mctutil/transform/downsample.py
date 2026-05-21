@@ -6,7 +6,7 @@ import tifffile as tf
 
 
 from mctutil.shared import cli
-from mctutil.shared import log
+from mctutil.shared.log import log
 from mctutil.shared.np_convert import np_convert
 
 
@@ -22,7 +22,7 @@ def downsample(data_dir, output_dir, out_dtype):
 	for path in Path(data_dir).iterdir():
 		in_img = tf.imread(path)
 		tf.imwrite(Path(out_dir, path.name), np_convert(dtype, in_img), dtype=dtype)
-		log.log("File Written", path.name)
+		log.write("File Written", path.name)
 
 
 if __name__ == "__main__":

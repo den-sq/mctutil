@@ -6,13 +6,13 @@ import numpy as np
 import tifffile as tf
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 def channelize_file(randomize, source, target_dir, execute=True):
 	target_path = target_dir.joinpath(source.name)
 	if not execute:
-		log.log("Channelize", f"Would write {target_path}", log_level=log.DEBUG.INFO)
+		log.write("Channelize", f"Would write {target_path}", log_level=LOG.INFO)
 		return
 
 	source_data = tf.imread(source)
@@ -32,7 +32,7 @@ def channelize_file(randomize, source, target_dir, execute=True):
 		target_data = np.repeat(source_data, 3).reshape(new_shape)
 
 	tf.imwrite(target_path, target_data.astype(source_data.dtype))
-	log.log("Channelize", f"{target_path} written", log_level=log.DEBUG.STATUS)
+	log.write("Channelize", f"{target_path} written", log_level=LOG.STATUS)
 
 
 @click.command()
@@ -45,7 +45,7 @@ def channelize(randomize, execute, root_path, target_path):
 	if execute:
 		target_path.mkdir(parents=True)
 	else:
-		log.log("Channelize", f"Would create {target_path}", log_level=log.DEBUG.INFO)
+		log.write("Channelize", f"Would create {target_path}", log_level=LOG.INFO)
 	with Pool(12) as pool:
 		pool.starmap(channelize_file,
 					[(randomize, source, target_path, execute) for source in root_path.iterdir()])

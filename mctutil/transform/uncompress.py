@@ -4,7 +4,7 @@ import click
 from natsort import natsorted
 import tifffile as tf
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -21,10 +21,10 @@ def uncompress(execute: bool, image_path: Path):
 		if execute:
 			image = tf.imread(im_path)
 			tf.imwrite(im_path, image, compression=None)
-			log.log("Uncompress", f"Rewrote {im_path}", log_level=log.DEBUG.STATUS)
+			log.write("Uncompress", f"Rewrote {im_path}", log_level=LOG.STATUS)
 		else:
-			log.log("Uncompress", f"Would rewrite {im_path}", log_level=log.DEBUG.INFO)
-	log.log("Uncompress", f"{len(images)} files {'rewritten' if execute else 'planned'}", log_level=log.DEBUG.STATUS)
+			log.write("Uncompress", f"Would rewrite {im_path}", log_level=LOG.INFO)
+	log.write("Uncompress", f"{len(images)} files {'rewritten' if execute else 'planned'}", log_level=LOG.STATUS)
 
 
 if __name__ == "__main__":

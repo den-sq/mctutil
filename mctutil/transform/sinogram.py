@@ -11,7 +11,7 @@ from skimage.restoration import denoise_nl_means, estimate_sigma
 import tifffile as tf
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 from mctutil.shared import cli
 from mctutil.shared.io_helpers import FLAT, distribute_read
 from mctutil.shared.mem import SharedNP, ProjOrder, SinoOrder
@@ -49,9 +49,9 @@ def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = N
 				tf.imwrite(path, sino[i, :, :])
 			else:
 				tf.imwrite(path, out_type.convert_ar(sino[i, :, :]))
-			log.log("File Written", str(path))
+			log.write("File Written", str(path))
 		else:
-			log.log("Dry Run", f"Would write {path}")
+			log.write("Dry Run", f"Would write {path}")
 
 
 def image_bounds(sino_mem: SharedNP, i: int = None):
@@ -60,7 +60,7 @@ def image_bounds(sino_mem: SharedNP, i: int = None):
 			return np.array([np.min(sino), np.max(sino)])
 	with sino_mem[i] as sino:
 		if np.max(sino) > 2:
-			log.log("Bounds Check", f"Peak value {np.max(sino):.4g}", log_level=log.DEBUG.INFO)
+			log.write("Bounds Check", f"Peak value {np.max(sino):.4g}", log_level=LOG.INFO)
 		return np.array([np.min(sino), np.max(sino)])
 
 
@@ -138,7 +138,7 @@ def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: i
 
 	sino_shape = SinoOrder(process_count, len(image_paths), pj["x"])
 	proj_shape = ProjOrder(len(image_paths), process_count, pj["x"])
-	log.log("Setup", f"{pj}")
+	log.write("Setup", f"{pj}")
 
 	with (
 		SharedNP(
@@ -157,7 +157,7 @@ def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: i
 		for x in sino_split:
 			window = range(x, min(x + process_count, sino_split.stop))
 			internal_window = range(0, len(window))
-			log.log("Cycle Start", f"Window {window}; Internal {internal_window}; Shape {sino_shape} from {proj_shape}")
+			log.write("Cycle Start", f"Window {window}; Internal {internal_window}; Shape {sino_shape} from {proj_shape}")
 			distribute_read(
 				input_mem,
 				pj,
@@ -167,7 +167,7 @@ def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: i
 				thread_max=process_count,
 				sino_order=False,
 			)
-			log.log("Files Read", f"Window {window}; Shape {proj_shape}")
+			log.write("Files Read", f"Window {window}; Shape {proj_shape}")
 			with Pool(process_count) as pool:
 				pool.starmap(
 					weighted_normalize,
@@ -182,10 +182,10 @@ def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: i
 					sino_write,
 					[(sino_mem, output_paths[i + window.start], i, None, execute) for i in internal_window],
 				)
-			log.log(
+			log.write(
 				"Files Written",
 				f"{output_dir} : {window} ({'written' if execute else 'planned'})",
-				log.DEBUG.TIME,
+				LOG.TIME,
 			)
 
 
@@ -211,7 +211,7 @@ def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: 
 
 	sino_shape = SinoOrder(process_count, pj["y"], pj["x"])
 	bounds = []
-	log.log("Setup", f"{pj}")
+	log.write("Setup", f"{pj}")
 
 	if min_val is None or max_val is None:
 		with SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem:
@@ -224,7 +224,7 @@ def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: 
 		bounds = np.asarray(bounds)
 		min_val = np.min(bounds[:, 0])
 		max_val = np.max(bounds[:, 1])
-		log.log("Final Bounds Calculated", f"{min_val} : {max_val}", log.DEBUG.TIME)
+		log.write("Final Bounds Calculated", f"{min_val} : {max_val}", LOG.TIME)
 
 	with SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem:
 		for x in range(0, len(image_paths), process_count):
@@ -239,10 +239,10 @@ def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: 
 					sino_write,
 					[(sino_mem, output_paths[i + window.start], i, None, execute) for i in internal_window],
 				)
-			log.log(
+			log.write(
 				"Files Written",
 				f"{output_dir} : {window} ({'written' if execute else 'planned'})",
-				log.DEBUG.TIME,
+				LOG.TIME,
 			)
 
 

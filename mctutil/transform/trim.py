@@ -5,7 +5,8 @@ import click
 import tifffile as tf
 
 
-from mctutil.shared import cli, log
+from mctutil.shared import cli
+from mctutil.shared.log import log, LOG  # noqa: F401
 
 
 def write_crop(input, output, crop, compress, execute=True):
@@ -15,9 +16,9 @@ def write_crop(input, output, crop, compress, execute=True):
 			tf.imwrite(output, img[crop], compression=8)
 		else:
 			tf.imwrite(output, img[crop])
-		log.log("File Written", f"{output.name}: ({img.shape}>{crop})")
+		log.write("File Written", f"{output.name}: ({img.shape}>{crop})")
 	else:
-		log.log("Dry Run", f"Would write {output.name}: ({img.shape}>{crop})")
+		log.write("Dry Run", f"Would write {output.name}: ({img.shape}>{crop})")
 
 
 @click.command

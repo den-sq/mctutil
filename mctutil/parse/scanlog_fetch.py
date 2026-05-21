@@ -4,7 +4,7 @@ from shutil import copy
 import click
 
 
-from mctutil.shared import log
+from mctutil.shared.log import log, LOG
 
 
 @click.command()
@@ -15,7 +15,7 @@ def scanlog_fetch(execute, root_dir):
 	if execute:
 		Path("logs").mkdir(exist_ok=True)
 	else:
-		log.log("Scanlog Fetch", "Would create logs/", log_level=log.DEBUG.INFO)
+		log.write("Scanlog Fetch", "Would create logs/", log_level=LOG.INFO)
 	for dir_name in root_dir:
 		for fullpath in Path(dir_name).rglob("scanlog.txt"):
 			software_trigger_scans = ["_post", "_pre", "_uncrop", "_crop", "_focus", "_step"]
@@ -24,12 +24,12 @@ def scanlog_fetch(execute, root_dir):
 					target = Path("logs", f"{fullpath.parent.name}_scanlog.txt")
 					if execute:
 						copy(fullpath, target)
-						log.log("Scanlog Fetch", f"{fullpath.parent.name}:{fullpath.stat().st_size}",
-								log_level=log.DEBUG.STATUS)
+						log.write("Scanlog Fetch", f"{fullpath.parent.name}:{fullpath.stat().st_size}",
+								log_level=LOG.STATUS)
 					else:
-						log.log("Scanlog Fetch",
+						log.write("Scanlog Fetch",
 								f"Would copy {fullpath} -> {target} (size {fullpath.stat().st_size})",
-								log_level=log.DEBUG.INFO)
+								log_level=LOG.INFO)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from typing import TextIO
 import numpy as np
 import psutil
 
-from mctutil.shared.log import log, DEBUG, attach_func
+from mctutil.shared.log import log, LOG
 
 NPString = namedtuple("NPString", 'T')
 SinoOrder = namedtuple("SinoOrder", ['Y', 'Theta', 'X'])
@@ -72,9 +72,9 @@ class SharedNP:
 				stop = self.size([buffer_index[-1] + 1])
 				self.__shape = self.__shape._make([len(buffer_index)] + list(self.__shape[1:]))
 			else:
-				log("Shared Memory", "Please use only single contiguous ranges for memory allocation;"
+				log.write("Shared Memory", "Please use only single contiguous ranges for memory allocation;"
 										+ f" {buffer_index} for {self.__name}, shape {self.__shape} failed.",
-										log_level=DEBUG.ERROR)
+										log_level=LOG.ERROR)
 				raise MemoryError
 			return slice(start, stop)
 
@@ -86,22 +86,23 @@ class SharedNP:
 		try:
 			shared_memory.SharedMemory(create=True, size=self.__full_size, name=self.__name)
 		except FileExistsError:
-			log("Shared Memory", f"Shared Memory Name {self.__name} Pre-Existed", log_level=DEBUG.INFO)
+			log.write("Shared Memory", f"Shared Memory Name {self.__name} Pre-Existed", log_level=LOG.INFO)
 			mem = shared_memory.SharedMemory(name=self.__name)
 			if recycle:
 				mem.close()
 				mem.unlink()
 				mem = shared_memory.SharedMemory(create=True, size=self.__full_size, name=self.__name)
-				log("Shared Memory", f"Shared Memory Name {self.__name} Recreated", log_level=DEBUG.INFO)
+				log.write("Shared Memory", f"Shared Memory Name {self.__name} Recreated", log_level=LOG.INFO)
 			elif len(mem.buf) < self.__ar_size:
-				log("Shared Memory", f"Existing {self.__name} Memory Too Small for Array ({len(mem.buf)} vs {self.__ar_size})",
-					log_level=DEBUG.ERROR)
+				log.write("Shared Memory",
+					f"Existing {self.__name} Memory Too Small for Array ({len(mem.buf)} vs {self.__ar_size})",
+					log_level=LOG.ERROR)
 				raise MemoryError
 			else:
 				if len(mem.buf) < self.__full_size:
-					log("Shared Memory", f"Existing {self.__name} Size {len(mem.buf)} Less Than Full Size {self.__full_size}.",
-							log_level=DEBUG.WARN)
-				log("Shared Memory", f"Using Existing {self.__name} Size {len(mem.buf)}", log_level=DEBUG.INFO)
+					log.write("Shared Memory", f"Existing {self.__name} Size {len(mem.buf)} Less Than Full Size {self.__full_size}.",
+							log_level=LOG.WARN)
+				log.write("Shared Memory", f"Using Existing {self.__name} Size {len(mem.buf)}", log_level=LOG.INFO)
 		self.__unlink = True
 
 	def __load(self):
@@ -110,7 +111,7 @@ class SharedNP:
 			self.__sm = shared_memory.SharedMemory(name=self.__name)
 			return np.ndarray(shape=self.__shape, dtype=self.__dtype, buffer=self.__sm.buf[self.__slice])
 		except FileNotFoundError:
-			log("Shared Memory", f"Shared Memory {self.__name} Has Not Been Created", log_level=DEBUG.ERROR)
+			log.write("Shared Memory", f"Shared Memory {self.__name} Has Not Been Created", log_level=LOG.ERROR)
 			return None
 
 	def __branch(self, buffer_index=None, dtype=None, transpose=False, shape=None):
@@ -149,9 +150,9 @@ class SharedNP:
 		self.close()
 		if self.__sm is not None:
 			self.__sm.unlink()
-			log("Shared Memory", f"Shared Memory {self.__name} Unlinked", log_level=DEBUG.STATUS)
+			log.write("Shared Memory", f"Shared Memory {self.__name} Unlinked", log_level=LOG.STATUS)
 		else:
-			log("Shared Memory", f"Shared Memory {self.__name} Is None", log_level=DEBUG.STATUS)
+			log.write("Shared Memory", f"Shared Memory {self.__name} Is None", log_level=LOG.STATUS)
 
 	def transpose(self, order=[1, 0], change_data=False):
 		if change_data:
@@ -213,11 +214,11 @@ class SharedNP:
 		"""Context handler to close shared memory.  Unlinks if this created the memory."""
 		self.close()
 		if self.__unlink:
-			log("Shared Memory", f"Unlinking {self.name}", log_level=DEBUG.INFO)
+			log.write("Shared Memory", f"Unlinking {self.name}", log_level=LOG.INFO)
 			self.unlink()
 		if exc_type is not None:
-			log("Shared Memory", f"Exception ({exc_type}: {exc_value})", log_level=DEBUG.ERROR)
-			log("Shared Memory", traceback, log_level=DEBUG.ERROR)
+			log.write("Shared Memory", f"Exception ({exc_type}: {exc_value})", log_level=LOG.ERROR)
+			log.write("Shared Memory", traceback, log_level=LOG.ERROR)
 
 	def __del__(self):
 		"""Delete closes; unlinks only if this created the memory.."""
@@ -242,7 +243,7 @@ def cleanup_mem(*shm_objects):
 			shm.unlink()
 
 
-def exit_cleanly(step: str, *shm_objects, return_code: int = 0, statement: str = '', log_level: DEBUG = DEBUG.TIME,
+def exit_cleanly(step: str, *shm_objects, return_code: int = 0, statement: str = '', log_level: LOG = LOG.TIME,
 					out: TextIO = stdout, throw: Exception = None):
 	""" Exit while cleaning up shared memory.
 
@@ -250,7 +251,7 @@ def exit_cleanly(step: str, *shm_objects, return_code: int = 0, statement: str =
 		:param shm_objects: Shared memory objects to shut down.
 		:param return_code: Process return code to send.
 	"""
-	log(step, statement, log_level, out)
+	log.write(step, statement, log_level, out)
 	cleanup_mem(*shm_objects)
 
 	sleep(MEM_INTERVAL_TIMER)
@@ -268,7 +269,7 @@ def mem_monitor(mem_file, mem_store, pid):
 			while last_step.strip() not in ["Error Exit", "Script Completion", "Keyboard Exit", "Exit",
 											"Center Find Done", "Scan Path Failure"]:
 				last_step = last_step_arr.tobytes().decode()
-				log(last_step, out=out, pid=pid)
+				log.write(last_step, out=out, pid=pid)
 				sleep(MEM_INTERVAL_TIMER)
 
 
@@ -282,7 +283,7 @@ def init_mem_tracker():
 	last_step = SharedNP(dtype=np.uint8, name=f"last_step_{psutil.Process().pid}", shape=NPString(T=20), create=False)
 	with last_step.create() as last_step_arr:
 		last_step_arr[:] = np.frombuffer("Script Inactive     ".encode(), dtype=last_step.dtype)
-	attach_func(__update_last_step)
+	log.attach_func(__update_last_step)
 	return last_step
 
 
