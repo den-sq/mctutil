@@ -20,7 +20,11 @@ shm = {
 	"fsm": "flat",
 	"ysm": "y_rot",
 	"pfm": "phase",
-	"log": "last_step"
+	"log": "last_step",
+	"ssm": "sino",
+	"wsm": "work",
+	"csm": "center",
+	"inp": "input",
 }
 
 other_shm = "__KMP_REGISTERED_LIB"

@@ -7,4 +7,4 @@
 module load miniconda/3
 source activate recon
 
-python clean_shared.py False
+python clean.py clean
