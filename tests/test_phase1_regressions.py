@@ -20,7 +20,7 @@ class _FakeMem:
 
 
 def test_scanlog_fetch_creates_logs_dir_and_copies_valid_scanlogs(load_module, monkeypatch, tmp_path):
-	module = load_module("parsing/scanlog_fetch.py")
+	module = load_module("mctutil/parse/scanlog_fetch.py")
 	root_dir = tmp_path / "scan"
 	scan_dir = root_dir / "sample"
 	scan_dir.mkdir(parents=True)
@@ -36,13 +36,13 @@ def test_scanlog_fetch_creates_logs_dir_and_copies_valid_scanlogs(load_module, m
 
 
 def test_normalize_processes_option_is_an_int_param(load_module):
-	module = load_module("transform/normalize.py")
+	module = load_module("mctutil/transform/normalize.py")
 	process_option = next(param for param in module.norm.params if param.name == "processes")
 	assert isinstance(process_option.type, click.types.IntParamType)
 
 
 def test_df_write_tiff_uses_source_title_for_output_name(load_module, monkeypatch, tmp_path):
-	module = load_module("transform/df_write_tiff.py")
+	module = load_module("mctutil/transform/df_write_tiff.py")
 	source_path = tmp_path / "source.ors"
 	source_path.write_text("placeholder")
 	output_dir = tmp_path / "out"
@@ -76,7 +76,7 @@ def test_df_write_tiff_uses_source_title_for_output_name(load_module, monkeypatc
 
 
 def test_hdf_convert_finds_raw_subdir_with_posix_glob(load_module, tmp_path):
-	module = load_module("transform/hdf_convert.py")
+	module = load_module("mctutil/transform/hdf_convert.py")
 	folder = tmp_path / "proj"
 	raw_dir = folder / "raw"
 	raw_dir.mkdir(parents=True)
@@ -88,7 +88,7 @@ def test_hdf_convert_finds_raw_subdir_with_posix_glob(load_module, tmp_path):
 
 
 def test_s3upload_does_not_require_client_close(load_module, monkeypatch, tmp_path):
-	module = load_module("transport/s3upload.py")
+	module = load_module("mctutil/transport/s3upload.py")
 	source_dir = tmp_path / "input"
 	source_dir.mkdir()
 	client_calls = []
@@ -101,7 +101,7 @@ def test_s3upload_does_not_require_client_close(load_module, monkeypatch, tmp_pa
 		def client(self, *_args, **_kwargs):
 			return DummyClient()
 
-	monkeypatch.setattr(module, "session", DummySession())
+	monkeypatch.setattr(module, "_session", DummySession())
 	monkeypatch.setattr(module, "upload_folder_to_s3_parallel", lambda *_args, **_kwargs: None)
 
 	module.s3upload.callback(Path("prefix"), "bucket", 4, False, True, source_dir, Path("target"))
@@ -110,7 +110,7 @@ def test_s3upload_does_not_require_client_close(load_module, monkeypatch, tmp_pa
 
 
 def test_layer_tag_retries_generated_intensity_until_unique(load_module, monkeypatch, tmp_path):
-	module = load_module("ng/layer_tag.py")
+	module = load_module("mctutil/ng/layer_tag.py")
 	source = {
 		"layers": [
 			{"name": "existing", "type": "annotation", "annotations": []},
@@ -140,13 +140,13 @@ def test_layer_tag_retries_generated_intensity_until_unique(load_module, monkeyp
 
 
 def test_image_bounds_returns_min_and_max(load_module):
-	module = load_module("transform/sinogram.py")
+	module = load_module("mctutil/transform/sinogram.py")
 	bounds = module.image_bounds(_FakeMem(np.array([[3, 8], [1, 5]], dtype=np.float32)))
 	assert np.array_equal(bounds, np.array([1, 8], dtype=np.float32))
 
 
 def test_layer_urlshift_updates_sources_in_place(load_module, tmp_path):
-	module = load_module("ng/layer_urlshift.py")
+	module = load_module("mctutil/ng/layer_urlshift.py")
 	source = {
 		"layers": [
 			{"name": "img", "type": "image", "source": "bucket|rest"},

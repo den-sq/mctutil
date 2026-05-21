@@ -6,6 +6,6 @@ main = LazyGroup(
 	name="sino",
 	help="Sinogram conversion and preprocessing workflows.",
 	lazy_subcommands={
-		"convert": "transform.sinogram:sino_convert",
+		"convert": "mctutil.transform.sinogram:sino_convert",
 	},
 )
