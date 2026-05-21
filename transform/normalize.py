@@ -74,10 +74,8 @@ def mem_write(mem: SharedNP, path: PathLike, i, dtype):
 def norm(normalize_over, data_dir, output_dir, processes):
 	log.start()
 
-	indices = list(range(processes))
-
 	Path(output_dir).mkdir(parents=True, exist_ok=True)
-	inputs = [x for x in Path(data_dir).iterdir() if ".tif" in x.name]
+	inputs = sorted([x for x in Path(data_dir).iterdir() if ".tif" in x.name])
 	batched_input = list(batch(inputs, processes))
 
 	log.log("Initialize", "Inputs Batched")
@@ -90,13 +88,14 @@ def norm(normalize_over, data_dir, output_dir, processes):
 
 	with SharedNP('Normalize_Mem', np.float32, mem_shape, create=True) as norm_mem:
 		for input_set in batched_input:
+			active_indices = list(range(len(input_set)))
 			with Pool(processes) as pool:
-				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in indices])
-			log.log("Image Load", f"{len(indices)} Images Loaded")
-			normalize(norm_mem, indices, normalize_over.start, normalize_over.stop, processes)
+				pool.starmap(memreader, [(norm_mem, i, input_set[i]) for i in active_indices])
+			log.log("Image Load", f"{len(active_indices)} Images Loaded")
+			normalize(norm_mem, active_indices, normalize_over.start, normalize_over.stop, processes)
 			with Pool(processes) as pool:
-				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, dtype) for i in indices])
-			log.log("Image Writing", f"{len(indices)} Images Written")
+				pool.starmap(mem_write, [(norm_mem, Path(output_dir, input_set[i].name), i, dtype) for i in active_indices])
+			log.log("Image Writing", f"{len(active_indices)} Images Written")
 
 
 if __name__ == '__main__':
