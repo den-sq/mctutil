@@ -1,3 +1,4 @@
+import atexit
 from collections import namedtuple
 from multiprocessing import shared_memory
 from sys import stdout
@@ -279,11 +280,35 @@ def __update_last_step(step, pid):
 	last_step[:] = np.frombuffer(step.ljust(20)[:20].encode(), dtype=np.uint8)
 
 
+def _unlink_tracker(name):
+	"""Best-effort unlink by name for the import-time mem_tracker segment.
+
+	`SharedNP.create()` returns a branch and never stores the underlying
+	`shared_memory.SharedMemory` object on the parent — so the parent's
+	close()/unlink() are no-ops. The OS-level segment persists. This
+	helper goes through `shared_memory.SharedMemory(name=...)` directly
+	so the unlink actually releases the segment that resource_tracker
+	is watching, silencing the "leaked shared_memory objects" warning
+	on shutdown.
+	"""
+	try:
+		seg = shared_memory.SharedMemory(name=name)
+		seg.close()
+		seg.unlink()
+	except FileNotFoundError:
+		pass
+
+
 def init_mem_tracker():
 	last_step = SharedNP(dtype=np.uint8, name=f"last_step_{psutil.Process().pid}", shape=NPString(T=20), create=False)
 	with last_step.create() as last_step_arr:
 		last_step_arr[:] = np.frombuffer("Script Inactive     ".encode(), dtype=last_step.dtype)
 	log.attach_func(__update_last_step)
+	# Allocated at module import (any leaf importing shared.mem inherits
+	# it). Without this, every CLI invocation that touches such a leaf —
+	# even `--help` — triggers a `resource_tracker: There appear to be 1
+	# leaked shared_memory objects` warning on shutdown.
+	atexit.register(_unlink_tracker, last_step.name)
 	return last_step
 
 
