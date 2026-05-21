@@ -3,6 +3,8 @@ from pathlib import Path
 
 import click
 
+from shared import log
+
 
 @click.command()
 @click.option("--json-file", "-j", type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
@@ -21,7 +23,7 @@ def shift_angle(json_file, json_result, make_ortho):
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	print("json loaded")
+	log.log("Shift Angle", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
 
 	json_data["projectionOrientation"] = [
 		0.3462526500225067,
@@ -30,7 +32,7 @@ def shift_angle(json_file, json_result, make_ortho):
 		0.8535001277923584
 	]
 
-	print("orientation updated")
+	log.log("Shift Angle", "Orientation updated", log_level=log.DEBUG.STATUS)
 
 	if make_ortho:
 		if isinstance(json_data["layout"], str):
@@ -40,12 +42,12 @@ def shift_angle(json_file, json_result, make_ortho):
 			}
 		else:
 			json_data["layout"]["orthographicProjection"] = True
-		print("Made orthographic, if not already.")
+		log.log("Shift Angle", "Made orthographic, if not already.", log_level=log.DEBUG.STATUS)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	print(f"new arrangement written to {json_result}")
+	log.log("Shift Angle", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":

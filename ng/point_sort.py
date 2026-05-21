@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from shared import log
 from shared.cli import DelimitedRecord
 
 
@@ -34,25 +35,25 @@ def point_sort(json_file: Path, json_result: Path, axis: int, source_annotations
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	print("json loaded")
+	log.log("Point Sort", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
 
 	annotation_names = [layer["name"] for layer in json_data["layers"]]
 
 	for pair in source_annotations:
 		if pair.name not in annotation_names:
-			print(f"Annotation {pair.name} missing.")
+			log.log("Point Sort", f"Annotation {pair.name} missing.", log_level=log.DEBUG.WARN)
 		else:
 			base_annotations = json_data["layers"][annotation_names.index(pair.name)]["annotations"]
 			sorted_annotations = sorted(base_annotations, key=lambda x: x['point'][axis])
 			final_annotations = sorted_annotations if pair.direction else reversed(sorted_annotations)
 			json_data["layers"][annotation_names.index(pair.name)]["annotations"] = list(final_annotations)
 
-	print("annotations updated")
+	log.log("Point Sort", "Annotations updated", log_level=log.DEBUG.STATUS)
 
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	print(f"new annotation written to {json_result}")
+	log.log("Point Sort", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":

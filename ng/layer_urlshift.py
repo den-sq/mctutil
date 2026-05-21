@@ -4,6 +4,8 @@ from pathlib import Path
 
 import click
 
+from shared import log
+
 
 def upd_layer(name, source, shifted_layers):
 	if isinstance(source, str):
@@ -37,7 +39,7 @@ def layer_urlshift(json_file: Path, json_result: Path):
 	with open(json_file) as json_handle:
 		json_data = json.load(json_handle)
 
-	print("json loaded")
+	log.log("Layer URLShift", f"Loaded {json_file}", log_level=log.DEBUG.STATUS)
 
 	shifted_layers = {layer["name"]: layer for layer in json_data["layers"]}
 	for name, layer in shifted_layers.items():
@@ -49,7 +51,7 @@ def layer_urlshift(json_file: Path, json_result: Path):
 	with open(json_result, "w") as handle:
 		json.dump(json_data, handle)
 
-	print(f"new annotation written to {json_result}")
+	log.log("Layer URLShift", f"Wrote {json_result}", log_level=log.DEBUG.STATUS)
 
 
 if __name__ == "__main__":
