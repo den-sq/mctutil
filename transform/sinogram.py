@@ -26,21 +26,34 @@ def weighted_normalize(sino_mem: SharedNP, input_mem: SharedNP, flats_mem: Share
 					projection: int, projection_count: int, debug_folder: Path = None):
 	"""Normalizes single projection using weighted pre/post flats."""
 	with sino_mem[int_window] as sino, flats_mem as flats, input_mem as source:
-		dark_map = np.average(flats[FLAT.PREDARK.index:FLAT.POSTDARK.index + 1, window, :], axis=0,
-							weights=[projection_count - projection, projection])
-		gain_map = np.subtract(np.average(flats[FLAT.PREGAIN.index:FLAT.POSTGAIN.index + 1, window, :], axis=0,
-							weights=[projection_count - projection, projection]), dark_map)
+		dark_map = np.average(
+			flats[FLAT.PREDARK.index:FLAT.POSTDARK.index + 1, window, :],
+			axis=0,
+			weights=[projection_count - projection, projection],
+		)
+		gain_map = np.subtract(
+			np.average(
+				flats[FLAT.PREGAIN.index:FLAT.POSTGAIN.index + 1, window, :],
+				axis=0,
+				weights=[projection_count - projection, projection],
+			),
+			dark_map,
+		)
 		gain_map[gain_map == 0] = np.min(gain_map[gain_map != 0])
 		temp = np.subtract(source[projection, int_window, :].astype(sino_mem.dtype), dark_map)
 		sino[int_window, projection, :] = np.divide(temp, gain_map)
 
 
-def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = None):
+def sino_write(sino_mem: SharedNP, path: PathLike, i, out_type: cli.NumpyCLI = None, execute=True):
 	with sino_mem as sino:
-		if out_type is None:
-			tf.imwrite(path, sino[i, :, :])
+		if execute:
+			if out_type is None:
+				tf.imwrite(path, sino[i, :, :])
+			else:
+				tf.imwrite(path, out_type.convert_ar(sino[i, :, :]))
+			log.log("File Written", str(path))
 		else:
-			tf.imwrite(path, out_type.convert_ar(sino[i, :, :]))
+			log.log("Dry Run", f"Would write {path}")
 
 
 def image_bounds(sino_mem: SharedNP, i: int = None):
@@ -49,7 +62,7 @@ def image_bounds(sino_mem: SharedNP, i: int = None):
 			return np.array([np.min(sino), np.max(sino)])
 	with sino_mem[i] as sino:
 		if np.max(sino) > 2:
-			print(np.max(sino))
+			log.log("Bounds Check", f"Peak value {np.max(sino):.4g}", log_level=log.DEBUG.INFO)
 		return np.array([np.min(sino), np.max(sino)])
 
 
@@ -65,9 +78,15 @@ def minmaxscale(sino_mem, i, minval=None, maxval=None):
 def remove_outlier(sino_mem, i):
 	with sino_mem[i] as sino:
 		a_sigma_est = estimate_sigma(sino, channel_axis=None, average_sigmas=True)
-		sino[:, :] = denoise_nl_means(sino, patch_size=9, patch_distance=5,
-							fast_mode=True, sigma=0.001 * a_sigma_est,
-							preserve_range=False, channel_axis=None)
+		sino[:, :] = denoise_nl_means(
+			sino,
+			patch_size=9,
+			patch_distance=5,
+			fast_mode=True,
+			sigma=0.001 * a_sigma_est,
+			preserve_range=False,
+			channel_axis=None,
+		)
 
 
 def preprocess(sino_mem, i, minval=None, maxval=None):
@@ -86,15 +105,20 @@ def validate_mode(mode: str, flat_dir: Path | None):
 
 
 def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int, sectioning: int,
-			sino_range: range):
+			sino_range: range, execute=True):
 	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
 	segment_id = str(uuid.uuid4())
 	internal_dtype = np.float32
 
 	with tf.TiffFile(image_paths[0]) as tif:
 		page = tif.pages[0]
-		pj = {"dtype": page.dtype, "bytesize": page.dtype.itemsize, "offset": page.dataoffsets[0],
-				"x": page.shape[1], "y": page.shape[0]}
+		pj = {
+			"dtype": page.dtype,
+			"bytesize": page.dtype.itemsize,
+			"offset": page.dataoffsets[0],
+			"x": page.shape[1],
+			"y": page.shape[0],
+		}
 
 	if sino_range is None:
 		sino_split = range(0, pj["y"], process_count)
@@ -102,19 +126,32 @@ def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: i
 		sino_split = range(sino_range.start, sino_range.stop, process_count)
 
 	if sectioning:
-		output_paths = [output_dir.joinpath(f"section_{x - x % sectioning:03}_{x - x % sectioning + sectioning:03}",
-							f"sino_{x % sectioning:05}.tiff") for x in range(pj["y"])]
+		output_paths = [
+			output_dir.joinpath(
+				f"section_{x - x % sectioning:03}_{x - x % sectioning + sectioning:03}",
+				f"sino_{x % sectioning:05}.tiff",
+			)
+			for x in range(pj["y"])
+		]
 	else:
-		output_dir.mkdir(parents=True, exist_ok=True)
+		if execute:
+			output_dir.mkdir(parents=True, exist_ok=True)
 		output_paths = [output_dir.joinpath(f"sino_{x:05}.tiff") for x in range(pj["y"])]
 
 	sino_shape = SinoOrder(process_count, len(image_paths), pj["x"])
 	proj_shape = ProjOrder(len(image_paths), process_count, pj["x"])
 	log.log("Setup", f"{pj}")
 
-	with (SharedNP(f'flats_{segment_id}', pj["dtype"], ProjOrder(len(FLAT), pj["y"], pj["x"]), create=True) as flats_mem,
-			SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem,
-			SharedNP(f"input_{segment_id}", pj["dtype"], proj_shape, create=True) as input_mem):
+	with (
+		SharedNP(
+			f'flats_{segment_id}',
+			pj["dtype"],
+			ProjOrder(len(FLAT), pj["y"], pj["x"]),
+			create=True,
+		) as flats_mem,
+		SharedNP(f"sino_{segment_id}", internal_dtype, sino_shape, create=True) as sino_mem,
+		SharedNP(f"input_{segment_id}", pj["dtype"], proj_shape, create=True) as input_mem,
+	):
 		with flats_mem as flat_set:
 			for flat in list(FLAT):
 				flat_set[flat.index, :, :] = tf.imread(flat_dir.joinpath(f"{flat}_median.tiff")).astype(internal_dtype)
@@ -134,18 +171,31 @@ def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: i
 			)
 			log.log("Files Read", f"Window {window}; Shape {proj_shape}")
 			with Pool(process_count) as pool:
-				pool.starmap(weighted_normalize, [(sino_mem, input_mem, flats_mem, window, internal_window, i, sino_mem.shape.Theta)
-										for i in range(sino_mem.shape.Theta)])
-			for section_dir in set([fullpath.parent for fullpath in output_paths[window.start:window.stop]]):
-				section_dir.mkdir(parents=True, exist_ok=True)
+				pool.starmap(
+					weighted_normalize,
+					[(sino_mem, input_mem, flats_mem, window, internal_window, i, sino_mem.shape.Theta)
+						for i in range(sino_mem.shape.Theta)],
+				)
+			if execute:
+				for section_dir in set([fullpath.parent for fullpath in output_paths[window.start:window.stop]]):
+					section_dir.mkdir(parents=True, exist_ok=True)
 			with Pool(process_count) as pool:
-				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
-			log.log("Files Written", f"{output_dir} : {window}", log.DEBUG.TIME)
+				pool.starmap(
+					sino_write,
+					[(sino_mem, output_paths[i + window.start], i, None, execute) for i in internal_window],
+				)
+			log.log(
+				"Files Written",
+				f"{output_dir} : {window} ({'written' if execute else 'planned'})",
+				log.DEBUG.TIME,
+			)
 
 
-def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: float | None, max_val: float | None):
+def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: float | None, max_val: float | None,
+			execute=True):
 	image_paths = natsort.natsorted(list(input_dir.glob("**/*.tif*")))
-	output_dir.mkdir(parents=True, exist_ok=True)
+	if execute:
+		output_dir.mkdir(parents=True, exist_ok=True)
 	output_paths = [output_dir.joinpath(x.name) for x in image_paths]
 
 	segment_id = str(uuid.uuid4())
@@ -153,8 +203,13 @@ def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: 
 
 	with tf.TiffFile(image_paths[0]) as tif:
 		page = tif.pages[0]
-		pj = {"dtype": page.dtype, "bytesize": page.dtype.itemsize, "offset": page.dataoffsets[0],
-				"x": page.shape[1], "y": page.shape[0]}
+		pj = {
+			"dtype": page.dtype,
+			"bytesize": page.dtype.itemsize,
+			"offset": page.dataoffsets[0],
+			"x": page.shape[1],
+			"y": page.shape[0],
+		}
 
 	sino_shape = SinoOrder(process_count, pj["y"], pj["x"])
 	bounds = []
@@ -182,8 +237,15 @@ def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: 
 			with Pool(process_count) as pool:
 				pool.starmap(preprocess, [(sino_mem, i, min_val, max_val) for i in internal_window])
 			with Pool(process_count) as pool:
-				pool.starmap(sino_write, [(sino_mem, output_paths[i + window.start], i) for i in internal_window])
-			log.log("Files Written", f"{output_dir} : {window}", log.DEBUG.TIME)
+				pool.starmap(
+					sino_write,
+					[(sino_mem, output_paths[i + window.start], i, None, execute) for i in internal_window],
+				)
+			log.log(
+				"Files Written",
+				f"{output_dir} : {window} ({'written' if execute else 'planned'})",
+				log.DEBUG.TIME,
+			)
 
 
 @click.command()
@@ -203,6 +265,8 @@ def run_preproc(input_dir: Path, output_dir: Path, process_count: int, min_val: 
 				help="Sinogram (projection Y dimension) range to create in full mode.")
 @click.option("--min-val", type=click.FLOAT, default=None, help="Minimum sinogram value for preproc mode.")
 @click.option("--max-val", type=click.FLOAT, default=None, help="Maximum sinogram value for preproc mode.")
+@click.option('--execute/--dry-run', default=True,
+				help='Whether to write sinogram outputs or only log the planned outputs.')
 def sino_convert(
 		mode: str,
 		input_dir: Path,
@@ -213,13 +277,14 @@ def sino_convert(
 		sino_range: range,
 		min_val: float | None,
 		max_val: float | None,
+		execute: bool,
 ):
 	mode = mode.lower()
 	validate_mode(mode, flat_dir)
 	if mode == "full":
-		run_full(input_dir, output_dir, flat_dir, process_count, sectioning, sino_range)
+		run_full(input_dir, output_dir, flat_dir, process_count, sectioning, sino_range, execute=execute)
 	else:
-		run_preproc(input_dir, output_dir, process_count, min_val, max_val)
+		run_preproc(input_dir, output_dir, process_count, min_val, max_val, execute=execute)
 
 
 if __name__ == "__main__":

@@ -10,13 +10,16 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from shared import cli, log 	# noqa::E402
 
 
-def write_crop(input, output, crop, compress):
+def write_crop(input, output, crop, compress, execute=True):
 	img = tf.imread(input)
-	if compress:
-		tf.imwrite(output, img[crop], compression=8)
+	if execute:
+		if compress:
+			tf.imwrite(output, img[crop], compression=8)
+		else:
+			tf.imwrite(output, img[crop])
+		log.log("File Written", f"{output.name}: ({img.shape}>{crop})")
 	else:
-		tf.imwrite(output, img[crop])
-	log.log("File Written", f"{output.name}: ({img.shape}>{crop})")
+		log.log("Dry Run", f"Would write {output.name}: ({img.shape}>{crop})")
 
 
 @click.command
@@ -31,14 +34,17 @@ def write_crop(input, output, crop, compress):
 				help='Z-dimension trim (top and bottom) as an absolute value (integer) or percent (float)')
 @click.option('--compressed/--uncompressed', default=False,
 				help='Whether to compress output data.')
-def trim(data_dir, output_dir, vertical_trim, horizontal_trim, z_trim, compressed):
+@click.option('--execute/--dry-run', default=True,
+				help='Whether to write cropped files or only log the planned outputs.')
+def trim(data_dir, output_dir, vertical_trim, horizontal_trim, z_trim, compressed, execute):
 	"""Crop an image stack.
 	Crop values can be a comma separated pair like 5,4 or a single value like 3.
 	Float values are handled as % of image size; integer values as voxel values.
 	"""
 	log.start()
 	out_dir = Path(output_dir)
-	out_dir.mkdir(parents=True, exist_ok=True)
+	if execute:
+		out_dir.mkdir(parents=True, exist_ok=True)
 	path_list = sorted(list(Path(data_dir).glob("*.tif*")))
 	path_list = path_list[cli.crop_val(z_trim, len(path_list))]
 
@@ -48,7 +54,7 @@ def trim(data_dir, output_dir, vertical_trim, horizontal_trim, z_trim, compresse
 	new_dim = (cli.crop_val(vertical_trim, dim[0]), cli.crop_val(horizontal_trim, dim[1]))
 
 	with Pool(64) as pool:
-		pool.starmap(write_crop, [(path, Path(out_dir, path.name), new_dim, compressed) for path in path_list])
+		pool.starmap(write_crop, [(path, Path(out_dir, path.name), new_dim, compressed, execute) for path in path_list])
 
 
 if __name__ == "__main__":
