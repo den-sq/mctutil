@@ -1,18 +1,34 @@
 from pathlib import Path
+import sys
 from shutil import copy
 
 import click
+
+# Needed to run script from subfolder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared import log 	# noqa::E402
 
 
 @click.command()
 @click.option("--source", type=click.Path(exists=True), help="Root Directory to Search for Configs.")
 @click.option("--target", type=click.Path(exists=False), help="Target Directory to Place Copied Configs.")
-def get_conf(source, target):
+@click.option('--execute/--dry-run', default=True,
+				help="Whether to actually copy configs or just list the planned copies.")
+def get_conf(source, target, execute):
 	source_conf_set = Path(source).glob("**/*.yaml")
-	Path(target).mkdir(exist_ok=True, parents=True)
+	if execute:
+		Path(target).mkdir(exist_ok=True, parents=True)
+	else:
+		log.log("Pull Config", f"Would create {target}", log_level=log.DEBUG.INFO)
 	for conf in source_conf_set:
-		print(f"{conf.parent.name}_{conf.name}")
-		copy(conf, Path(target, f"{conf.parent.name}_{conf.name}"))
+		dest = Path(target, f"{conf.parent.name}_{conf.name}")
+		if execute:
+			log.log("Pull Config", f"{conf.parent.name}_{conf.name}", log_level=log.DEBUG.STATUS)
+			copy(conf, dest)
+		else:
+			log.log("Pull Config", f"Would copy {conf} -> {dest}", log_level=log.DEBUG.INFO)
+
 
 if __name__ == "__main__":
 	get_conf()

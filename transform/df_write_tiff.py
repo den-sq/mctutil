@@ -2,6 +2,11 @@ import os
 from pathlib import Path
 import sys
 
+# Needed to run script from subfolder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared import log 	# noqa::E402
+
 
 def _env_path(name: str, default: str) -> Path:
 	return Path(os.environ.get(name, default))
@@ -27,7 +32,7 @@ def set_df_environment():
 		ana_dir.joinpath("Lib\\site-packages\\pywin32_system32"),
 		ors_dir.joinpath("pythonAllUsersExtensions"), user_dir.joinpath("pythonUserExtensions")]])
 
-	print('Python %s on %s' % (sys.version, sys.platform), flush=True)
+	log.log("DF Write TIFF", f"Python {sys.version} on {sys.platform}", log_level=log.DEBUG.INFO)
 
 
 set_df_environment()
@@ -43,8 +48,10 @@ import tifffile as tf 	# noqa:E402
 @click.option("-o", "--df-object", type=click.STRING, help="Type of object to output, if done by class and title.")
 @click.option("-t", "--df-title", type=click.STRING, help="Title of object to output, if done by class and title.")
 @click.option("-i", "--df-id", type=click.STRING, help="ID of object to output, if done by id.")
+@click.option('--execute/--dry-run', default=True,
+				help="Whether to actually write the TIFF or just describe the planned write.")
 @click.argument("OUTPUTDIR", type=click.Path(exists=False, writable=True, dir_okay=True, path_type=Path))
-def df_write_tiff(df_source, df_object, df_title, df_id, outputdir):
+def df_write_tiff(df_source, df_object, df_title, df_id, execute, outputdir):
 	roi_set = List()
 	roi_set.loadFromFileFiltered(df_source, False, ['CxvLabeledMultiROI'], Progress())
 
@@ -53,7 +60,12 @@ def df_write_tiff(df_source, df_object, df_title, df_id, outputdir):
 	else:
 		source = orsObj(df_id)
 
-	tf.imwrite(outputdir.joinpath(f"{source.getTitle()}.tif"), source.getAsNDArray(0))
+	target = outputdir.joinpath(f"{source.getTitle()}.tif")
+	if execute:
+		tf.imwrite(target, source.getAsNDArray(0))
+		log.log("DF Write TIFF", f"Wrote {target}", log_level=log.DEBUG.STATUS)
+	else:
+		log.log("DF Write TIFF", f"Would write {target}", log_level=log.DEBUG.INFO)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,13 @@
+from pathlib import Path
+import sys
 from subprocess import run
 
 import click
+
+# Needed to run script from subfolder
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared import log 	# noqa::E402
 
 
 def expand_node_range(prefix: str, start: int, stop: int):
@@ -12,9 +19,15 @@ def expand_node_range(prefix: str, start: int, stop: int):
 @click.option("--start", type=click.INT, required=True)
 @click.option("--stop", type=click.INT, required=True)
 @click.option("--sbatch-script", type=click.STRING, default="memclean.sbatch", show_default=True)
-def from_range(prefix: str, start: int, stop: int, sbatch_script: str):
+@click.option('--execute/--dry-run', default=True,
+				help="Whether to actually submit sbatch jobs or just list the planned submissions.")
+def from_range(prefix: str, start: int, stop: int, sbatch_script: str, execute: bool):
 	for node in expand_node_range(prefix, start, stop):
-		run(["sbatch", "-w", node, sbatch_script])
+		if execute:
+			run(["sbatch", "-w", node, sbatch_script])
+			log.log("Mem From Range", f"sbatch -w {node} {sbatch_script}", log_level=log.DEBUG.STATUS)
+		else:
+			log.log("Mem From Range", f"Would sbatch -w {node} {sbatch_script}", log_level=log.DEBUG.INFO)
 
 
 if __name__ == "__main__":

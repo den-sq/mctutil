@@ -68,7 +68,7 @@ def test_df_write_tiff_uses_source_title_for_output_name(load_module, monkeypatc
 	monkeypatch.setattr(module, "orsObj", lambda *_args, **_kwargs: source)
 	monkeypatch.setattr(module.tf, "imwrite", lambda path, data: written.update(path=Path(path), data=data.copy()))
 
-	module.df_write_tiff.callback(source_path, None, None, "dummy-id", output_dir)
+	module.df_write_tiff.callback(source_path, None, None, "dummy-id", True, output_dir)
 
 	assert written["path"].name == "roi-title.tif"
 	assert written["path"].parent == output_dir
@@ -104,7 +104,7 @@ def test_s3upload_does_not_require_client_close(load_module, monkeypatch, tmp_pa
 	monkeypatch.setattr(module, "session", DummySession())
 	monkeypatch.setattr(module, "upload_folder_to_s3_parallel", lambda *_args, **_kwargs: None)
 
-	module.s3upload.callback(Path("prefix"), "bucket", 4, False, source_dir, Path("target"))
+	module.s3upload.callback(Path("prefix"), "bucket", 4, False, True, source_dir, Path("target"))
 
 	assert client_calls == [{"Bucket": "bucket", "Key": "prefix/target/"}]
 
