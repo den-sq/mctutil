@@ -9,7 +9,8 @@ from mctutil.shared import log
 
 
 @click.command()
-@click.option("--scan_root", type=click.Path(), required=True, help="Root to search for projection start/stop from images.")
+@click.option("--scan_root", type=click.Path(), required=True,
+				help="Root to search for projection start/stop from images.")
 def timecheck(scan_root):
 	scandatalist = []
 	for root, dirs, files in walk(scan_root):
@@ -26,7 +27,12 @@ def timecheck(scan_root):
 						timestring = handle.readline()[-27:-1]
 					scan_start = datetime.strptime(timestring, '%Y-%m-%d %H:%M:%S.%f')
 					projection_size = Path(root, files[-1]).stat().st_size / 1000000
-					scandatalist.append(f"{scan_start},{scan_start+scan_duration},{base.parent.parent.name},{base.parent.name},{'_'.join(base.name.split('_')[3:-1])},{projection_size:.1f}MB")
+					scan_label = '_'.join(base.name.split('_')[3:-1])
+					scandatalist.append(
+						f"{scan_start},{scan_start + scan_duration},"
+						f"{base.parent.parent.name},{base.parent.name},"
+						f"{scan_label},{projection_size:.1f}MB"
+					)
 				except Exception as ex:
 					log.log("Time Check", f"{ex}", log_level=log.DEBUG.ERROR)
 	scandatalist.sort()

@@ -92,8 +92,9 @@ def bin_write(mem: SharedNP, path: PathLike, i: int, xy_slice, dtype, bin_power:
 @click.option("-c", "--circ-mask-ratio", type=click.FLOAT, default=None,
 				help="Circular Mask Ratio, if wanted.")
 @click.option('--compressed/--uncompressed', default=False, help='Whether to compress output data.')
-def norm(normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim, out_dtype, processes, bin_power, mips,
-			mips_index, circ_mask_ratio, compressed):
+def norm(  # noqa: C901
+			normalize_over, data_dir, output_dir, vertical_trim, horizontal_trim,
+			out_dtype, processes, bin_power, mips, mips_index, circ_mask_ratio, compressed):
 	log.start()
 
 	compression = 8 if compressed else None

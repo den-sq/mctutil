@@ -60,7 +60,9 @@ def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, 
 	batch_size = (cloud_slice[0].stop - cloud_slice[0].start) // num_processes
 
 	# directory management
-	output_dir = Path(output_dir, f'CV_bin{bin_power}_{resolution*2**bin_power}um_{datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")}')
+	effective_resolution = resolution * 2 ** bin_power
+	timestamp = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+	output_dir = Path(output_dir, f'CV_bin{bin_power}_{effective_resolution}um_{timestamp}')
 	if execute:
 		output_dir.mkdir(parents=True, exist_ok=True)
 	else:
