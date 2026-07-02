@@ -31,6 +31,13 @@ references inline). Audience: `den-sq/mctutil` maintainers.
 - **§1.4 security follow-up** — shipped in PR #57 (deleted
   `mem/clean_shared.py`, retired its `eval(argv[1])`, merged its extra
   shm prefixes into `mem/clean.py`).
+- **Issue #72 / b11_flat_handling promotion** — promoted the ALS Beamline
+  8.3.2 HDF5 extractors and flat-field drift helpers into the refactored
+  package layout: `mctutil/als832` exposes `extract-projections`,
+  `extract-refs`, and `h5-tree`; `mctutil/flats` exposes `beam-tracking`,
+  `series-digest`, and `medianize`; both groups are registered on the
+  unified CLI with lazy imports, smoke tests, `--dry-run` coverage on
+  write-heavy commands, and `[als832]` / `[flats]` extras in `pyproject.toml`.
 
 Still open after the chain:
 
@@ -42,8 +49,9 @@ Still open after the chain:
   heredoc per-cluster parameterization plus several other ergonomic
   defects in `mem/clean.py` that the refactor chain didn't sweep up.
 - Optional-dependencies groups in `pyproject.toml` (§3.3 / Phase 0
-  partial). `[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]` extras
-  were planned but never declared; runtime deps still source from
+  partial). `[als832]` and `[flats]` are declared for the issue #72
+  promotions; `[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]` extras
+  remain planned but undeclared. Runtime deps still source from
   `environment.yml` (conda).
 
 Intentionally deferred (per maintainer instruction):

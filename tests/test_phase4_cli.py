@@ -8,7 +8,7 @@ from mctutil.cli import main
 def test_mctutil_root_help_lists_category_groups():
 	result = CliRunner().invoke(main, ["--help"])
 	assert result.exit_code == 0, result.output
-	for name in ["transform", "sino", "ng", "mesh", "transport", "mem", "parse", "hpc"]:
+	for name in ["transform", "sino", "als832", "flats", "ng", "mesh", "transport", "mem", "parse", "hpc"]:
 		assert name in result.output
 
 
@@ -26,6 +26,18 @@ def test_mem_group_help_lists_collapsed_commands():
 		assert name in result.output
 
 
+def test_issue72_groups_help_lists_promoted_commands():
+	result = CliRunner().invoke(main, ["als832", "--help"])
+	assert result.exit_code == 0, result.output
+	for name in ["extract-projections", "extract-refs", "h5-tree"]:
+		assert name in result.output
+
+	result = CliRunner().invoke(main, ["flats", "--help"])
+	assert result.exit_code == 0, result.output
+	for name in ["beam-tracking", "series-digest", "medianize"]:
+		assert name in result.output
+
+
 def test_unified_leaf_help_works(stubbed_modules):
 	result = CliRunner().invoke(main, ["sino", "convert", "--help"])
 	assert result.exit_code == 0, result.output
@@ -34,3 +46,11 @@ def test_unified_leaf_help_works(stubbed_modules):
 	result = CliRunner().invoke(main, ["ng", "layer-tag", "--help"])
 	assert result.exit_code == 0, result.output
 	assert "--segment_radius" in result.output
+
+	result = CliRunner().invoke(main, ["als832", "extract-projections", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "--dry-run" in result.output
+
+	result = CliRunner().invoke(main, ["flats", "series-digest", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "--dry-run" in result.output

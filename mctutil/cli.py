@@ -2,6 +2,8 @@
 
 import click
 
+from mctutil.als832 import main as als832_group
+from mctutil.flats import main as flats_group
 from mctutil.hpc import main as hpc_group
 from mctutil.mem import main as mem_group
 from mctutil.mesh import main as mesh_group
@@ -47,6 +49,8 @@ def main(log_level, quiet_flag, verbose_flag):
 
 main.add_command(transform_group, "transform")
 main.add_command(sino_group, "sino")
+main.add_command(als832_group, "als832")
+main.add_command(flats_group, "flats")
 main.add_command(ng_group, "ng")
 main.add_command(mesh_group, "mesh")
 main.add_command(transport_group, "transport")
