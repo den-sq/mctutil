@@ -138,6 +138,83 @@ def test_normalize_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
 	assert not output_dir.exists()
 
 
+def test_flip_stack_flips_depth_and_image_axes(load_module, tmp_path, monkeypatch):
+	module = load_module("mctutil/transform/flip.py")
+	monkeypatch.setattr(module.log, "start", lambda: None)
+	monkeypatch.setattr(module.log, "write", lambda *_args, **_kwargs: None)
+
+	input_dir = tmp_path / "input"
+	depth_output = tmp_path / "depth"
+	column_output = tmp_path / "columns"
+	input_dir.mkdir()
+
+	tifffile.imwrite(input_dir / "slice_0.tif", np.array([[1, 2], [3, 4]], dtype=np.uint8))
+	tifffile.imwrite(input_dir / "slice_1.tif", np.array([[5, 6], [7, 8]], dtype=np.uint8))
+
+	depth_result = CliRunner().invoke(module.flip_stack, ["-f", "0", str(input_dir), str(depth_output)])
+	assert depth_result.exit_code == 0, depth_result.output
+	assert tifffile.imread(depth_output / "slice_0.tif").tolist() == [[5, 6], [7, 8]]
+	assert tifffile.imread(depth_output / "slice_1.tif").tolist() == [[1, 2], [3, 4]]
+
+	column_result = CliRunner().invoke(module.flip_stack, ["-f", "2", str(input_dir), str(column_output)])
+	assert column_result.exit_code == 0, column_result.output
+	assert tifffile.imread(column_output / "slice_0.tif").tolist() == [[2, 1], [4, 3]]
+	assert tifffile.imread(column_output / "slice_1.tif").tolist() == [[6, 5], [8, 7]]
+
+
+def test_flip_stack_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
+	module = load_module("mctutil/transform/flip.py")
+	monkeypatch.setattr(module.log, "start", lambda: None)
+	monkeypatch.setattr(module.log, "write", lambda *_args, **_kwargs: None)
+
+	input_dir = tmp_path / "input"
+	output_dir = tmp_path / "output"
+	input_dir.mkdir()
+	tifffile.imwrite(input_dir / "slice_0.tif", np.array([[1, 2], [3, 4]], dtype=np.uint8))
+
+	result = CliRunner().invoke(module.flip_stack, ["-f", "1", "--dry-run", str(input_dir), str(output_dir)])
+
+	assert result.exit_code == 0, result.output
+	assert not output_dir.exists()
+
+
+def test_reslice_writes_orthogonal_coordinate_planes(load_module, tmp_path, monkeypatch):
+	module = load_module("mctutil/transform/reslice.py")
+	monkeypatch.setattr(module.log, "start", lambda: None)
+	monkeypatch.setattr(module.log, "write", lambda *_args, **_kwargs: None)
+
+	input_dir = tmp_path / "input"
+	output_dir = tmp_path / "output"
+	input_dir.mkdir()
+
+	stack = np.arange(3 * 2 * 4, dtype=np.uint8).reshape(3, 2, 4)
+	for z_index, image in enumerate(stack):
+		tifffile.imwrite(input_dir / f"slice_{z_index}.tif", image)
+
+	result = CliRunner().invoke(module.reslice, ["-r", "2,1,1", str(input_dir), str(output_dir)])
+
+	assert result.exit_code == 0, result.output
+	assert tifffile.imread(output_dir / "xy_z1.tif").tolist() == stack[1].tolist()
+	assert tifffile.imread(output_dir / "xz_y1.tif").tolist() == stack[:, 1, :].tolist()
+	assert tifffile.imread(output_dir / "yz_x2.tif").tolist() == stack[:, :, 2].tolist()
+
+
+def test_reslice_dry_run_writes_nothing(load_module, tmp_path, monkeypatch):
+	module = load_module("mctutil/transform/reslice.py")
+	monkeypatch.setattr(module.log, "start", lambda: None)
+	monkeypatch.setattr(module.log, "write", lambda *_args, **_kwargs: None)
+
+	input_dir = tmp_path / "input"
+	output_dir = tmp_path / "output"
+	input_dir.mkdir()
+	tifffile.imwrite(input_dir / "slice_0.tif", np.array([[1, 2], [3, 4]], dtype=np.uint8))
+
+	result = CliRunner().invoke(module.reslice, ["-r", "1,0,0", "--dry-run", str(input_dir), str(output_dir)])
+
+	assert result.exit_code == 0, result.output
+	assert not output_dir.exists()
+
+
 def test_sinogram_preproc_normalizes_small_real_input(load_module, tmp_path, monkeypatch):
 	module = load_module("mctutil/transform/sinogram.py")
 	monkeypatch.setattr(module, "Pool", SerialPool)
