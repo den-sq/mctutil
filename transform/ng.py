@@ -24,14 +24,19 @@ import click
 				help="Whether to strip gz extennsions from filenames, as they can confuse neuroglancer.")
 @click.option("--compress-info", type=click.BOOL, is_flag=True, show_default=True, default=False,
 				help="Whether to compress info file as gz as well (without changing extension).")
+@click.option("--channel-count", type=click.INT, default=1,
+				help="Number of channels in the input image.")
 @click.option('-o', '--output-location', type=click.Path(), required=True)
 def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, metadata_info, compress_info,
-				output_location):
+				channel_count, output_location):
 	print(f'input folder: {input_path}')
 	image_paths = natsorted(Path(input_path).glob("**/*.tif*"))
 
 	memmap_ = tifffile.memmap(image_paths[0])
-	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
+	if channel_count > 1:
+		size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
+	else:
+		size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
 	dtype_ = str(memmap_.dtype)
 
 	print(f'volume size is :{size} datatype is {dtype_}')
@@ -42,7 +47,7 @@ def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, meta
 			"mesh": "mesh_mip_0_err_40", 				# mesh
 			"encoding": 'compressed_segmentation',
 			"data_type": "uint64",
-			"num_channels": 1,
+			"num_channels": channel_count,
 			"compressed_segmentation_block_size": [8, 8, 8],
 			"scales":
 			[
@@ -57,7 +62,7 @@ def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, meta
 		json_metadata = {
 			"type": "image",
 			"data_type": dtype_,
-			"num_channels": 1,
+			"num_channels": channel_count,
 			"scales":
 			[
 				{

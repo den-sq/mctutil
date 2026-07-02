@@ -9,9 +9,7 @@ import tifffile as tf
 
 
 def denoise_threshold(input_paths, output_path, threshold):
-	print(input_paths)
-	base_data = np.array([tf.imread(infile) for infile in input_paths]).astype(np.int32)
-
+	base_data = np.array([tf.imread(infile) for infile in input_paths])
 	floor = np.min(base_data)
 	ceiling = np.max(base_data)
 	gap = (ceiling - floor) * threshold
@@ -19,10 +17,12 @@ def denoise_threshold(input_paths, output_path, threshold):
 	mask = np.logical_and(np.abs(np.subtract(base_data[1], base_data[0])) > gap,
 							np.abs(np.subtract(base_data[1], base_data[2]) > gap))
 
+	print(f"{ceiling}|{floor}|{threshold}|{gap}|{np.unique(mask, return_counts=True)}")
+
 	if len(base_data[0][mask] > 0):
 		base_data[1][mask] = np.average([base_data[0][mask], base_data[2][mask]], axis=0)
 
-	tf.imwrite(output_path, base_data[1].astype(np.uint16))
+	tf.imwrite(output_path, base_data[1])
 
 
 def denoise_flat(input_paths, output_path, threshold):

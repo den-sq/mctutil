@@ -22,27 +22,31 @@ def fetch_slices(remote, use_https, region, bin_power, output_dir, out_type, tra
 	log.log("Fetching Slices", f"{remote}: {region} with {bin_power}")
 	vol = CloudVolume(remote, mip=bin_power, use_https=use_https, progress=True)
 	log.log("Volume Set", f"{remote}: {region} with {bin_power}")
+
 	for i, slice_data in enumerate(vol[region], start=region[0].start):
 		log.write("Writing Slice", f"slice_{str(i).zfill(4)}.tif")
 		if transpose_axes:
 			tifffile.imwrite(os.path.join(output_dir, f"slice_{str(i).zfill(4)}.tif"),
 								np.array(slice_data, out_type.nptype))
-			log.write("Wrote Slice", f"Transposed: slice_{str(i).zfill(4)}.tif")
+			log.log("Wrote Slice", f"Transposed: slice_{str(i).zfill(4)}.tif")
 		else:
 			tifffile.imwrite(os.path.join(output_dir, f"slice_{str(i).zfill(4)}.tif"),
 							np.transpose(np.array(slice_data, out_type.nptype), (2, 0, 1)))
-			log.write("Wrote Slice", f"slice_{str(i).zfill(4)}.tif")
+			log.log("Wrote Slice", f"slice_{str(i).zfill(4)}.tif")
 
 
 def bin_slices(base_slice, bin_power, base_dim):
-	out_slice = ()
+	if bin_power:
+		out_slice = ()
 
-	for i, slice_dim in enumerate(base_slice):
-		new_start = 0 if slice_dim.start is None else slice_dim.start // (2 ** bin_power)
-		new_stop = base_dim[i] if slice_dim.stop is None else slice_dim.stop // (2 ** bin_power)
-		out_slice += (np.s_[new_start: new_stop], )
-	log.log("Slice Calculation", out_slice)
-	return out_slice
+		for i, slice_dim in enumerate(base_slice):
+			new_start = 0 if slice_dim.start is None else slice_dim.start // (2 ** bin_power) 
+			new_stop = base_dim[i] if slice_dim.stop is None else slice_dim.stop // (2 ** bin_power)
+			out_slice += (np.s_[new_start: new_stop], )
+		log.log("Slice Calculation", out_slice)
+		return out_slice
+	else:
+		return base_slice
 
 
 @click.command()
@@ -55,13 +59,14 @@ def bin_slices(base_slice, bin_power, base_dim):
 @click.option("--use-https", is_flag=True, help="Whether to use an https connection.")
 @click.option("-n", "--num-processes", type=click.INT, default=psutil.cpu_count(),
 				help="Number of simultaneous processes.")
-@click.option("-t", "--out-dtype", type=cli.NUMPYTYPE, help="Target Datatype")
+@click.option("-t", "--out-dtype", type=cli.NUMPYTYPE, required=True, help="Target Datatype")
 @click.option("--transpose-axes/--original-axes", type=click.BOOL, default=False,
 				help="Whether to transpose the axes during download; shift is 2-0-1")
 @click.argument("output-dir")
 def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https,
 						num_processes, output_dir, out_dtype, transpose_axes):
 	log.start()
+	log.log("Setting Up", f"Remote: {cloud_url}; https: {use_https}")
 
 	cloud_slice = bin_slices(cloud_slice, bin_power,
 							CloudVolume(cloud_url, mip=bin_power, use_https=use_https, progress=True).shape)
