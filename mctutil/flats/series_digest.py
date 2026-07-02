@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 import numpy as np
 
-from mctutil.shared.log import LOG, log
+from mctutil.shared.log import log
 
 
 def _require_tifffile():

@@ -63,48 +63,59 @@ def find_exchange(handle):
 	return hits[0] if hits else None
 
 
+def _read_array(handle, paths, expected_len=None):
+	for path in paths:
+		if path in handle:
+			if expected_len is not None and len(handle[path]) != expected_len:
+				continue
+			return np.asarray(handle[path][()])
+	return None
+
+
+def _format_timestamp(timestamp, nanosecond=None):
+	try:
+		value = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+		if nanosecond is not None:
+			value += f".{int(nanosecond):09d}"
+		return value + "Z"
+	except Exception:
+		return str(int(timestamp))
+
+
+def _format_timestamps(timestamps, nanoseconds=None):
+	formatted = []
+	for index, timestamp in enumerate(timestamps):
+		nanosecond = None if nanoseconds is None else nanoseconds[index]
+		formatted.append(_format_timestamp(timestamp, nanosecond))
+	return formatted
+
+
+def _label_timestamps(label, image_key, date, nanoseconds, counts):
+	key = IMAGE_KEY[label]
+	selected = image_key == key
+	timestamps = date[selected]
+	if len(timestamps) != counts.get(label, -1):
+		return None
+	ns_values = nanoseconds[selected] if nanoseconds is not None else None
+	return _format_timestamps(timestamps, ns_values)
+
+
 def load_timestamps(handle, _exchange, counts):
 	"""Map per-frame timestamps to white/dark frames via image_key + image_date."""
-	out = {}
-	image_key = None
-	for path in ("exchange/image_key", "image_key"):
-		if path in handle:
-			image_key = np.asarray(handle[path][()])
-			break
+	image_key = _read_array(handle, ("exchange/image_key", "image_key"))
 	if image_key is None:
-		return out
+		return {}
 
-	date = None
-	for path in ("process/acquisition/image_date", "exchange/image_date"):
-		if path in handle and len(handle[path]) == len(image_key):
-			date = np.asarray(handle[path][()])
-			break
+	date = _read_array(handle, ("process/acquisition/image_date", "exchange/image_date"), len(image_key))
 	if date is None:
-		return out
+		return {}
 
-	nanoseconds = None
-	for path in ("process/acquisition/image_date_ns",):
-		if path in handle and len(handle[path]) == len(image_key):
-			nanoseconds = np.asarray(handle[path][()])
-			break
-
-	for label, key in IMAGE_KEY.items():
-		selected = image_key == key
-		timestamps = date[selected]
-		if len(timestamps) != counts.get(label, -1):
-			continue
-		ns_values = nanoseconds[selected] if nanoseconds is not None else None
-		formatted = []
-		for index, timestamp in enumerate(timestamps):
-			try:
-				value = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-				if ns_values is not None:
-					value += f".{int(ns_values[index]):09d}"
-				value += "Z"
-			except Exception:
-				value = str(int(timestamp))
-			formatted.append(value)
-		out[label] = formatted
+	nanoseconds = _read_array(handle, ("process/acquisition/image_date_ns",), len(image_key))
+	out = {}
+	for label in IMAGE_KEY:
+		label_values = _label_timestamps(label, image_key, date, nanoseconds, counts)
+		if label_values is not None:
+			out[label] = label_values
 	return out
 
 
@@ -159,6 +170,145 @@ def read_camera_meta(handle):
 	return out
 
 
+def _reference_counts(exchange):
+	return {
+		label: exchange[name].shape[0] if name in exchange else 0
+		for name, (_subfolder, label) in REF_STACKS.items()
+	}
+
+
+def _log_white_stats(exchange):
+	white = exchange["data_white"]
+	means = [float(white[index].mean()) for index in range(white.shape[0])]
+	low, high = min(means), max(means)
+	log.write("White Means", f"min={low:.1f} max={high:.1f} spread={high - low:.1f}")
+	median = float(np.median(means))
+	outliers = [index for index, mean in enumerate(means) if abs(mean - median) > 0.15 * median]
+	if outliers:
+		log.write(
+			"Flat Outliers",
+			f"{len(outliers)} flat(s) deviate >15% from median: {outliers}",
+			log_level=LOG.WARN,
+		)
+
+
+def inspect_file(path, exchange, counts, flat_meta, camera_meta):
+	projection_count = exchange["data"].shape[0] if "data" in exchange else "?"
+	log.write(
+		"Exchange",
+		(
+			f"{path.name}: projections={projection_count} "
+			+ " ".join(f"{label}={counts[label]}" for label in ("white", "dark"))
+		),
+		log_level=LOG.STATUS,
+	)
+	if counts.get("white"):
+		_log_white_stats(exchange)
+
+	move_x = flat_meta.get("i0_move_x")
+	move_y = flat_meta.get("i0_move_y")
+	if move_x == 0 and move_y == 0:
+		log.write(
+			"Flat Metadata",
+			"i0_move_x = i0_move_y = 0; sample may not have moved out of beam for flats",
+			log_level=LOG.WARN,
+		)
+	log.write(
+		"Flat Metadata",
+		f"i0_move_x={move_x} i0_move_y={move_y} i0cycle={flat_meta.get('i0cycle')}",
+	)
+	log.write(
+		"Geometry",
+		(
+			f"camera_distance={camera_meta.get('camera_distance')} "
+			f"camera_elevation={camera_meta.get('camera_elevation')} "
+			f"tilt_motor={camera_meta.get('tilt_motor')}"
+		),
+	)
+
+
+def _frame_stats(frame):
+	return round(float(frame.mean()), 2), int(frame.min()), int(frame.max())
+
+
+def _manifest_row(path, label, index, output, timestamp, stats, flat_meta, camera_meta):
+	mean, minimum, maximum = stats
+	return {
+		"source_file": path.name,
+		"type": label,
+		"index": index,
+		"output": output,
+		"timestamp": timestamp,
+		"mean": mean,
+		"min": minimum,
+		"max": maximum,
+		"i0_move_x": flat_meta.get("i0_move_x", ""),
+		"i0_move_y": flat_meta.get("i0_move_y", ""),
+		"i0cycle": flat_meta.get("i0cycle", ""),
+		"camera_distance": camera_meta.get("camera_distance", ""),
+		"camera_elevation": camera_meta.get("camera_elevation", ""),
+		"tilt_motor": camera_meta.get("tilt_motor", ""),
+	}
+
+
+def extract_stack(path, out_root, manifest_rows, stack_info, timestamps, meta, dry_run, write_frames):
+	_name, subfolder, label, dataset = stack_info
+	flat_meta, camera_meta = meta
+	n_frames = dataset.shape[0]
+	dest = out_root / subfolder
+	need_write = write_frames and not dry_run
+	tifffile = _require_tifffile() if need_write else None
+	if need_write:
+		dest.mkdir(parents=True, exist_ok=True)
+
+	frame_timestamps = timestamps.get(label)
+	width = max(3, len(str(n_frames - 1)))
+	for index in range(n_frames):
+		filename = f"{path.stem}__{label}_{index:0{width}d}.tif"
+		relative_path = f"{subfolder}/{filename}"
+		if need_write:
+			frame = np.asarray(dataset[index])
+			tifffile.imwrite(str(dest / filename), frame)
+			stats = _frame_stats(frame)
+		else:
+			if dry_run and write_frames:
+				log.write("Dry Run", f"Would write {dest / filename}", log_level=LOG.INFO)
+			stats = ("", "", "")
+		timestamp = frame_timestamps[index] if frame_timestamps else ""
+		output = relative_path if write_frames else ""
+		manifest_rows.append(_manifest_row(path, label, index, output, timestamp, stats, flat_meta, camera_meta))
+
+	dest_note = f"{subfolder}/" if write_frames else "manifest only; frames not written"
+	log.write("Reference Frames", f"{path.name}: {label} x{n_frames} -> {dest_note}")
+
+
+def extract_file(path, exchange, out_root, manifest_rows, timestamps, meta, dry_run, write_frames):
+	for name, (subfolder, label) in REF_STACKS.items():
+		if name in exchange:
+			stack_info = (name, subfolder, label, exchange[name])
+			extract_stack(path, out_root, manifest_rows, stack_info, timestamps, meta, dry_run, write_frames)
+
+
+def process_open_file(path, out_root, manifest_rows, handle, mode, dry_run, write_frames):
+	exchange = find_exchange(handle)
+	if exchange is None:
+		log.write(
+			"Skip",
+			f"{path.name}: no exchange group with data_white/data_dark (keys: {list(handle.keys())[:6]})",
+			log_level=LOG.WARN,
+		)
+		return
+
+	counts = _reference_counts(exchange)
+	timestamps = load_timestamps(handle, exchange, counts)
+	flat_meta = read_flat_meta(handle)
+	camera_meta = read_camera_meta(handle)
+	if mode == "inspect":
+		inspect_file(path, exchange, counts, flat_meta, camera_meta)
+	else:
+		extract_file(path, exchange, out_root, manifest_rows, timestamps, (flat_meta, camera_meta), dry_run, write_frames)
+
+
 def process_file(path, out_root, manifest_rows, mode="extract", dry_run=False, write_frames=True):
 	h5py = _require_h5py()
 	path = Path(path)
@@ -170,113 +320,7 @@ def process_file(path, out_root, manifest_rows, mode="extract", dry_run=False, w
 		return
 
 	with handle:
-		exchange = find_exchange(handle)
-		if exchange is None:
-			log.write(
-				"Skip",
-				f"{path.name}: no exchange group with data_white/data_dark (keys: {list(handle.keys())[:6]})",
-				log_level=LOG.WARN,
-			)
-			return
-
-		counts = {
-			label: exchange[name].shape[0] if name in exchange else 0
-			for name, (_subfolder, label) in REF_STACKS.items()
-		}
-		timestamps = load_timestamps(handle, exchange, counts)
-		flat_meta = read_flat_meta(handle)
-		camera_meta = read_camera_meta(handle)
-
-		if mode == "inspect":
-			projection_count = exchange["data"].shape[0] if "data" in exchange else "?"
-			log.write(
-				"Exchange",
-				(
-					f"{path.name}: projections={projection_count} "
-					+ " ".join(f"{label}={counts[label]}" for label in ("white", "dark"))
-				),
-				log_level=LOG.STATUS,
-			)
-			if counts.get("white"):
-				white = exchange["data_white"]
-				means = [float(white[index].mean()) for index in range(white.shape[0])]
-				low, high = min(means), max(means)
-				log.write("White Means", f"min={low:.1f} max={high:.1f} spread={high - low:.1f}")
-				median = float(np.median(means))
-				outliers = [index for index, mean in enumerate(means) if abs(mean - median) > 0.15 * median]
-				if outliers:
-					log.write(
-						"Flat Outliers",
-						f"{len(outliers)} flat(s) deviate >15% from median: {outliers}",
-						log_level=LOG.WARN,
-					)
-			move_x = flat_meta.get("i0_move_x")
-			move_y = flat_meta.get("i0_move_y")
-			if move_x == 0 and move_y == 0:
-				log.write(
-					"Flat Metadata",
-					"i0_move_x = i0_move_y = 0; sample may not have moved out of beam for flats",
-					log_level=LOG.WARN,
-				)
-			log.write(
-				"Flat Metadata",
-				f"i0_move_x={move_x} i0_move_y={move_y} i0cycle={flat_meta.get('i0cycle')}",
-			)
-			log.write(
-				"Geometry",
-				(
-					f"camera_distance={camera_meta.get('camera_distance')} "
-					f"camera_elevation={camera_meta.get('camera_elevation')} "
-					f"tilt_motor={camera_meta.get('tilt_motor')}"
-				),
-			)
-			return
-
-		for name, (subfolder, label) in REF_STACKS.items():
-			if name not in exchange:
-				continue
-			dataset = exchange[name]
-			n_frames = dataset.shape[0]
-			dest = out_root / subfolder
-			need_write = write_frames and not dry_run
-			if need_write:
-				tifffile = _require_tifffile()
-				dest.mkdir(parents=True, exist_ok=True)
-			frame_timestamps = timestamps.get(label)
-			width = max(3, len(str(n_frames - 1)))
-			for index in range(n_frames):
-				filename = f"{path.stem}__{label}_{index:0{width}d}.tif"
-				relative_path = f"{subfolder}/{filename}"
-				if need_write:
-					frame = np.asarray(dataset[index])
-					tifffile.imwrite(str(dest / filename), frame)
-					mean = round(float(frame.mean()), 2)
-					minimum = int(frame.min())
-					maximum = int(frame.max())
-				else:
-					if dry_run and write_frames:
-						log.write("Dry Run", f"Would write {dest / filename}", log_level=LOG.INFO)
-					mean = minimum = maximum = ""
-				manifest_rows.append(
-					{
-						"source_file": path.name,
-						"type": label,
-						"index": index,
-						"output": relative_path if write_frames else "",
-						"timestamp": frame_timestamps[index] if frame_timestamps else "",
-						"mean": mean,
-						"min": minimum,
-						"max": maximum,
-						"i0_move_x": flat_meta.get("i0_move_x", ""),
-						"i0_move_y": flat_meta.get("i0_move_y", ""),
-						"i0cycle": flat_meta.get("i0cycle", ""),
-						"camera_distance": camera_meta.get("camera_distance", ""),
-						"camera_elevation": camera_meta.get("camera_elevation", ""),
-						"tilt_motor": camera_meta.get("tilt_motor", ""),
-					}
-				)
-			dest_note = f"{subfolder}/" if write_frames else "manifest only; frames not written"
-			log.write("Reference Frames", f"{path.name}: {label} x{n_frames} -> {dest_note}")
+		process_open_file(path, out_root, manifest_rows, handle, mode, dry_run, write_frames)
 
 
 def iter_h5_inputs(inputs):

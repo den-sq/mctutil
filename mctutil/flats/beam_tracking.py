@@ -221,7 +221,7 @@ def diagnose(pre, post, beam_sigma=8, dark_quantile=0.15):
 	log.write("Fine Motion", f"{fine_motion:.4f}; noise part {logR_noise:.4f}")
 	log.write("Dark Quant", f"{info['dark_rel_quant_pct']:.1f}% frame-bottom relative noise")
 
-	motion_dominated = info["motion_to_noise"] > 3 and (lag1 > 0.3 or fine_motion > 2*logR_noise)
+	motion_dominated = info["motion_to_noise"] > 3 and (lag1 > 0.3 or fine_motion > 2 * logR_noise)
 	if not motion_dominated:
 		log.write("Recommendation", "noise comparable to motion -> optimal_transport_interp (method 2)")
 	elif bd["eight_bit"] or dark_rel_q > 0.01:
@@ -294,10 +294,12 @@ def estimate_flow_ratio_HS(pre, post, beam_sigma=4, env_sigma=40,
 	It = tq - tp
 	Ix = 0.5 * (np.gradient(tp, axis=1) + np.gradient(tq, axis=1))
 	Iy = 0.5 * (np.gradient(tp, axis=0) + np.gradient(tq, axis=0))
-	u = np.zeros_like(It); v = np.zeros_like(It)
+	u = np.zeros_like(It)
+	v = np.zeros_like(It)
 	a2 = smoothness ** 2
 	for _ in range(n_iter):
-		ub = gaussian_filter(u, prefilter); vb = gaussian_filter(v, prefilter)
+		ub = gaussian_filter(u, prefilter)
+		vb = gaussian_filter(v, prefilter)
 		num = Ix * ub + Iy * vb + It
 		den = a2 + Ix ** 2 + Iy ** 2
 		u = ub - Ix * num / den
@@ -317,7 +319,8 @@ def estimate_flow_ratio_HS(pre, post, beam_sigma=4, env_sigma=40,
 			f"|disp| {md:.1f}px > max_disp {max_disp}px; possible band aliasing, clamping",
 			log_level=LOG.WARN,
 		)
-		v *= max_disp / md; u *= max_disp / md
+		v *= max_disp / md
+		u *= max_disp / md
 	return v, u
 
 
@@ -516,7 +519,7 @@ def decompose_static_dynamic(flats, beam_sigma=4, band_orientation="horizontal",
 		logD = logD.copy()
 		logD[exclude_mask] = 0.0
 	D = np.exp(logD).astype(np.float32)
-	B = np.stack([( _clean(arr[k]) / D).astype(np.float32) for k in range(n)])
+	B = np.stack([(_clean(arr[k]) / D).astype(np.float32) for k in range(n)])
 	return D, B
 
 
@@ -608,17 +611,24 @@ def calibrate_schedule(projs, scan_fractions, pre, post, mask=None,
 		mask = auto_air_mask(projs[0], pre)
 	tstar = np.array([fit_beam_time(p, pre, post, mask=mask, band=band)
 						for p in projs])
-	order = np.argsort(fr); fr, tstar = fr[order], tstar[order]
+	order = np.argsort(fr)
+	fr, tstar = fr[order], tstar[order]
 	if kind == "linear":
 		A = np.vstack([np.ones_like(fr), fr]).T
 		alpha, beta = np.linalg.lstsq(A, tstar, rcond=None)[0]
-		sched = lambda t: alpha + beta * np.asarray(t, float)
+
+		def sched(t):
+			return alpha + beta * np.asarray(t, float)
+
 		resid = float(np.std(tstar - (alpha + beta * fr)))
 		info = dict(alpha=float(alpha), beta=float(beta), resid=resid,
 					tstar=tstar.tolist(), scan_fractions=fr.tolist())
 	else:
 		ti = np.maximum.accumulate(tstar)        # enforce monotone
-		sched = lambda t: np.interp(t, fr, ti)
+
+		def sched(t):
+			return np.interp(t, fr, ti)
+
 		info = dict(tstar=tstar.tolist(), scan_fractions=fr.tolist())
 	if verbose:
 		log.write("Calibration", "beam-time calibration from air regions")
@@ -651,8 +661,10 @@ def schedule_from_trajectory(frac, motion, kind="cumulative"):
 	do not use this at all: a schedule only re-paces motion ALONG the pre->post
 	line, and an event takes the beam OFF that line. Use keyframe_interp with
 	the digest snapshots instead."""
-	frac = np.asarray(frac, float); motion = np.asarray(motion, float)
-	order = np.argsort(frac); frac, motion = frac[order], motion[order]
+	frac = np.asarray(frac, float)
+	motion = np.asarray(motion, float)
+	order = np.argsort(frac)
+	frac, motion = frac[order], motion[order]
 	m = motion - motion[0]
 	m = np.maximum.accumulate(m) if kind == "cumulative" else m
 	if m[-1] == 0:
@@ -703,8 +715,9 @@ def beam_only_residual_decomp(pre, post, proj, t, mask, smooth=8):
 				key=lambda k: out[k])
 	out["best"] = best
 	out["tracking_worthwhile"] = bool(
-		frac_along > 0.3 and
-		out["crossfade"] < 0.9 * min(out["static_pre"], out["static_post"]))
+		frac_along > 0.3
+		and out["crossfade"] < 0.9 * min(out["static_pre"], out["static_post"])
+	)
 	return out
 
 
@@ -734,7 +747,13 @@ def build_gain_stack(G, n, dark=0.0):
 	type=click.Path(file_okay=False, path_type=Path),
 	help="Write static_defects.tif and dynamic_beam_*.tif to this directory.",
 )
-@click.option("--beam-sigma", type=float, default=4.0, show_default=True, help="Gaussian scale separating beam from defects.")
+@click.option(
+	"--beam-sigma",
+	type=float,
+	default=4.0,
+	show_default=True,
+	help="Gaussian scale separating beam from defects.",
+)
 @click.option(
 	"--band-orientation",
 	type=click.Choice(["horizontal", "vertical", "none"]),
@@ -742,9 +761,24 @@ def build_gain_stack(G, n, dark=0.0):
 	show_default=True,
 	help="Stripe orientation to suppress while estimating static defects.",
 )
-@click.option("--band-length", type=click.IntRange(1), default=75, show_default=True, help="Directional median window length.")
+@click.option(
+	"--band-length",
+	type=click.IntRange(1),
+	default=75,
+	show_default=True,
+	help="Directional median window length.",
+)
 @click.option("--dry-run", is_flag=True, help="Plan decomposition writes without writing files.")
-def beam_tracking(pre_flat, post_flat, digest_stack, decompose_output, beam_sigma, band_orientation, band_length, dry_run):
+def beam_tracking(
+	pre_flat,
+	post_flat,
+	digest_stack,
+	decompose_output,
+	beam_sigma,
+	band_orientation,
+	band_length,
+	dry_run,
+):
 	"""Diagnose beam drift and optionally split flat fields into static/dynamic components."""
 	_require_scipy()
 	log.start()
