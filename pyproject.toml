@@ -14,6 +14,16 @@ authors = [
 # Runtime dependencies are managed through environment.yml so TomoPy and other
 # non-PyPI-first packages can be sourced from conda-forge.
 
+[project.optional-dependencies]
+als832 = [
+  "h5py",
+  "tifffile",
+]
+flats = [
+  "scipy",
+  "tifffile",
+]
+
 [project.scripts]
 mctutil = "mctutil.cli:main"
 
