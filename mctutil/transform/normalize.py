@@ -73,9 +73,11 @@ def mem_write(mem: SharedNP, path: PathLike, i, dtype, execute=True):
 				help='Output path for cleaned images', default='data/clean/')
 @click.option('-p', '--processes', type=click.INT, default=psutil.cpu_count(),
 				help='Process Count (for simulatenous images)')
+@click.option("--hard-cut/--relative-cut", type=bool, default=False,
+				help="Whether to use hard or relative values for normalizing.")
 @click.option('--execute/--dry-run', default=True,
 				help='Whether to write normalized files or only log the planned outputs.')
-def norm(normalize_over, data_dir, output_dir, processes, execute):
+def norm(normalize_over, data_dir, output_dir, processes, hard_cut, execute):
 	log.start()
 
 	if execute:
