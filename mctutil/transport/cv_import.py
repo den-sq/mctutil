@@ -12,7 +12,7 @@ from mctutil.shared.log import log, LOG
 from mctutil.shared import cli
 
 
-def fetch_slices(remote, use_https, region, bin_power, output_dir, execute=True):
+def fetch_slices(remote, use_https, region, bin_power, output_dir, out_type=None, transpose_axes=False, execute=True):
 	log.write("Fetching Slices", f"{remote}: {region} with {bin_power}")
 	if not execute:
 		log.write("Fetching Slices",
@@ -20,8 +20,15 @@ def fetch_slices(remote, use_https, region, bin_power, output_dir, execute=True)
 				log_level=LOG.INFO)
 		return
 	vol = CloudVolume(remote, mip=bin_power, use_https=use_https, progress=True)
+	log.write("Volume Set", f"{remote}: {region} with {bin_power}", log_level=LOG.INFO)
 	for i, slice_data in enumerate(vol[region], start=region[0].start):
-		tifffile.imwrite(output_dir / f"slice_{str(i).zfill(4)}.tif", slice_data)
+		if out_type is not None:
+			slice_data = np.array(slice_data, dtype=out_type.nptype)
+		if transpose_axes:
+			slice_data = np.transpose(slice_data, (2, 0, 1))
+		output_path = output_dir / f"slice_{str(i).zfill(4)}.tif"
+		log.write("Writing Slice", output_path.name, log_level=LOG.INFO)
+		tifffile.imwrite(output_path, slice_data)
 
 
 def bin_slices(base_slice, bin_power, base_dim):
@@ -48,10 +55,14 @@ def bin_slices(base_slice, bin_power, base_dim):
 @click.option("--use-https", is_flag=True, help="Whether to use an https connection.")
 @click.option("-n", "--num-processes", type=click.INT, default=psutil.cpu_count(),
 				help="Number of simultaneous processes.")
+@click.option("-t", "--out-dtype", type=cli.NUMPYTYPE, help="Target datatype.")
+@click.option("--transpose-axes/--original-axes", type=click.BOOL, default=False,
+				help="Whether to transpose downloaded slices from XYZ/channel order to ZYX/channel order.")
 @click.option('--execute/--dry-run', default=True,
 				help="Whether to actually fetch and write slices or just plan the work.")
 @click.argument("output-dir")
-def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, num_processes, execute, output_dir):
+def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, num_processes, out_dtype,
+						transpose_axes, execute, output_dir):
 	log.write("Start")
 
 	cloud_slice = bin_slices(cloud_slice, bin_power,
@@ -70,7 +81,8 @@ def cloudvolume_fetch(cloud_url, cloud_slice, resolution, bin_power, use_https, 
 	with Pool(num_processes) as pool:
 		pool.starmap(fetch_slices,
 			[(cloud_url, use_https, (np.s_[i:min(i + batch_size, cloud_slice[0].stop)],) + cloud_slice[1:],
-				bin_power, output_dir, execute) for i in range(cloud_slice[0].start, cloud_slice[0].stop, batch_size)])
+				bin_power, output_dir, out_dtype, transpose_axes, execute)
+				for i in range(cloud_slice[0].start, cloud_slice[0].stop, batch_size)])
 
 	log.write("Complete")
 
