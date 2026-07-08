@@ -63,6 +63,55 @@ def is_image_like_dataset(dataset) -> bool:
 	return True
 
 
+def _maybe_cast(arr, dtype):
+	"""Return ``arr`` cast to ``dtype`` if a dtype was provided."""
+	if dtype is None:
+		return arr
+	return arr.astype(dtype)
+
+
+def _write_2d(dataset, out_path: Path, dtype, compression) -> None:
+	"""Write a 2-D dataset as one BigTIFF image."""
+	tifffile = _require_tifffile()
+	arr = _maybe_cast(dataset[()], dtype)
+	tifffile.imwrite(out_path, arr, compression=compression, bigtiff=True)
+	log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
+
+
+def _write_3d(dataset, out_path: Path, dtype, compression) -> None:
+	"""Write a 3-D dataset as one BigTIFF stack, streamed slice-by-slice."""
+	tifffile = _require_tifffile()
+	depth = dataset.shape[0]
+	with tifffile.TiffWriter(out_path, bigtiff=True) as tif:
+		for z in range(depth):
+			tif.write(_maybe_cast(dataset[z, :, :], dtype), compression=compression, contiguous=False)
+			if z % 100 == 0:
+				log.write("H5 Progress", f"slice {z + 1}/{depth}", log_level=LOG.INFO)
+	log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
+
+
+def _write_ndim(dataset, base: str, output_dir: Path, dtype, compression) -> None:
+	"""Write a 4-D+ dataset as one BigTIFF stack per first-axis index."""
+	tifffile = _require_tifffile()
+	outer, inner = dataset.shape[0], dataset.shape[1]
+	for i in range(outer):
+		out_path = output_dir / f"{base}_{i:04d}_stack.tif"
+		with tifffile.TiffWriter(out_path, bigtiff=True) as tif:
+			for z in range(inner):
+				tif.write(
+					_maybe_cast(dataset[i, z, :, :], dtype),
+					compression=compression,
+					contiguous=False,
+				)
+				if z % 100 == 0:
+					log.write(
+						"H5 Progress",
+						f"stack {i + 1}/{outer}, slice {z + 1}/{inner}",
+						log_level=LOG.INFO,
+					)
+		log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
+
+
 def write_dataset_as_tiffs(
 	dataset,
 	h5_path: str,
@@ -83,52 +132,17 @@ def write_dataset_as_tiffs(
 		:param dtype: Optional numpy dtype to cast the output to.
 		:param compress: If true, write with zlib compression.
 	"""
-	tifffile = _require_tifffile()
-
 	base = safe_name(h5_path)
 	compression = "zlib" if compress else None
 
 	log.write("H5 Dataset", f"{h5_path} shape={dataset.shape} dtype={dataset.dtype}", log_level=LOG.STATUS)
 
 	if dataset.ndim == 2:
-		arr = dataset[()]
-		if dtype is not None:
-			arr = arr.astype(dtype)
-
-		out_path = output_dir / f"{base}.tif"
-		tifffile.imwrite(out_path, arr, compression=compression, bigtiff=True)
-		log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
-
+		_write_2d(dataset, output_dir / f"{base}.tif", dtype, compression)
 	elif dataset.ndim == 3:
-		out_path = output_dir / f"{base}_stack.tif"
-		with tifffile.TiffWriter(out_path, bigtiff=True) as tif:
-			for z in range(dataset.shape[0]):
-				arr = dataset[z, :, :]
-				if dtype is not None:
-					arr = arr.astype(dtype)
-				tif.write(arr, compression=compression, contiguous=False)
-				if z % 100 == 0:
-					log.write("H5 Progress", f"slice {z + 1}/{dataset.shape[0]}", log_level=LOG.INFO)
-
-		log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
-
+		_write_3d(dataset, output_dir / f"{base}_stack.tif", dtype, compression)
 	else:
-		for i in range(dataset.shape[0]):
-			out_path = output_dir / f"{base}_{i:04d}_stack.tif"
-			with tifffile.TiffWriter(out_path, bigtiff=True) as tif:
-				for z in range(dataset.shape[1]):
-					arr = dataset[i, z, :, :]
-					if dtype is not None:
-						arr = arr.astype(dtype)
-					tif.write(arr, compression=compression, contiguous=False)
-					if z % 100 == 0:
-						log.write(
-							"H5 Progress",
-							f"stack {i + 1}/{dataset.shape[0]}, slice {z + 1}/{dataset.shape[1]}",
-							log_level=LOG.INFO,
-						)
-
-			log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
+		_write_ndim(dataset, base, output_dir, dtype, compression)
 
 
 def visit_h5(handle, output_dir: Path, dtype=None, compress: bool = True) -> int:
