@@ -29,8 +29,9 @@ from mctutil.shared.log import log, LOG
 @click.option('-o', '--output-location', type=click.Path(), required=True)
 def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, metadata_info, compress_info,
 				output_location):
-	log.write("Neuroglance", f"Input folder: {input_path}", log_level=LOG.STATUS)
+	log.write("Neuroglance", f"Input folder: {input_path} to {output_location}", log_level=LOG.STATUS)
 	image_paths = natsorted(Path(input_path).glob("**/*.tif*"))
+	Path(output_location).mkdir(exist_ok=True, parents=True)
 
 	memmap_ = tifffile.memmap(image_paths[0])
 	size = [memmap_.shape[1], memmap_.shape[0], len(image_paths)]
