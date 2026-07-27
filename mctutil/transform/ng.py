@@ -3,7 +3,7 @@ from pathlib import Path
 
 from natsort import natsorted
 from neuroglancer_scripts.scripts.generate_scales_info import generate_scales_info
-from neuroglancer_scripts.scripts.slices_to_precomputed import convert_slices_in_directory
+from neuroglancer_scripts.scripts.slices_to_precomputed import slices_to_raw_chunks
 from neuroglancer_scripts.scripts.compute_scales import compute_scales
 import json
 import tifffile
@@ -76,7 +76,7 @@ def neuroglance(chunk_size, resolution, segmentation, strip_gz, input_path, meta
 		json.dump(json_metadata, handle)
 
 	generate_scales_info(metadata_info, output_location, chunk_size)
-	convert_slices_in_directory([Path(input_path)], output_location, options={"flat": True})
+	slices_to_raw_chunks([image_paths], output_location, "RAS", options={"flat": True})
 	compute_scales(output_location, "majority" if segmentation else "average", options={"flat": True})
 
 	if strip_gz:
