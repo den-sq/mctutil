@@ -52,6 +52,19 @@ mctutil mem from-file --help
 mctutil parse meta-shift --help
 ```
 
+Read one HDF5 dataset, or recursively read every dataset below a group:
+
+```bash
+mctutil als832 h5-tree scan.h5 \
+  --path measurement/instrument/detector/actual_pixel_size
+mctutil als832 h5-tree scan.h5 \
+  --path measurement/instrument/detector \
+  --path measurement/instrument/setup
+```
+
+`h5-tree` opens source files read-only. Selected datasets containing more than
+10,000 values are not loaded unless `--max-values` is raised or set to `0`.
+
 The legacy module entrypoints still exist for now while the unified CLI settles:
 
 ```bash
