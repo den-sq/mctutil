@@ -87,7 +87,7 @@ def test_mem_clean_applies_all_configured_prefixes_once(load_module, monkeypatch
 		module.load_prefix_configs(["shm", "kmp"]),
 	)
 
-	assert unlinked == ["rot-volume", "__KMP_REGISTERED_LIB_123"]
+	assert sorted(unlinked) == ["__KMP_REGISTERED_LIB_123", "rot-volume"]
 
 
 def test_mark_node_list_queries_partitions_and_submits_eligible_nodes(load_module, monkeypatch, tmp_path):
