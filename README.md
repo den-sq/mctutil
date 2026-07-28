@@ -90,22 +90,27 @@ with `-q` / `-v` shorthands.
 
 ## Categories
 
-Run `mctutil <category> --help` for the full task list in each:
+Each category has its own README with the full command breakdown; run
+`mctutil <category> --help` for the live task list:
 
-- `transform` — TIFF-stack transforms (trim, normalize, transpose, convert,
-  downsample, find-bounds, denoise, stitch, decompress-tiff / strip-gz-suffix /
-  gunzip, hdf-convert / h5-convert / raw-convert, stack-split, …)
-- `sino` — sinogram conversion (`sino convert --mode full|preproc`)
-- `ng` — Neuroglancer JSON, layer, and annotation helpers, plus `ng build`
-- `mesh` — Igneous mesh generation (`mesh build`)
-- `transport` — S3 / CloudVolume data movement (`s3-upload`, `cv-fetch`)
-- `mem` — shared-memory cleanup (`clean`, `mark`) and node-list submission
-  (`from-file`, `from-range`)
-- `parse` — metadata / config / scanlog parsing (`meta-shift`, `pull-config`,
-  `scanlog-fetch`, `prune-empty`)
-- `hpc` — HPC scheduler-side helpers (`time-check`)
-- `als832` / `flats` — ALS Beamline 8.3.2 HDF5 extractors and flat-field drift
-  helpers
+- [`transform`](mctutil/transform/README.md) — TIFF-stack transforms (trim,
+  normalize, transpose, convert, downsample, find-bounds, denoise, stitch,
+  decompress-tiff / strip-gz-suffix / gunzip, hdf-convert / h5-convert /
+  raw-convert, stack-split, …)
+- [`sino`](mctutil/sino/README.md) — sinogram conversion
+  (`sino convert --mode full|preproc`)
+- [`ng`](mctutil/ng/README.md) — Neuroglancer JSON, layer, and annotation
+  helpers, plus `ng build`
+- [`mesh`](mctutil/mesh/README.md) — Igneous mesh generation (`mesh build`)
+- [`transport`](mctutil/transport/README.md) — S3 / CloudVolume data movement
+  (`s3-upload`, `cv-fetch`)
+- [`mem`](mctutil/mem/README.md) — shared-memory cleanup (`clean`, `mark`) and
+  node-list submission (`from-file`, `from-range`)
+- [`parse`](mctutil/parse/README.md) — metadata / config / scanlog parsing
+  (`meta-shift`, `pull-config`, `scanlog-fetch`, `prune-empty`)
+- [`hpc`](mctutil/hpc/README.md) — HPC scheduler-side helpers (`time-check`)
+- [`als832`](mctutil/als832/README.md) / [`flats`](mctutil/flats/README.md) —
+  ALS Beamline 8.3.2 HDF5 extractors and flat-field drift helpers
 
 ## Repository layout
 
