@@ -15,8 +15,8 @@ class CommandCase:
 
 CASES = [
 	CommandCase("mctutil/hpc/timecheck.py", "timecheck"),
-	CommandCase("mctutil/mem/clean.py", "memclean", ("clean", "--help")),
-	CommandCase("mctutil/mem/clean.py", "memclean", ("mark", "--help")),
+	CommandCase("mctutil/mem/clean.py", "clean"),
+	CommandCase("mctutil/mem/clean.py", "mark"),
 	CommandCase("mctutil/mem/from_file.py", "from_file"),
 	CommandCase("mctutil/mem/from_range.py", "from_range"),
 	CommandCase("mctutil/als832/extract_projections.py", "extract_projections"),

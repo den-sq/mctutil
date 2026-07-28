@@ -41,9 +41,6 @@ references inline). Audience: `den-sq/mctutil` maintainers.
 
 Still open after the chain:
 
-- Issue **#64** — `mem/clean.py` revision pass. Covers the §6.4 sbatch
-  heredoc per-cluster parameterization plus several other ergonomic
-  defects in `mem/clean.py` that the refactor chain didn't sweep up.
 - Optional-dependencies groups in `pyproject.toml` (§3.3 / Phase 0
   partial). `[als832]` and `[flats]` are declared for the issue #72
   promotions; `[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]` extras
@@ -122,7 +119,7 @@ All resolved.
 
 | File | Notes | Status |
 |------|-------|--------|
-| `mem/clean_shared.py:22` | `eval(argv[1])` for an apply/dry-run boolean. Comment already admits this is "Very Stupid". | Resolved in #57: `mem/clean_shared.py` deleted, its four extra shm prefixes (`sino`, `work`, `center`, `input`) merged into `mem/clean.py` so the canonical `mem clean --apply` is a strict superset, and the two consumer sbatch scripts (`mem/memcheck.sbatch`, `mem/memclean.sbatch`) switched to `python clean.py [--apply] clean`. |
+| `mem/clean_shared.py:22` | `eval(argv[1])` for an apply/dry-run boolean. Comment already admits this is "Very Stupid". | Resolved in #57: `mem/clean_shared.py` was deleted and its four extra prefixes were merged into the canonical cleanup path. Issue #64 subsequently moved the standard and KMP prefixes into matching JSON dictionaries selected through repeatable `--config` options, renamed the destructive flag to the safe-by-default `--execute/--dry-run` pair, and updated the sbatch consumers to use `mctutil mem clean`. |
 | `transform/upload.py`, `transport/s3upload.py` | Both ingest AWS credentials in different ways (JSON file vs `boto3.Session(profile_name='chenglab')`). Pick one. Don't pass credentials via JSON if a profile already works. | Resolved in #51 (Phase 3): `transform/upload.py` deleted; `transport/s3upload.py` is the one S3 path, using the chenglab boto profile. |
 
 ### 1.5 Lint / hygiene
@@ -445,15 +442,17 @@ CLI group).
   bitmask via `set_threshold()` / `set_screen()`; the top-level CLI's
   `--log-level [quiet|default|verbose|debug]` (with `-q` / `-v`
   shorthands) applies the threshold before subcommand dispatch.
-- [x] Add a `--dry-run` flag to anything that writes files, mirroring the
-  `mem clean --apply` pattern. **Shipped across #54, #55, #56.** Coverage:
+- [x] Add a `--dry-run` flag to anything that writes files. **Shipped
+  across #54, #55, #56, with the final `mem clean` consistency update
+  in #64.** Coverage:
   `transform trim`, `transform normalize`, `sino convert`,
   `transform decompress-tiff`, `transform hdf-convert`,
   `transform stitch`, `transform channelize`, `transform df-write-tiff`,
   `mesh build`, `transport s3-upload`, `transport cv-fetch`,
   `parse pull-config`, `parse scanlog-fetch`, `parse prune-empty`,
-  `mem from-file`, `mem from-range`. `mem clean` keeps its existing
-  `--apply` flag rather than gaining a parallel `--dry-run`.
+  `mem from-file`, `mem from-range`, `mem clean`, and `mem mark`.
+  Shared-memory cleanup defaults to dry-run because unlinking is
+  destructive.
 - [x] Consider whether `parsing/meta_shift.py` even belongs in this repo
   vs the chenglab automation; if it's Cheng-Lab specific, move it.
   **Answered in #58:** kept in repo, but the chenglab schema lives in a
@@ -504,7 +503,8 @@ These remain relevant for any future restructuring.
    directories outright. Any out-of-tree caller that imported a leaf by
    its old top-level path now needs to switch to either the installed
    console script (`mctutil <verb>`) or the `mctutil.<category>.<task>`
-   import.
+   import. #64 completed the in-tree migration to `mctutil mem clean
+   --dry-run|--execute`.
 2. Is `parsing/meta_*.py` still in active use, or a snapshot of a
    one-time migration? If snapshot, archive and remove. **Answered:**
    active. Kept in tree; #58 split the chenglab schema into a dedicated
@@ -517,12 +517,12 @@ These remain relevant for any future restructuring.
    paths now read from `DRAGONFLY_DIR` / `DRAGONFLY_ORS_DIR` /
    `DRAGONFLY_USER_DIR` env vars instead of being hardcoded.
 4. Where do `mem/clean.py`'s sbatch templates run today, and against
-   which scheduler version? That code embeds an heredoc with module
-   loads (`module load miniconda/3`, `source activate recon`) — worth
-   parameterizing per-cluster. **Open — tracked in issue #64** as part
-   of a broader `mem/clean.py` revision pass (also covers the inverted
-   `--apply` semantics, the half-finished `mark` argument surface, and
-   several other ergonomic defects the refactor chain didn't sweep).
+   which scheduler version? **Answered in #64:** `mem mark` no longer
+   embeds a cluster environment or log directories. Callers can provide
+   cluster shell setup with `--job-preamble` and opt into Slurm log
+   locations with `--sbatch-output` / `--sbatch-error`. The shipped
+   sbatch consumers likewise assume only that the installed `mctutil`
+   entrypoint is on `PATH`.
 
 ---
 
@@ -555,8 +555,7 @@ What actually happened (2026-05-21):
   the top-level CLI).
 - The maintainer separately wired up the Phase 0 CI workflow (lint +
   smoke matrix on Python 3.10 / 3.11 / 3.12), closing issue #13.
-- Remaining concrete follow-ups: `mem/clean.py` revision pass (issue
-  #64, including the §6.4 sbatch heredoc per-cluster parameterization),
-  and optional-dependencies groups in `pyproject.toml`.
+- Remaining concrete follow-up: optional-dependencies groups in
+  `pyproject.toml`.
 - `hpc_work/codeclist.txt` decision was: keep, per maintainer
   instruction.
