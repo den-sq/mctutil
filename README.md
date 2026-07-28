@@ -8,9 +8,11 @@ General tools for working with MicroCT data at PSU.
 MicroCT image stacks, building Neuroglancer-friendly artifacts, moving data to
 remote storage, and doing a small amount of HPC-side housekeeping.
 
-The codebase is in the middle of a staged cleanup. Phase 0 adds packaging,
-smoke tests, CI, and contributor hygiene without renaming the existing module
-layout yet.
+The staged cleanup in [REFACTOR_PLAN.md](REFACTOR_PLAN.md) is substantially
+complete: every tool now lives in a single installable `mctutil` package and is
+exposed through a unified `mctutil <category> <task>` console script. A few
+follow-ups remain open — the optional-dependency extras (#86) and a handful of
+surveyed-but-unregistered commands (#87).
 
 ## Installation
 
@@ -29,26 +31,29 @@ Notes:
 - A few packages are still pulled through the `pip:` section because they are
   not published on conda-forge today: `cloud-volume`, `dicom2jpg`,
   `igneous-pipeline`, `neuroglancer-scripts`, and `task-queue`.
+- The `[als832]` and `[flats]` optional-dependency extras are declared; the
+  remaining extras (`[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]`) are
+  tracked in #86.
 - Python indentation uses tabs in this repository.
 - No autoformatter is configured at this time.
 - Linting is enforced with `flake8`, the pre-commit hooks in
   `.pre-commit-config.yaml`, and `scripts/check_python_tabs.py`.
-- The `mctutil` console script is intentionally a stub for now. The current
-  command surface still lives at `python -m <module>` from a repo checkout;
-  Phase 4 will unify it under `mctutil <category> <task>`.
 
 ## Quickstart
 
-Phase 4 introduces the unified CLI surface:
+`pip install -e .` installs a real `mctutil` console script. The command surface
+is `mctutil <category> <task>`:
 
 ```bash
+mctutil --help
+mctutil transform --help
 mctutil transform trim --help
 mctutil transform normalize --help
 mctutil sino convert --help
 mctutil ng point-add --help
+mctutil mesh build --help
 mctutil transport s3-upload --help
 mctutil mem clean --help
-mctutil mem from-file --help
 mctutil parse meta-shift --help
 ```
 
@@ -65,30 +70,10 @@ mctutil als832 h5-tree scan.h5 \
 `h5-tree` opens source files read-only. Selected datasets containing more than
 10,000 values are not loaded unless `--max-values` is raised or set to `0`.
 
-The legacy module entrypoints still exist for now while the unified CLI settles:
+A worked trim example (equivalent to the old hardcoded `quick_crop` shape):
 
 ```bash
-python -m transform.trim --help
-python -m transform.normalize --help
-python -m transform.sinogram --help
-python -m ng.point_add --help
-python -m transport.s3upload --help
-python -m mem.clean --help
-python -m mem.from_file --help
-python -m parsing.meta_shift --help
-```
-
-Phase 3 collapsed several duplicate scripts into the surviving module paths above:
-- `transform/sino_preproc.py` folded into `transform/sinogram.py --mode preproc`
-- `transform/f_transpose.py` folded into `transform/transpose.py --mode naive`
-- `transform/upload.py` retired in favor of `transport/s3upload.py`
-- `parsing/meta_list.py` and `parsing/meta_parser.py` folded into `parsing/meta_shift.py`
-- `mem/check_nodeinfo.py`, `mem/from_nodeinfo.py`, and `mem/from_list.py` folded into `mem/from_file.py` and `mem/from_range.py`
-
-A worked trim example equivalent to the old hardcoded `transform/quick_crop.py` shape is:
-
-```bash
-python -m transform.trim \
+mctutil transform trim \
   --data-dir /path/to/projections \
   --output-dir /path/to/projections-tight \
   --vertical-trim 421,21 \
@@ -96,23 +81,45 @@ python -m transform.trim \
   --z-trim 803,0
 ```
 
-The unified entrypoint is now live:
+Write-heavy commands accept `--dry-run`. Shared-memory cleanup
+(`mctutil mem clean`) defaults to dry-run because unlinking is destructive; pass
+`--execute` to actually unlink.
 
-```bash
-mctutil --help
-mctutil transform --help
-mctutil ng --help
-```
+Verbosity is controlled at the top level: `--log-level [quiet|default|verbose|debug]`,
+with `-q` / `-v` shorthands.
 
-## Project map
+## Categories
 
-- `transform/` — TIFF stack transforms, normalization, trimming, reconstruction helpers
-- `ng/` — Neuroglancer JSON and point/layer helpers
-- `transport/` — data movement helpers for S3 / CloudVolume workflows
-- `mem/` — HPC memory cleanup helpers
-- `shared/` — shared click parameter types, logging, and memory helpers
+Run `mctutil <category> --help` for the full task list in each:
+
+- `transform` — TIFF-stack transforms (trim, normalize, transpose, convert,
+  downsample, find-bounds, denoise, stitch, decompress-tiff / strip-gz-suffix /
+  gunzip, hdf-convert / h5-convert / raw-convert, stack-split, …)
+- `sino` — sinogram conversion (`sino convert --mode full|preproc`)
+- `ng` — Neuroglancer JSON, layer, and annotation helpers, plus `ng build`
+- `mesh` — Igneous mesh generation (`mesh build`)
+- `transport` — S3 / CloudVolume data movement (`s3-upload`, `cv-fetch`)
+- `mem` — shared-memory cleanup (`clean`, `mark`) and node-list submission
+  (`from-file`, `from-range`)
+- `parse` — metadata / config / scanlog parsing (`meta-shift`, `pull-config`,
+  `scanlog-fetch`, `prune-empty`)
+- `hpc` — HPC scheduler-side helpers (`time-check`)
+- `als832` / `flats` — ALS Beamline 8.3.2 HDF5 extractors and flat-field drift
+  helpers
+
+## Repository layout
+
+- `mctutil/` — the installable package; one module per category with leaves at
+  `mctutil/<category>/<task>.py`, and shared parameter types / logging / memory
+  helpers in `mctutil/shared/`
+- `chenglab/` — Cheng-Lab schema adapter sitting behind the generic
+  `parse meta-shift` engine
+- `hpc_env/`, `hpc_work/` — non-Python data buckets (sbatch templates, yaml
+  configs)
+- `tests/` — per-command smoke tests and math-heavy fixture tests
+- `scripts/` — repository hygiene (e.g. `check_python_tabs.py`)
 
 ## Refactor plan
 
-See [REFACTOR_PLAN.md](REFACTOR_PLAN.md) for the staged cleanup plan that Phase
-0 is implementing.
+See [REFACTOR_PLAN.md](REFACTOR_PLAN.md) for the full staged-cleanup record —
+phase by phase, with per-file defect → resolution tables.

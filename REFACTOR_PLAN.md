@@ -4,6 +4,10 @@ Status: substantively done. Originally drafted as a proposal from a survey of
 `master`. Annotated 2026-05-21 with phase-by-phase execution status (PR
 references inline). Audience: `den-sq/mctutil` maintainers.
 
+The refactor branch is proposed for landing onto `master` in #85. Remaining
+follow-ups are tracked as #86 (optional-dependency extras) and #87
+(surveyed-but-unregistered commands).
+
 ## Status at a glance (2026-05-21)
 
 - **Phase 0** — shipped in PR #48. (CI was finished separately by the
@@ -45,7 +49,24 @@ Still open after the chain:
   partial). `[als832]` and `[flats]` are declared for the issue #72
   promotions; `[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]` extras
   remain planned but undeclared. Runtime deps still source from
-  `environment.yml` (conda).
+  `environment.yml` (conda). **Tracked in #86.**
+- Surveyed CLI commands not yet on the unified surface: `mem list`
+  (unimplemented), `parse find-errs` (source
+  `mctutil/parse/find_err_general.py` exists but is unregistered), and
+  `hpc cuda-check` (source `hpc_env/cuda.py` still at top level,
+  unregistered). **Tracked in #87.**
+
+Later additions (June–July 2026), on top of the phase chain:
+
+- Issue #72 / `b11_flat_handling` promotion — `als832` + `flats` groups (#74;
+  see the status-at-a-glance entry above).
+- Local transform command integration (#78, #79) — added `transform flip`
+  and `transform reslice`.
+- `transform h5-convert`, `transform raw-convert`, and `transform stack-split`
+  (#81).
+- Mesh-build unification into `shared/mesh.py::build_mesh` (#37, #82; §2.2).
+- Shared-memory cleanup revised to config-driven prefixes with a
+  safe-by-default `--execute` / `--dry-run` pair (#64, #84; §1.4).
 
 Intentionally deferred (per maintainer instruction):
 
