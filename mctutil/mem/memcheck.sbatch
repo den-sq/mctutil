@@ -1,10 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=MemClean
-#SBATCH --output=../log/memcheck_%N.std
-#SBATCH --error=../log/memcheck_%N.err
-#SBATCH -p compute
+#SBATCH --job-name=MemCheck
 
-module load miniconda/3
-source activate recon
-
-python clean.py clean
+# Configure the cluster environment before submission so mctutil is on PATH.
+mctutil mem clean --dry-run

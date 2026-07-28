@@ -44,3 +44,6 @@ include = [
   "mctutil*",
   "chenglab*",
 ]
+
+[tool.setuptools.package-data]
+"mctutil.mem" = ["config/*.json"]

@@ -1,30 +1,23 @@
+"""Shared-memory cleanup and Slurm submission commands."""
+
 from enum import IntEnum
-from multiprocessing import shared_memory
 from io import StringIO
+import json
+from multiprocessing import shared_memory
 from pathlib import Path
+import shlex
 from subprocess import run, PIPE
 
 import click
-import ipyslurm
-
 
 from mctutil.shared.log import log, LOG
 
-# Names of shared memory to be script-specific (for now)
-shm = {
-	"rsm": "rot",
-	"psm": "proj",
-	"fsm": "flat",
-	"ysm": "y_rot",
-	"pfm": "phase",
-	"log": "last_step",
-	"ssm": "sino",
-	"wsm": "work",
-	"csm": "center",
-	"inp": "input",
-}
 
-other_shm = "__KMP_REGISTERED_LIB"
+CONFIG_DIR = Path(__file__).with_name("config")
+BUILTIN_CONFIGS = {
+	"shm": CONFIG_DIR / "shm.json",
+	"kmp": CONFIG_DIR / "kmp.json",
+}
 
 
 class NF(IntEnum):
@@ -34,123 +27,332 @@ class NF(IntEnum):
 	STATUS = 3
 
 
+class PrefixConfig(click.ParamType):
+	name = "CONFIG"
+
+	def convert(self, value, param, ctx):
+		path = resolve_config_path(value)
+		if not path.is_file():
+			self.fail(f"{value} is not a built-in config name or an existing JSON file.", param, ctx)
+		return path
+
+
+PREFIX_CONFIG = PrefixConfig()
+
+
+def resolve_config_path(value):
+	"""Resolve a built-in config name or custom path.
+
+	:param value: Built-in config name or filesystem path.
+	:return: Resolved config path.
+	"""
+	if isinstance(value, Path):
+		return value
+	return BUILTIN_CONFIGS.get(str(value).lower(), Path(value))
+
+
+def config_reference(config_path):
+	"""Return a portable CLI reference for a resolved config path."""
+	config_path = resolve_config_path(config_path)
+	for name, built_in_path in BUILTIN_CONFIGS.items():
+		if config_path == built_in_path:
+			return name
+	return str(config_path)
+
+
+def load_prefix_configs(config_paths):
+	"""Load and merge shared-memory prefix dictionaries.
+
+	Later files override keys from earlier files.
+
+	:param config_paths: Iterable of built-in config names or JSON paths.
+	:return: Merged name-to-prefix dictionary.
+	"""
+	prefixes = {}
+
+	for config_path in config_paths:
+		config_path = resolve_config_path(config_path)
+		try:
+			with config_path.open() as config_file:
+				config = json.load(config_file)
+		except (OSError, json.JSONDecodeError) as exc:
+			raise click.ClickException(f"Could not load prefix config {config_path}: {exc}") from exc
+
+		if not isinstance(config, dict):
+			raise click.ClickException(f"Prefix config {config_path} must contain a JSON object.")
+
+		for name, prefix in config.items():
+			if not isinstance(name, str) or not isinstance(prefix, str) or prefix == "":
+				raise click.ClickException(
+					f"Prefix config {config_path} must map non-empty string names to non-empty string prefixes."
+				)
+			prefixes[name] = prefix
+
+	if not prefixes:
+		raise click.ClickException("At least one shared-memory prefix must be configured.")
+
+	return prefixes
+
+
+def prefix_config_option(command):
+	return click.option(
+		"-c",
+		"--config",
+		"config_paths",
+		type=PREFIX_CONFIG,
+		multiple=True,
+		default=("shm",),
+		show_default=True,
+		help=(
+			"Prefix config to load. Use built-in 'shm' or 'kmp', or a JSON path. "
+			"Repeat to merge multiple configs; explicit values replace the default selection."
+		),
+	)(command)
+
+
 def parse_sinfo(node_info, node_mixed):
+	"""Group eligible nodes from ``sinfo -N`` output by partition."""
 	free_nodes = {}
+	assigned_nodes = set()
 
-	next(node_info)
-	node_entries = [[field for field in line.strip('\n').strip().split(' ') if field != ''] for line in node_info]
+	next(node_info, None)
+	for line in node_info:
+		node = line.split()
+		if len(node) <= NF.STATUS:
+			continue
 
-	for node in node_entries:
-		if node[NF.PARTITION] != "sas":
-			if node[NF.STATUS] == "idle" or (node[NF.STATUS] == "mix" and node_mixed):
-				# Add node to list of those to clear.
-				if node[NF.PARTITION] not in free_nodes:
-					free_nodes[node[NF.PARTITION]] = [node[NF.NAME]]
-				else:
-					free_nodes[node[NF.PARTITION]].append(node[NF.NAME])
+		node_name = node[NF.NAME]
+		partition = node[NF.PARTITION].rstrip("*")
+		status = node[NF.STATUS]
+
+		if node_name in assigned_nodes or partition == "sas":
+			continue
+		if status.startswith("idle") or (status.startswith("mix") and node_mixed):
+			free_nodes.setdefault(partition, []).append(node_name)
+			assigned_nodes.add(node_name)
 
 	return free_nodes
 
 
-def mem_clean(shared_base, apply, apply_kmp):
-	host = run("hostname", stdout=PIPE).stdout.decode().strip('\n')
+def parse_node_list(node_lists):
+	"""Flatten repeatable comma-separated node-list options."""
+	nodes = []
+	for node_list in node_lists:
+		for node in node_list.split(","):
+			node = node.strip()
+			if node and node not in nodes:
+				nodes.append(node)
+	return nodes
+
+
+def merge_node_targets(clear_targets, new_targets):
+	"""Merge partition-to-node mappings without duplicate submissions."""
+	assigned_nodes = {node for nodes in clear_targets.values() for node in nodes}
+	for partition, nodes in new_targets.items():
+		for node in nodes:
+			if node not in assigned_nodes:
+				clear_targets.setdefault(partition, []).append(node)
+				assigned_nodes.add(node)
+
+
+def collect_node_targets(slurm, node_lists, node_file, node_call, node_mixed):
+	"""Collect and deduplicate eligible nodes from every selected source."""
+	clear_targets = {}
+	nodes = parse_node_list(node_lists)
+
+	if nodes:
+		node_query = shlex.quote(",".join(nodes))
+		with StringIO(slurm.command(f"sinfo -N --nodes={node_query}")) as node_info:
+			merge_node_targets(clear_targets, parse_sinfo(node_info, node_mixed))
+
+	if node_file is not None:
+		merge_node_targets(clear_targets, parse_sinfo(node_file, node_mixed))
+
+	if node_call:
+		with StringIO(slurm.command("sinfo -N")) as node_live:
+			merge_node_targets(clear_targets, parse_sinfo(node_live, node_mixed))
+
+	return clear_targets
+
+
+def load_job_preamble(job_preamble):
+	"""Read optional cluster-specific shell setup."""
+	if job_preamble is None:
+		return ""
+	try:
+		return job_preamble.read_text().rstrip()
+	except OSError as exc:
+		raise click.ClickException(f"Could not read job preamble {job_preamble}: {exc}") from exc
+
+
+def build_clean_command(shared_base, config_paths, execute):
+	"""Build the installed CLI invocation for a submitted cleanup job."""
+	command = ["mctutil", "mem", "clean", "--shared-base", str(shared_base)]
+	for config_path in config_paths:
+		command.extend(["--config", config_reference(config_path)])
+	command.append("--execute" if execute else "--dry-run")
+	return shlex.join(command)
+
+
+def build_sbatch_job(partition, nodes, clean_command, preamble, output_pattern, error_pattern):
+	"""Build a portable batch script and its Slurm arguments."""
+	script_parts = ["#!/bin/bash -l"]
+	if preamble:
+		script_parts.extend(["", preamble])
+	script_parts.extend(["", clean_command, ""])
+
+	args = [
+		"--job-name", "mem_clean",
+		"--nodelist", ",".join(nodes),
+		"--partition", partition,
+		"--nodes", str(len(nodes)),
+	]
+	if output_pattern is not None:
+		args.extend(["--output", output_pattern.replace("{partition}", partition)])
+	if error_pattern is not None:
+		args.extend(["--error", error_pattern.replace("{partition}", partition)])
+
+	return "\n".join(script_parts), args
+
+
+def mem_clean(shared_base, execute, prefixes):
+	"""List or unlink shared-memory entries matching configured prefixes."""
+	host = run(["hostname"], stdout=PIPE, check=False).stdout.decode().strip("\n")
+	prefix_values = tuple(dict.fromkeys(prefixes.values()))
 
 	for mem_path in shared_base.iterdir():
 		mem_name = mem_path.name
-		for prefix in shm.values():
-			if mem_name[:len(prefix)] == prefix:
-				if apply:
-					clean_target = shared_memory.SharedMemory(name=mem_name)
-					clean_target.close()
-					clean_target.unlink()
-				log.write("Mem Clean", f"{host}:{mem_name}:{apply}",
-						log_level=LOG.STATUS if apply else LOG.INFO)
-			elif mem_name[:len(other_shm)] == other_shm:
-				if apply_kmp:
-					try:
-						clean_target = shared_memory.SharedMemory(name=str(mem_name))
-						clean_target.close()
-						clean_target.unlink()
-					except FileNotFoundError:
-						pass
-					log.write("Mem Clean", f"{host}:{mem_name}:{apply}",
-							log_level=LOG.STATUS if apply else LOG.INFO)
+		if not mem_name.startswith(prefix_values):
+			continue
+
+		if execute:
+			try:
+				clean_target = shared_memory.SharedMemory(name=mem_name)
+				clean_target.close()
+				clean_target.unlink()
+			except FileNotFoundError:
+				continue
+
+		log.write(
+			"Mem Clean",
+			f"{host}:{mem_name}:{execute}",
+			log_level=LOG.STATUS if execute else LOG.INFO,
+		)
 
 
-@click.group()
-@click.option("--node_mixed", is_flag=True, help="Whether to scan/remove on mixed files.")
-@click.option("--apply", is_flag=True, help="Whether to clean shared memory or just write what memory exists.")
-@click.option("--apply_kmp", is_flag=True, help="Whether to clean KMP_REGISTERED_LIB entries.")
-@click.option("--shared_base", type=click.Path(exists=True), default="/dev/shm")
-@click.option("--remote", type=click.STRING, default=None)
-@click.pass_context
-def memclean(ctx, node_mixed, apply, apply_kmp, shared_base, remote):
-	ctx.obj = ipyslurm.Slurm()
+def _get_slurm(remote):
+	try:
+		import ipyslurm
+	except ImportError as exc:
+		raise click.ClickException(
+			"The mem mark command requires ipyslurm; install the project HPC environment."
+		) from exc
+
+	slurm = ipyslurm.Slurm()
 	if remote is not None:
-		ctx.obj.login(remote.split("@")[1], remote.split("@")[0])
+		try:
+			user, host = remote.split("@", 1)
+		except ValueError as exc:
+			raise click.ClickException("--remote must use USER@HOST format.") from exc
+		slurm.login(host, user)
+	return slurm
 
 
-@memclean.command()
-@click.pass_context
-def clean(ctx):
-	mem_clean(Path(ctx.parent.params["shared_base"]), ctx.parent.params["apply"], ctx.parent.params["apply_kmp"])
+@click.command()
+@prefix_config_option
+@click.option(
+	"--execute/--dry-run",
+	default=False,
+	show_default=True,
+	help="Unlink matching entries; the safe default only lists them.",
+)
+@click.option(
+	"--shared-base",
+	"--shared_base",
+	type=click.Path(exists=True, file_okay=False, path_type=Path),
+	default="/dev/shm",
+	show_default=True,
+)
+def clean(config_paths, execute, shared_base):
+	"""List or clean configured shared-memory entries on this node."""
+	mem_clean(shared_base, execute, load_prefix_configs(config_paths))
 
 
-@memclean.command()
-@click.option("--node_list", type=click.STRING, required=False, help="Comma separated list of nodes to clear.")
-@click.option("--node_file", type=click.File(), required=False, help="Path to output of sinfo -N to identify nodes.")
-@click.option("--node_call", is_flag=True,
-							help="Pull a list of nodes to parse for idle and mixed nodes from server.")
-@click.pass_context
-def mark(ctx, node_list, node_file, node_call):
-	base_params = ctx.parent.params.copy()
+@click.command()
+@prefix_config_option
+@click.option("--node-list", "--node_list", multiple=True,
+				help="Comma-separated Slurm nodes to inspect; may be repeated.")
+@click.option("--node-file", "--node_file", type=click.File("r"),
+				help="Saved output from sinfo -N.")
+@click.option("--node-call", "--node_call", is_flag=True,
+				help="Query sinfo -N for all eligible nodes.")
+@click.option("--node-mixed", "--node_mixed", is_flag=True,
+				help="Include nodes in the mixed state.")
+@click.option(
+	"--execute/--dry-run",
+	default=False,
+	show_default=True,
+	help="Make submitted jobs unlink matching entries; the safe default only reports them.",
+)
+@click.option(
+	"--shared-base",
+	"--shared_base",
+	type=click.Path(file_okay=False, path_type=Path),
+	default="/dev/shm",
+	show_default=True,
+	help="Shared-memory directory on the target nodes.",
+)
+@click.option("--remote", type=click.STRING, default=None,
+				help="Run Slurm commands through USER@HOST.")
+@click.option(
+	"--job-preamble",
+	type=click.Path(exists=True, dir_okay=False, path_type=Path),
+	help="File containing cluster-specific shell setup inserted before the mctutil command.",
+)
+@click.option(
+	"--sbatch-output",
+	help="Optional Slurm output pattern; supports {partition} and Slurm percent escapes.",
+)
+@click.option(
+	"--sbatch-error",
+	help="Optional Slurm error pattern; supports {partition} and Slurm percent escapes.",
+)
+def mark(
+	config_paths,
+	node_list,
+	node_file,
+	node_call,
+	node_mixed,
+	execute,
+	shared_base,
+	remote,
+	job_preamble,
+	sbatch_output,
+	sbatch_error,
+):
+	"""Submit one shared-memory cleanup job per selected Slurm partition."""
+	if not node_list and node_file is None and not node_call:
+		raise click.UsageError("Provide --node-list, --node-file, or --node-call.")
 
-	node_mixed = base_params.pop("node_mixed") 	# Used Here
-	base_params.pop("remote")					# Not Used in Batched Command
+	# Validate every config before submitting remote jobs.
+	load_prefix_configs(config_paths)
+	preamble = load_job_preamble(job_preamble)
+	slurm = _get_slurm(remote)
+	clear_targets = collect_node_targets(slurm, node_list, node_file, node_call, node_mixed)
+	if not clear_targets:
+		log.write("Mem Clean", "No eligible nodes found.", log_level=LOG.WARN)
+		return
 
-	clear_targets = {}
+	clean_command = build_clean_command(shared_base, config_paths, execute)
 
-# 	if node_list is None:
-# 	node_list = []
-# 	else:
-# 		node_list = node_list.split(",")
-
-	if node_file is not None:
-		for partition, nodes in parse_sinfo(node_file, node_mixed).items():
-			if partition in clear_targets:
-				clear_targets[partition].append(nodes)
-			else:
-				clear_targets[partition] = nodes
-
-	if node_call:
-		with StringIO(ctx.obj.command("sinfo -N")) as node_live:
-			for partition, nodes in parse_sinfo(node_live, node_mixed).items():
-				if partition in clear_targets:
-					clear_targets[partition].append(nodes)
-				else:
-					clear_targets[partition] = nodes
-
-	if len(clear_targets) > 0:
-		param_str = ' '.join([f"--{key}={value}" if not isinstance(value, bool) else f"--{key}"
-							for key, value in base_params.items()
-							if ctx.parent.get_parameter_source(key) != click.core.ParameterSource.DEFAULT])
-		for partition, nodes in clear_targets.items():
-			res = ctx.obj.sbatch(f"""
-#!/bin/bash -l
-
-module load miniconda/3
-source activate recon
-
-python -X pycache_prefix=~/.pycache ~/mem/clean.py {param_str} clean
-""", args=['--job-name', 'mem_clean',
-			'--output', f'~/mem/log/%j_{partition}.log',
-			'--error', f'~/mem/error/%j_{partition}.log',
-			'--nodelist', ','.join(nodes),
-			'--partition', partition,
-			'--nodes', str(len(nodes))
-])
-			log.write("Mem Clean", f"Job {partition}:{res}", log_level=LOG.STATUS)
-
-
-if __name__ == "__main__":
-	memclean()
+	for partition, partition_nodes in clear_targets.items():
+		script, args = build_sbatch_job(
+			partition,
+			partition_nodes,
+			clean_command,
+			preamble,
+			sbatch_output,
+			sbatch_error,
+		)
+		res = slurm.sbatch(script, args=args)
+		log.write("Mem Clean", f"Job {partition}:{res}", log_level=LOG.STATUS)

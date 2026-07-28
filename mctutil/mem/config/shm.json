@@ -1,0 +1,12 @@
+{
+  "rsm": "rot",
+  "psm": "proj",
+  "fsm": "flat",
+  "ysm": "y_rot",
+  "pfm": "phase",
+  "log": "last_step",
+  "ssm": "sino",
+  "wsm": "work",
+  "csm": "center",
+  "inp": "input"
+}

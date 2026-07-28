@@ -26,6 +26,29 @@ def test_mem_group_help_lists_collapsed_commands():
 		assert name in result.output
 
 
+def test_mem_leaf_help_lists_config_and_node_selection_options():
+	result = CliRunner().invoke(main, ["mem", "clean", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "--config" in result.output
+	assert "--shared-base" in result.output
+	assert "--execute" in result.output
+	assert "--dry-run" in result.output
+	assert "--apply" not in result.output
+
+	result = CliRunner().invoke(main, ["mem", "mark", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "--config" in result.output
+	assert "--node-list" in result.output
+	assert "--node-file" in result.output
+	assert "--node-call" in result.output
+	assert "--job-preamble" in result.output
+	assert "--sbatch-output" in result.output
+	assert "--sbatch-error" in result.output
+	assert "--execute" in result.output
+	assert "--dry-run" in result.output
+	assert "--apply" not in result.output
+
+
 def test_mesh_group_exposes_only_unified_build_command():
 	result = CliRunner().invoke(main, ["mesh", "--help"])
 	assert result.exit_code == 0, result.output
