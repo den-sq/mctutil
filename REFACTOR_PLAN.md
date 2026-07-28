@@ -41,10 +41,6 @@ references inline). Audience: `den-sq/mctutil` maintainers.
 
 Still open after the chain:
 
-- Issue **#37** — Unify mesh build paths. `transform/mesh.py`,
-  `transform/mesh_ig.py`, and `transport/s3upload.py --mesh` all call
-  `tc.create_meshing_tasks` directly; factoring requires CloudVolume
-  network access to verify end-to-end.
 - Issue **#64** — `mem/clean.py` revision pass. Covers the §6.4 sbatch
   heredoc per-cluster parameterization plus several other ergonomic
   defects in `mem/clean.py` that the refactor chain didn't sweep up.
@@ -160,7 +156,7 @@ All resolved in #51 (Phase 3); `meta_shift.py` further refactored in #58.
 | Normalize / convert dtype | `transform/normalize.py`, `transform/transform.py::norm`, `transform/convert.py::np_convert`, `shared/cli.py::NumpyCLI.convert_ar` | `convert.np_convert` is the cleanest pure helper; promote to `shared/np_convert.py`. Pin a single `normalize` command that uses it. | Shipped in #50: `shared/np_convert.py` is the helper; `transform normalize` is the one normalize command. |
 | Decompress / unzip | `transform/uncompress.py` (rewrites TIFFs uncompressed), `transform/gz_strip.py` (just renames `.gz` → strips suffix), `transform/quickgunzip.py` (real gunzip + brotli) | Three different things mislabeled with similar names. Rename: `decompress-tiff`, `strip-gz-suffix`, `gunzip`. Keep all three under one verb group with distinct subcommands. | Shipped in #52 (Phase 4): all three registered under `transform` as `decompress-tiff`, `strip-gz-suffix`, `gunzip`. |
 | S3 upload | `transform/upload.py`, `transport/s3upload.py` | `transport/s3upload.py` is the more complete one (uses profile, optionally meshes after upload). Retire `transform/upload.py`. | Shipped in #51: `transform/upload.py` deleted, `transport/s3upload.py` is the single S3 path (CLI: `transport s3-upload`). |
-| Mesh generation | `transform/mesh.py` (broken, has hardcoded params), `transform/mesh_ig.py` (clean), `transport/s3upload.py --mesh` (inline) | Fix `transform/mesh.py` or drop it. `mesh_ig.py` and the `s3upload --mesh` path both call the same `tc.create_meshing_tasks` API; factor into one helper. | Partial: `transform/mesh.py` typo fixed in #49 and both registered separately (`mesh build`, `mesh build-igneous`); the `s3-upload --mesh` inline path was not factored into a shared helper. **Open.** |
+| Mesh generation | `transform/mesh.py` (broken, has hardcoded params), `transform/mesh_ig.py` (clean), `transport/s3upload.py --mesh` (inline) | Fix `transform/mesh.py` or drop it. `mesh_ig.py` and the `s3upload --mesh` path both call the same `tc.create_meshing_tasks` API; factor into one helper. | Resolved in #37: `shared/mesh.py::build_mesh` owns the two-pass unsharded multiresolution workflow; `mesh build` and `s3-upload --mesh` both call it, the old hardcoded implementation was removed, and `build-igneous` was retired. |
 | `cleanup_mem` / `exit_cleanly` | Defined verbatim in both `shared/log.py` and `shared/mem.py`. | Pick one location (`shared/mem.py` — it's the natural owner of shared-memory cleanup). `shared/log.py` should import from `mem`, not redefine. | Shipped in #50: `shared/log.py` now imports the canonical implementations from `shared/mem.py`. |
 
 ### 2.3 Repeated Click `ParamType` patterns
@@ -232,7 +228,7 @@ mapping stays familiar:
 | `transform` | `normalize`, `trim`, `transpose`, `downsample`, `channelize`, `convert`, `find-bounds`, `denoise`, `stitch`, `decompress-tiff`, `gunzip`, `strip-gz-suffix` | All shipped (#52), plus `df-write-tiff`, `dicom-conv`, `fix-name`, `hdf-convert`, and `neuroglance` (was `transform/ng.py`). |
 | `sino` | `convert` (full flats), `preprocess` (no flats), `find-bounds` | `sino convert` shipped in #52 with `--mode full|preproc`; `find-bounds` lives under `transform find-bounds` instead. |
 | `ng` | `layer copy`, `layer extract`, `layer tag`, `layer urlshift`, `layer recolor`, `point add`, `point merge`, `point sort`, `point shift`, `position copy`, `shift-angle`, `build` (= current `transform/ng.py`) | All shipped (#52); `ng build` wraps the former `transform/ng.py`. |
-| `mesh` | `build`, `manifest` (the two-pass igneous flow) | `mesh build` and `mesh build-igneous` shipped (#52); the two-pass manifest variant runs inside `mesh build`. |
+| `mesh` | `build`, `manifest` (the two-pass igneous flow) | `mesh build` is the sole command after #37 and runs the forge plus unsharded multiresolution merge passes. |
 | `transport` | `s3 upload`, `cv fetch` | Shipped as `transport s3-upload` and `transport cv-fetch` (#52). |
 | `mem` | `clean`, `mark`, `list` | `mem clean`, `mem mark`, `mem from-file`, `mem from-range` shipped (#52). `list` not implemented — **open**. |
 | `parse` | `meta-shift` (the consolidated `meta_*.py`), `scanlog-fetch`, `pull-config`, `find-errs`, `prune-empty` | `parse meta-shift`, `parse pull-config`, `parse scanlog-fetch` shipped (#52); `parse prune-empty` shipped in #56. `find-errs` not implemented — **open**. |
@@ -559,9 +555,8 @@ What actually happened (2026-05-21):
   the top-level CLI).
 - The maintainer separately wired up the Phase 0 CI workflow (lint +
   smoke matrix on Python 3.10 / 3.11 / 3.12), closing issue #13.
-- Remaining concrete follow-ups: mesh-helper factoring (issue #37,
-  needs network), `mem/clean.py` revision pass (issue #64, including
-  the §6.4 sbatch heredoc per-cluster parameterization), and
-  optional-dependencies groups in `pyproject.toml`.
+- Remaining concrete follow-ups: `mem/clean.py` revision pass (issue
+  #64, including the §6.4 sbatch heredoc per-cluster parameterization),
+  and optional-dependencies groups in `pyproject.toml`.
 - `hpc_work/codeclist.txt` decision was: keep, per maintainer
   instruction.

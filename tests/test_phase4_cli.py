@@ -26,6 +26,13 @@ def test_mem_group_help_lists_collapsed_commands():
 		assert name in result.output
 
 
+def test_mesh_group_exposes_only_unified_build_command():
+	result = CliRunner().invoke(main, ["mesh", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "build" in result.output
+	assert "build-igneous" not in result.output
+
+
 def test_issue72_groups_help_lists_promoted_commands():
 	result = CliRunner().invoke(main, ["als832", "--help"])
 	assert result.exit_code == 0, result.output

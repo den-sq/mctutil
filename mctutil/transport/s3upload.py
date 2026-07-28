@@ -1,15 +1,14 @@
 from pathlib import Path
-from taskqueue import LocalTaskQueue
 
 from concurrent.futures import ProcessPoolExecutor
 from botocore.exceptions import ClientError
 
 import boto3
 import click
-import igneous.task_creation as tc
 
 
 from mctutil.shared.log import log, LOG
+from mctutil.shared.mesh import build_mesh
 
 _session = None
 
@@ -62,7 +61,8 @@ def upload_folder_to_s3_parallel(folder_path, target_folder, bucket_name, num_pr
 @click.command()
 @click.option("-p", "--bucket-prefix", type=click.Path(path_type=Path), required=True)
 @click.option("-n", "--bucket-name", type=click.STRING, required=True, help="Name of target s3 bucket.")
-@click.option("-t", "--process-count", type=click.INT, default=60, help="Number of simultaneous uploads.")
+@click.option("-t", "--process-count", type=click.IntRange(min=1), default=60,
+				help="Number of simultaneous uploads.")
 @click.option("--mesh", type=click.BOOL, is_flag=True, show_default=True, default=False,
 				help="Whether to mesh the resulting upload.")
 @click.option('--execute/--dry-run', default=True,
@@ -87,14 +87,13 @@ def s3upload(bucket_prefix, bucket_name, process_count, mesh, execute, source_fo
 	if mesh:
 		mesh_path = f"precomputed://s3://{bucket_name}/{target_full}"
 		log.write("S3 Upload", f"full remote path: {mesh_path}", log_level=LOG.STATUS)
-		if execute:
-			tq = LocalTaskQueue(parallel=process_count // 4)
-			tq.insert(tc.create_meshing_tasks(mesh_path, mip=0))
-			tq.execute()
-			tq.insert(tc.create_unsharded_multires_mesh_tasks(mesh_path, num_lod=4))
-			tq.execute()
-		else:
-			log.write("S3 Upload", f"Would mesh {mesh_path}", log_level=LOG.INFO)
+		build_mesh(
+			mesh_path,
+			mip=0,
+			num_lod=4,
+			parallel=max(1, process_count // 4),
+			execute=execute,
+		)
 
 
 if __name__ == '__main__':
