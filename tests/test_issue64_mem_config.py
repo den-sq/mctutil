@@ -5,6 +5,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from mctutil.cli import main
+
 
 def test_prefix_configs_default_to_shm_and_merge_custom_overrides(load_module, tmp_path):
 	module = load_module("mctutil/mem/clean.py")
@@ -88,6 +90,21 @@ def test_mem_clean_applies_all_configured_prefixes_once(load_module, monkeypatch
 	)
 
 	assert sorted(unlinked) == ["__KMP_REGISTERED_LIB_123", "rot-volume"]
+
+
+def test_clean_dry_run_reports_matches_at_default_log_level(tmp_path):
+	(tmp_path / "rot-visible").touch()
+	(tmp_path / "unrelated").touch()
+
+	result = CliRunner().invoke(
+		main,
+		["mem", "clean", "--shared-base", str(tmp_path), "--dry-run"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert "STATUS" in result.output
+	assert "rot-visible" in result.output
+	assert "unrelated" not in result.output
 
 
 def test_mark_node_list_queries_partitions_and_submits_eligible_nodes(load_module, monkeypatch, tmp_path):

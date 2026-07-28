@@ -236,7 +236,7 @@ def mem_clean(shared_base, execute, prefixes):
 		log.write(
 			"Mem Clean",
 			f"{host}:{mem_name}:{execute}",
-			log_level=LOG.STATUS if execute else LOG.INFO,
+			log_level=LOG.STATUS,
 		)
 
 
