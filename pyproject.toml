@@ -23,6 +23,11 @@ flats = [
   "scipy",
   "tifffile",
 ]
+transform = [
+  "h5py",
+  "numpy",
+  "tifffile",
+]
 
 [project.scripts]
 mctutil = "mctutil.cli:main"

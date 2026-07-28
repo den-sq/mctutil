@@ -73,3 +73,19 @@ def test_click_help_smoke(load_module, case: CommandCase):
 	command = getattr(module, case.attr_name)
 	result = CliRunner().invoke(command, list(case.argv))
 	assert result.exit_code == 0, result.output
+
+
+def test_issue76_modified_command_flags(load_module):
+	cases = [
+		("mctutil/transform/ng.py", "neuroglance", "--channel-count"),
+		("mctutil/transform/normalize.py", "norm", "--hard-cut"),
+		("mctutil/transform/normalize.py", "norm", "--relative-cut"),
+		("mctutil/transport/cv_import.py", "cloudvolume_fetch", "--out-dtype"),
+		("mctutil/transport/cv_import.py", "cloudvolume_fetch", "--transpose-axes"),
+		("mctutil/transport/cv_import.py", "cloudvolume_fetch", "--original-axes"),
+	]
+	for module_path, attr_name, option in cases:
+		module = load_module(module_path)
+		result = CliRunner().invoke(getattr(module, attr_name), ["--help"])
+		assert result.exit_code == 0, result.output
+		assert option in result.output

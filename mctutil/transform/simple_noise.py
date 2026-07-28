@@ -11,7 +11,6 @@ from mctutil.shared.log import log, LOG
 
 
 def denoise_threshold(input_paths, output_path, threshold):
-	log.write("Simple Denoise", f"Threshold inputs: {input_paths}", log_level=LOG.INFO)
 	base_data = np.array([tf.imread(infile) for infile in input_paths]).astype(np.int32)
 
 	floor = np.min(base_data)
@@ -20,6 +19,12 @@ def denoise_threshold(input_paths, output_path, threshold):
 
 	mask = np.logical_and(np.abs(np.subtract(base_data[1], base_data[0])) > gap,
 							np.abs(np.subtract(base_data[1], base_data[2]) > gap))
+	log.write(
+		"Simple Denoise",
+		f"threshold stats: ceiling={ceiling}, floor={floor}, threshold={threshold}, "
+		f"gap={gap}, mask_counts={np.unique(mask, return_counts=True)}",
+		log_level=LOG.INFO,
+	)
 
 	if len(base_data[0][mask] > 0):
 		base_data[1][mask] = np.average([base_data[0][mask], base_data[2][mask]], axis=0)
