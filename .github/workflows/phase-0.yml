@@ -1,0 +1,48 @@
+name: Phase 0 CI
+
+on:
+  push:
+    branches:
+      - master
+      - refactor
+  pull_request:
+    branches:
+      - master
+      - refactor
+
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: conda-incubator/setup-miniconda@v4
+        with:
+          channels: conda-forge
+          conda-remove-defaults: true
+          activate-environment: mctutil
+          auto-activate: false
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install environment
+        shell: bash -el {0}
+        run: |
+          conda env update -n mctutil -f environment.yml
+          python -m pip install --no-deps -e .
+
+      - name: Lint
+        shell: bash -el {0}
+        run: |
+          flake8 mctutil scripts tests
+          python scripts/check_python_tabs.py
+
+      - name: Smoke tests
+        shell: bash -el {0}
+        run: |
+          pytest tests/
+          mctutil --help

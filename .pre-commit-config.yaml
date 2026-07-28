@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: python-tabs
+        name: Enforce tabs for Python indentation
+        entry: python3 scripts/check_python_tabs.py
+        language: system
+        types: [python]
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
