@@ -142,6 +142,7 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 	neuroglancer_generate.generate_scales_info = lambda *_args, **_kwargs: None
 	neuroglancer_slices = types.ModuleType("neuroglancer_scripts.scripts.slices_to_precomputed")
 	neuroglancer_slices.convert_slices_in_directory = lambda *_args, **_kwargs: None
+	neuroglancer_slices.slices_to_raw_chunks = lambda *_args, **_kwargs: None
 	neuroglancer_compute = types.ModuleType("neuroglancer_scripts.scripts.compute_scales")
 	neuroglancer_compute.compute_scales = lambda *_args, **_kwargs: None
 	neuroglancer_scripts.scripts = neuroglancer_scripts_scripts
