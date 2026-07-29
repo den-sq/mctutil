@@ -29,7 +29,7 @@ def _require_dependencies():
 	except ImportError as exc:
 		raise RuntimeError(
 			"ng shard requires igneous-pipeline and task-queue; "
-			"install with pip install -e '.[mesh]'"
+			"install with pip install -e '.[ng,mesh]'"
 		) from exc
 	return CloudVolume, task_creation
 
@@ -140,7 +140,9 @@ def create_shard_tasks(
 			encoding=encoding,
 			memory_target=memory,
 			compress="br",
-			truncate_scales=True,
+			# Preserve absolute mip positions when staging multiple or
+			# non-contiguous scales through sequential factory calls.
+			truncate_scales=False,
 		)
 
 	legacy_factory = task_creation.create_transfer_tasks
