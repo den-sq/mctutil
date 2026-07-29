@@ -66,6 +66,10 @@ CASES = [
 	CommandCase("mctutil/transform/simple_noise.py", "simple_denoise"),
 	CommandCase("mctutil/transform/sinogram.py", "sino_convert"),
 	CommandCase("mctutil/transform/stitch.py", "stitch"),
+	CommandCase(
+		"mctutil/transform/stitch_reconstructions.py",
+		"stitch_reconstructions",
+	),
 	CommandCase("mctutil/transform/transform.py", "norm"),
 	CommandCase("mctutil/transform/transpose.py", "transpose_stack"),
 	CommandCase("mctutil/transform/trim.py", "trim"),

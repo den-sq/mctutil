@@ -23,6 +23,9 @@ main = LazyGroup(
 		"denoise": "mctutil.transform.simple_noise:simple_denoise",
 		"stack-split": "mctutil.transform.stack_split:stack_split",
 		"stitch": "mctutil.transform.stitch:stitch",
+		"stitch-reconstructions": (
+			"mctutil.transform.stitch_reconstructions:stitch_reconstructions"
+		),
 		"transpose": "mctutil.transform.transpose:transpose_stack",
 		"trim": "mctutil.transform.trim:trim",
 		"decompress-tiff": "mctutil.transform.uncompress:uncompress",
