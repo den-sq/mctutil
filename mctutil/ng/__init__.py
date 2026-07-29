@@ -7,6 +7,7 @@ main = LazyGroup(
 	help="Neuroglancer JSON, layer, and annotation helpers.",
 	lazy_subcommands={
 		"build": "mctutil.transform.ng:neuroglance",
+		"downsample-pyramid": "mctutil.ng.downsample_pyramid:downsample_pyramid",
 		"layer-copy": "mctutil.ng.layer_copy:layer_copy",
 		"layer-extract": "mctutil.ng.layer_extract:layer_extract",
 		"layer-recolor": "mctutil.ng.change_color:change_color",
