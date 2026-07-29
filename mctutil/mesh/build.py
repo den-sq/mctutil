@@ -2,6 +2,7 @@
 
 from collections import namedtuple
 from multiprocessing import cpu_count
+from pathlib import Path
 
 import click
 
@@ -63,6 +64,13 @@ MESH_VECTOR = DelimitedRecord(
 				help="Minimum multiresolution chunk size as X,Y,Z voxels.")
 @click.option("--execute/--dry-run", default=True,
 				help="Whether to run mesh tasks or only describe the workflow.")
+@click.option(
+	"--queue",
+	"queue_dir",
+	type=click.Path(path_type=Path),
+	help="Durable FileQueue root for crash-resumable forge and merge passes.",
+)
+@click.option("--lease-seconds", type=click.IntRange(min=10), default=3600, show_default=True)
 @click.argument("layer_path", type=click.STRING)
 def mesh(
 	parallel,
@@ -82,11 +90,12 @@ def mesh(
 	vertex_quantization_bits,
 	min_chunk_size,
 	execute,
+	queue_dir,
+	lease_seconds,
 	layer_path,
 ):
 	"""Build an unsharded multiresolution mesh for LAYER_PATH."""
-	build_mesh(
-		layer_path,
+	options = dict(
 		mip=mip,
 		num_lod=num_lod,
 		parallel=parallel,
@@ -105,6 +114,10 @@ def mesh(
 		min_chunk_size=min_chunk_size,
 		execute=execute,
 	)
+	if queue_dir is not None:
+		options["queue_dir"] = queue_dir
+		options["lease_seconds"] = lease_seconds
+	build_mesh(layer_path, **options)
 
 
 if __name__ == "__main__":
