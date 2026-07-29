@@ -32,7 +32,12 @@ transform = [
 ng = [
   "cloud-files",
   "cloud-volume",
+  "flask",
+  "flask-cors",
+  "neuroglancer",
   "neuroglancer-scripts",
+  "qrcode[pil]",
+  "rangehttpserver",
   "zarr<3",
 ]
 # The recon half of the sinogram stack (tomopy) is conda-forge-only and stays

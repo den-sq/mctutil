@@ -8,6 +8,7 @@ main = LazyGroup(
 	lazy_subcommands={
 		"build": "mctutil.transform.ng:neuroglance",
 		"downsample-pyramid": "mctutil.ng.downsample_pyramid:downsample_pyramid",
+		"http-check": "mctutil.ng.http_check:http_check",
 		"layer-copy": "mctutil.ng.layer_copy:layer_copy",
 		"layer-extract": "mctutil.ng.layer_extract:layer_extract",
 		"layer-recolor": "mctutil.ng.change_color:change_color",
@@ -22,5 +23,7 @@ main = LazyGroup(
 		"publish": "mctutil.ng.publish:publish",
 		"shard": "mctutil.ng.shard:shard",
 		"shift-angle": "mctutil.ng.shift_angle:shift_angle",
+		"serve": "mctutil.ng.serve:serve",
+		"validate": "mctutil.ng.validate:validate",
 	},
 )

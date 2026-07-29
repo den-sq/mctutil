@@ -10,8 +10,11 @@ command's options.
 - **`build`** — Build a Neuroglancer precomputed volume (image or segmentation) from a stack.
 - **`precompute`** — Write resumable, process-parallel CloudVolume MIP-0 output from TIFF input.
 - **`downsample-pyramid`** — Build a volumetric MIP pyramid with durable Igneous task queues.
+- **`http-check`** — Smoke-test `info` and explicit chunk URLs with GET or HEAD.
 - **`publish`** — Run the stage-aware, resumable sharded publishing pipeline.
 - **`shard`** — Stage a precomputed pyramid into sharded per-mip output.
+- **`serve`** — Serve local precomputed data with Range/CORS or Flask and an optional viewer.
+- **`validate`** — Validate precomputed metadata and representative origin/center reads.
 - **`layer-copy`** — Merge annotation layers from one Neuroglancer JSON into another, writing a new file.
 - **`layer-extract`** — Extract layers from a Neuroglancer JSON into a new file.
 - **`layer-recolor`** — Recolor the segment colors of a named annotation.
