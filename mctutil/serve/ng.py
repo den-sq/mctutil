@@ -40,6 +40,24 @@ def resolve_bind_address(bind: str, expose: bool) -> str:
 	return bind
 
 
+def exposure_warning(bind: str, advertise_host: str) -> str | None:
+	normalized_host = advertise_host.strip().strip("[]").lower()
+	if bind in LOOPBACK_HOSTS or normalized_host not in LOOPBACK_HOSTS:
+		return None
+	return (
+		f"Warning: server is unauthenticated with permissive CORS on {bind}; "
+		f"advertised host {advertise_host} is loopback and will be unreachable "
+		"from other devices. Set --advertise-host to a reachable hostname or "
+		"address, and do not expose this server on untrusted networks."
+	)
+
+
+def echo_exposure_warning(bind: str, advertise_host: str) -> None:
+	warning = exposure_warning(bind, advertise_host)
+	if warning is not None:
+		click.echo(warning, err=True)
+
+
 def _require_range_handler():
 	try:
 		from RangeHTTPServer import RangeRequestHandler
@@ -231,7 +249,10 @@ def run_server(
 @click.option(
 	"--expose",
 	is_flag=True,
-	help="Permit non-loopback binding; changes the default bind to 0.0.0.0.",
+	help=(
+		"Permit unauthenticated, permissive-CORS non-loopback serving; "
+		"changes the default bind to 0.0.0.0. Do not use on untrusted networks."
+	),
 )
 @click.option(
 	"--advertise-host",
@@ -274,6 +295,7 @@ def ng(
 			raise ValueError("--data-port and --viewer-port must differ")
 		if not viewer and (open_browser or qr_path is not None):
 			raise ValueError("--open-browser and --qr require --viewer")
+		echo_exposure_warning(bind, advertise_host)
 
 		click.echo(f"Layer root: {layer_root}")
 		click.echo(f"Layer type: {layer_type}")

@@ -4,7 +4,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib
 import json
 from pathlib import Path
+import sys
 import threading
+import types
 from urllib.request import Request, urlopen
 
 from click.testing import CliRunner
@@ -84,6 +86,23 @@ def test_serve_requires_explicit_exposure(load_module, tmp_path):
 	)
 	assert exposed.exit_code == 0, exposed.output
 	assert "bind: 0.0.0.0:8000" in exposed.output
+	assert "server is unauthenticated with permissive CORS" in exposed.output
+	assert "advertised host 127.0.0.1 is loopback" in exposed.output
+	assert "Set --advertise-host" in exposed.output
+	assert "untrusted networks" in exposed.output
+
+	reachable = CliRunner().invoke(
+		module.ng,
+		[
+			str(layer),
+			"--expose",
+			"--advertise-host", "viewer.example.test",
+			"--dry-run",
+		],
+	)
+	assert reachable.exit_code == 0, reachable.output
+	assert "Advertised host: viewer.example.test" in reachable.output
+	assert "advertised host 127.0.0.1 is loopback" not in reachable.output
 
 
 def test_serve_advertises_configured_host(load_module):
@@ -265,6 +284,7 @@ def test_validate_reports_metadata_and_configurable_reads(
 ):
 	module = load_module("mctutil/ng/validate.py")
 	monkeypatch.setattr(module, "_require_cloudvolume", lambda: FakeVolume)
+	monkeypatch.setattr(module, "load_info", lambda _cloudpath: VALID_INFO)
 	monkeypatch.setattr(module, "patch_cloudfiles_monitoring", lambda: True)
 
 	result = CliRunner().invoke(
@@ -285,20 +305,44 @@ def test_validate_reports_metadata_and_configurable_reads(
 	assert "Validation passed." in result.output
 
 
-def test_validate_structural_failure_is_nonzero(load_module, monkeypatch):
+def test_validate_structural_failure_precedes_cloudvolume(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
 	module = load_module("mctutil/ng/validate.py")
+	layer = tmp_path / "malformed-layer"
+	layer.mkdir()
+	(layer / "info").write_text(
+		json.dumps({"type": "image", "scales": []}),
+		encoding="utf-8",
+	)
 
-	class InvalidVolume(FakeVolume):
-		info = {"type": "image", "scales": []}
+	class FakeCloudFiles:
+		def __init__(self, *_args, **_kwargs):
+			pass
 
-	monkeypatch.setattr(module, "_require_cloudvolume", lambda: InvalidVolume)
+		def get(self, path):
+			return (layer / path).read_bytes()
+
+	cloudfiles = types.ModuleType("cloudfiles")
+	cloudfiles.CloudFiles = FakeCloudFiles
+	monkeypatch.setitem(sys.modules, "cloudfiles", cloudfiles)
+	monkeypatch.setattr(
+		module,
+		"_require_cloudvolume",
+		lambda: (_ for _ in ()).throw(
+			AssertionError("CloudVolume constructed before structural validation")
+		),
+	)
 
 	result = CliRunner().invoke(
 		module.validate,
-		["file:///bad", "--metadata-only"],
+		[str(layer), "--metadata-only"],
 	)
 
 	assert result.exit_code != 0
+	assert not isinstance(result.exception, AssertionError)
 	assert "missing info field: data_type" in result.output
 	assert "scales must be a non-empty list" in result.output
 

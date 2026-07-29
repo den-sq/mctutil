@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
@@ -26,6 +27,22 @@ def _require_cloudvolume():
 			"ng validate requires CloudVolume; install with pip install -e '.[ng]'"
 		) from exc
 	return CloudVolume
+
+
+def load_info(cloudpath: str):
+	try:
+		from cloudfiles import CloudFiles
+	except ImportError as exc:
+		raise RuntimeError(
+			"ng validate requires CloudFiles; install with pip install -e '.[ng]'"
+		) from exc
+	payload = CloudFiles(cloudpath, progress=False).get("info")
+	if payload is None:
+		raise ValueError(f"layer has no info metadata: {cloudpath}")
+	try:
+		return json.loads(payload)
+	except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as exc:
+		raise ValueError(f"layer info is not valid JSON: {cloudpath}/info") from exc
 
 
 def validate_triplet(
@@ -232,18 +249,9 @@ def validate(
 ) -> None:
 	"""Validate metadata and representative blocks in a precomputed layer."""
 	try:
-		CloudVolume = _require_cloudvolume()
 		patch_cloudfiles_monitoring()
 		cloudpath = normalize_cloudpath(layer_path)
-		volume = CloudVolume(
-			cloudpath,
-			mip=mip,
-			parallel=False,
-			bounded=True,
-			cache=False,
-			fill_missing=False,
-		)
-		info = volume.info
+		info = load_info(cloudpath)
 		errors = validate_info(info)
 		if not isinstance(info, dict):
 			raise ValueError("; ".join(errors))
@@ -254,6 +262,15 @@ def validate(
 			click.echo("Structural validation passed; data reads skipped.")
 			return
 
+		CloudVolume = _require_cloudvolume()
+		volume = CloudVolume(
+			cloudpath,
+			mip=mip,
+			parallel=False,
+			bounded=True,
+			cache=False,
+			fill_missing=False,
+		)
 		minimum = tuple(int(value) for value in volume.bounds.minpt)
 		maximum = tuple(int(value) for value in volume.bounds.maxpt)
 		if read_origin:

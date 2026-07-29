@@ -15,3 +15,8 @@ Install the server dependencies with:
 ```console
 pip install -e '.[serve]'
 ```
+
+The server is loopback-only by default. `--expose` enables unauthenticated
+serving with permissive CORS on non-loopback interfaces; do not use it on
+untrusted networks. Set `--advertise-host` to a hostname or address reachable
+by the devices opening the generated viewer URL or QR code.
