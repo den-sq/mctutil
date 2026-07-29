@@ -32,7 +32,7 @@ Notes:
   not published on conda-forge today: `cloud-volume`, `dicom2jpg`,
   `igneous-pipeline`, `neuroglancer-scripts`, and `task-queue`.
 - Optional-dependency extras are declared for the heavy, orthogonal stacks:
-  `[als832]`, `[flats]`, `[ng]`, `[sino]`, `[mesh]`, `[aws]`, and
+  `[als832]`, `[flats]`, `[ng]`, `[serve]`, `[sino]`, `[mesh]`, `[aws]`, and
   `[dragonfly]`, so e.g. `python -m pip install -e .[mesh]` pulls only the
   mesh dependencies. The extras are complementary to `environment.yml`, not
   a replacement: conda-only packages stay in the conda env (`tomopy` for the
@@ -55,6 +55,7 @@ mctutil transform trim --help
 mctutil transform normalize --help
 mctutil sino convert --help
 mctutil ng point-add --help
+mctutil serve ng --help
 mctutil mesh build --help
 mctutil transport s3-upload --help
 mctutil mem clean --help
@@ -105,6 +106,8 @@ Each category has its own README with the full command breakdown; run
   (`sino convert --mode full|preproc`)
 - [`ng`](mctutil/ng/README.md) — Neuroglancer JSON, layer, and annotation
   helpers, plus `ng build`
+- [`serve`](mctutil/serve/README.md) — local data and visualization servers
+  (`serve ng`)
 - [`mesh`](mctutil/mesh/README.md) — Igneous mesh generation (`mesh build`)
 - [`transport`](mctutil/transport/README.md) — S3 / CloudVolume data movement
   (`s3-upload`, `cv-fetch`)

@@ -84,7 +84,7 @@ Map each pipeline stage to a `mctutil` command. Dependency order = shippable ord
 | shard | `ng shard` (#95) | `create_transfer_tasks(sharded=True)`, per-mip chunk map — the headline new capability |
 | upload | extend `transport s3-upload` (#96) | sharded-tree aware; parallel per-mip; `aws s3 sync` |
 | mesh | existing `mesh build` | no port; orchestrator calls it |
-| orchestrate | `ng publish` (#97) | chains the above + optional `ng serve` / `validate` / `http-check` |
+| orchestrate | `ng publish` (#97) | chains the above + optional `serve ng` / `ng validate` / `ng http-check` |
 
 ## Resume architecture (verified)
 

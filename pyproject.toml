@@ -35,6 +35,13 @@ ng = [
   "neuroglancer-scripts",
   "zarr<3",
 ]
+serve = [
+  "flask",
+  "flask-cors",
+  "neuroglancer",
+  "qrcode[pil]",
+  "rangehttpserver",
+]
 # The recon half of the sinogram stack (tomopy) is conda-forge-only and stays
 # in environment.yml; scikit-image is the pip-installable stack dependency.
 sino = [
