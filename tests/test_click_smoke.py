@@ -49,6 +49,7 @@ CASES = [
 	CommandCase("mctutil/transform/flip.py", "flip_stack"),
 	CommandCase("mctutil/transform/gz_strip.py", "stripgz"),
 	CommandCase("mctutil/transform/hdf_convert.py", "hdf_convert"),
+	CommandCase("mctutil/transform/memmap_prep.py", "memmap_prep"),
 	CommandCase("mctutil/mesh/build.py", "mesh"),
 	CommandCase("mctutil/transform/ng.py", "neuroglance"),
 	CommandCase("mctutil/transform/normalize.py", "norm"),

@@ -27,9 +27,11 @@ transform = [
   "h5py",
   "numpy",
   "tifffile",
+  "zarr<3",
 ]
 ng = [
   "neuroglancer-scripts",
+  "zarr<3",
 ]
 # The recon half of the sinogram stack (tomopy) is conda-forge-only and stays
 # in environment.yml; scikit-image is the pip-installable stack dependency.
