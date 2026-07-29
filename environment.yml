@@ -28,3 +28,4 @@ dependencies:
       - igneous-pipeline
       - neuroglancer-scripts
       - task-queue
+      - zarr<3

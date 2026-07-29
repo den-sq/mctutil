@@ -16,6 +16,7 @@ main = LazyGroup(
 		"flip": "mctutil.transform.flip:flip_stack",
 		"h5-convert": "mctutil.transform.h5_convert:h5_convert",
 		"hdf-convert": "mctutil.transform.hdf_convert:hdf_convert",
+		"memmap-prep": "mctutil.transform.memmap_prep:memmap_prep",
 		"normalize": "mctutil.transform.normalize:norm",
 		"raw-convert": "mctutil.transform.raw_convert:raw_convert",
 		"reslice": "mctutil.transform.reslice:reslice",

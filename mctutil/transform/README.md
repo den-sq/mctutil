@@ -26,6 +26,7 @@ Run `mctutil transform --help` to list commands and
 - **`hdf-convert`** — Convert HDF (usually HDF4) files to TIFF.
 - **`h5-convert`** — Export image-like datasets from an HDF5 file as TIFF stacks.
 - **`raw-convert`** — Convert a raw 3D image volume to a TIFF stack or per-Z folder.
+- **`memmap-prep`** — Stream a 3D TIFF into an uncompressed contiguous TIFF for fast memory-mapped reads.
 - **`dicom-conv`** — Convert DICOM files to TIFF.
 - **`df-write-tiff`** — Export TIFFs from ORS/Dragonfly objects by class+title or id (Dragonfly-only; paths via `DRAGONFLY_*` env vars).
 
