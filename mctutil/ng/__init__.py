@@ -19,6 +19,7 @@ main = LazyGroup(
 		"point-sort": "mctutil.ng.point_sort:point_sort",
 		"position-copy": "mctutil.ng.position_copy:position_copy",
 		"precompute": "mctutil.ng.precompute:precompute",
+		"shard": "mctutil.ng.shard:shard",
 		"shift-angle": "mctutil.ng.shift_angle:shift_angle",
 	},
 )
