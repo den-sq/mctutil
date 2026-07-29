@@ -1,4 +1,5 @@
 from enum import Enum, Flag, auto
+import re
 
 import click
 import numpy as np
@@ -173,6 +174,21 @@ class CropNumberType(click.ParamType):
 		return converted
 
 
+class IntegerTriple(click.ParamType):
+	name = "X,Y,Z"
+
+	def convert(self, value, param, ctx):
+		if isinstance(value, tuple) and len(value) == 3:
+			return value
+		try:
+			parts = tuple(int(item) for item in re.split(r"[x,]", str(value)))
+		except ValueError:
+			self.fail(f"{value} must contain three integers.", param, ctx)
+		if len(parts) != 3:
+			self.fail(f"{value} must contain exactly three integers.", param, ctx)
+		return parts
+
+
 class SLICE(click.ParamType):
 	name = "Index Slice"
 
@@ -257,4 +273,5 @@ RANGE = Range()
 FRANGE = Frange()
 NUMPYTYPE = NumPyType()
 CROP_NUMBER = CropNumberType()
+XYZ = IntegerTriple()
 FLAGS = []

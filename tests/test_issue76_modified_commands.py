@@ -8,9 +8,12 @@ import numpy as np
 
 from mctutil.shared.cli import NumpyCLI
 
-cloudvolume = types.ModuleType("cloudvolume")
-cloudvolume.CloudVolume = type("CloudVolume", (), {})
-sys.modules.setdefault("cloudvolume", cloudvolume)
+try:
+	import cloudvolume
+except ImportError:
+	cloudvolume = types.ModuleType("cloudvolume")
+	cloudvolume.CloudVolume = type("CloudVolume", (), {})
+	sys.modules["cloudvolume"] = cloudvolume
 
 cv_import = importlib.import_module("mctutil.transport.cv_import")
 

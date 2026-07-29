@@ -30,6 +30,8 @@ transform = [
   "zarr<3",
 ]
 ng = [
+  "cloud-files",
+  "cloud-volume",
   "neuroglancer-scripts",
   "zarr<3",
 ]

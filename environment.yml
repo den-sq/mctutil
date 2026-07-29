@@ -23,6 +23,7 @@ dependencies:
   - tifffile
   - tomopy>=1.15
   - pip:
+      - cloud-files
       - cloud-volume
       - dicom2jpg
       - igneous-pipeline
