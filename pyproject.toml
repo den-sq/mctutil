@@ -30,6 +30,8 @@ transform = [
   "zarr<3",
 ]
 ng = [
+  "cloud-files",
+  "cloud-volume",
   "neuroglancer-scripts",
   "zarr<3",
 ]
@@ -43,7 +45,6 @@ mesh = [
   "task-queue",
 ]
 aws = [
-  "cloud-volume",
   "boto3",
 ]
 # ORS Dragonfly is Windows-only and runs these scripts inside its embedded

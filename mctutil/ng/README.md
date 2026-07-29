@@ -8,6 +8,7 @@ command's options.
 ## Commands
 
 - **`build`** — Build a Neuroglancer precomputed volume (image or segmentation) from a stack.
+- **`precompute`** — Write resumable, process-parallel CloudVolume MIP-0 output from TIFF input.
 - **`layer-copy`** — Merge annotation layers from one Neuroglancer JSON into another, writing a new file.
 - **`layer-extract`** — Extract layers from a Neuroglancer JSON into a new file.
 - **`layer-recolor`** — Recolor the segment colors of a named annotation.
@@ -21,3 +22,5 @@ command's options.
 - **`shift-angle`** — Set a Neuroglancer JSON to a consistent forward-facing angled orientation.
 
 Note: `ng build` wraps the former `transform/ng.py` neuroglance command.
+`ng precompute` is the CloudVolume backend used by the sharded publishing
+pipeline and intentionally coexists with `ng build`.
