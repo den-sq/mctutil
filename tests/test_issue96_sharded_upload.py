@@ -191,6 +191,84 @@ def test_sharded_upload_dry_run_never_constructs_s3_client(
 	assert "planned=4" in result.output
 
 
+def test_legacy_upload_without_flag_preserves_execute_default(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/transport/s3upload.py")
+	source = tmp_path / "legacy"
+	source.mkdir()
+	events = []
+
+	class FakeS3:
+		def put_object(self, **kwargs):
+			events.append(("prefix", kwargs))
+
+	fake_s3 = FakeS3()
+	monkeypatch.setattr(
+		module,
+		"_get_session",
+		lambda: types.SimpleNamespace(client=lambda _name: fake_s3),
+	)
+	monkeypatch.setattr(
+		module,
+		"upload_folder_to_s3_parallel",
+		lambda *_args, **kwargs: events.append(
+			("upload", kwargs["execute"])
+		),
+	)
+
+	result = CliRunner().invoke(
+		module.s3upload,
+		[
+			"--bucket-prefix", "prefix",
+			"--bucket-name", "bucket",
+			str(source),
+			"dataset",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert events[0][0] == "prefix"
+	assert ("upload", True) in events
+
+
+def test_explicit_dry_run_overrides_legacy_execute_default(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/transport/s3upload.py")
+	source = tmp_path / "legacy"
+	source.mkdir()
+	events = []
+	monkeypatch.setattr(
+		module,
+		"_get_session",
+		lambda: (_ for _ in ()).throw(AssertionError("S3 session created")),
+	)
+	monkeypatch.setattr(
+		module,
+		"upload_folder_to_s3_parallel",
+		lambda *_args, **kwargs: events.append(kwargs["execute"]),
+	)
+
+	result = CliRunner().invoke(
+		module.s3upload,
+		[
+			"--bucket-prefix", "prefix",
+			"--bucket-name", "bucket",
+			"--dry-run",
+			str(source),
+			"dataset",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert events == [False]
+
+
 def test_sharded_tree_validation_rejects_unsharded_scale(load_module, tmp_path):
 	module = load_module("mctutil/transport/s3upload.py")
 	source = tmp_path / "not-sharded"

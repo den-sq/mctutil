@@ -248,8 +248,14 @@ def upload_sharded_tree(
 @click.option("--include-mip0/--exclude-mip0", default=True, show_default=True)
 @click.option("--jobs", type=click.IntRange(min=1), default=6, show_default=True,
 				help="Parallel scale-directory uploads in sharded-tree mode.")
-@click.option('--execute/--dry-run', default=False, show_default=True,
-				help="Whether to actually upload (and optionally mesh) or just plan the operations.")
+@click.option(
+	"--execute/--dry-run",
+	default=None,
+	help=(
+		"Override execution. Legacy uploads execute by default; "
+		"--from-sharded-tree plans by default."
+	),
+)
 @click.argument("SOURCE_FOLDER", nargs=1, type=click.Path(exists=True, path_type=Path))
 @click.argument("TARGET_FOLDER", nargs=1, type=click.Path(path_type=Path))
 def s3upload(
@@ -264,6 +270,8 @@ def s3upload(
 	include_mip0=True,
 	jobs=6,
 ):
+	if execute is None:
+		execute = not from_sharded_tree
 
 	target_full = bucket_prefix.joinpath(target_folder)
 
