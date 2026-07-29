@@ -138,6 +138,41 @@ def test_downsample_restart_drains_recorded_source_mip(load_module, tmp_path, mo
 	assert recorded == [2]
 
 
+def test_partial_file_queue_insertion_retries_the_complete_task_set(tmp_path):
+	taskqueue = pytest.importorskip("taskqueue")
+	pytest.importorskip("igneous.task_creation")
+	module = importlib.import_module("mctutil.shared.persistent_queue")
+	queue_path = tmp_path / "partial-insert"
+	queue = taskqueue.TaskQueue(
+		module.file_queue_url(queue_path),
+		progress=False,
+	)
+	queue.insert(
+		[taskqueue.PrintTask("partial")],
+		skip_insert_counter=True,
+	)
+
+	assert queue.inserted == 0
+	assert queue.is_empty() is False
+
+	state = module.run_persistent_tasks(
+		queue_path,
+		"partial-insert-regression",
+		lambda: [
+			taskqueue.PrintTask("full-a"),
+			taskqueue.PrintTask("full-b"),
+		],
+		parallel=1,
+		lease_seconds=60,
+	)
+
+	assert state["status"] == "complete"
+	assert state["inserted"] == 2
+	assert queue.inserted == 2
+	assert queue.completed == 3
+	assert queue.is_empty() is True
+
+
 def test_downsample_executes_real_igneous_file_queue(tmp_path):
 	pytest.importorskip("igneous.task_creation")
 	pytest.importorskip("taskqueue")

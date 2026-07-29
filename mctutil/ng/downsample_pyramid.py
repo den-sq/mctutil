@@ -23,7 +23,7 @@ def _require_dependencies():
 	except ImportError as exc:
 		raise RuntimeError(
 			"ng downsample-pyramid requires igneous-pipeline and task-queue; "
-			"install with pip install -e '.[mesh]'"
+			"install with pip install -e '.[ng,mesh]'"
 		) from exc
 	return CloudVolume, task_creation
 

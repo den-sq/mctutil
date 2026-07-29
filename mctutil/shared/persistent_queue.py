@@ -150,6 +150,9 @@ def run_persistent_tasks(
 
 	if state["status"] == "inserting":
 		if queue.inserted == 0:
+			# FileQueue commits its insertion counter only after the full insert
+			# returns. If a process dies mid-insert, retrying the complete task
+			# set can duplicate idempotent tasks but cannot accept a partial set.
 			state["inserted"] = queue.insert(tasks_factory())
 		else:
 			state["inserted"] = queue.inserted
