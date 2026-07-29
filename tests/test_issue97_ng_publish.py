@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import types
 
 from click.testing import CliRunner
 import numpy as np
@@ -36,6 +37,103 @@ def test_stage_aware_extra_resolution(load_module):
 	) == ("ng", "mesh", "aws")
 
 
+def test_mesh_preflight_checks_cloudvolume(load_module, monkeypatch):
+	module = load_module("mctutil/ng/publish.py")
+	monkeypatch.setattr(
+		module,
+		"module_available",
+		lambda name: name != "cloudvolume",
+	)
+
+	assert module.missing_dependencies(("mesh",)) == {
+		"mesh": ("cloudvolume",),
+	}
+
+
+def test_run_stage_dispatches_sibling_commands_by_keyword(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/ng/publish.py")
+	calls = {}
+
+	def callback_for(name):
+		def callback(*args, **kwargs):
+			calls[name] = (args, kwargs)
+
+		return callback
+
+	modules = {
+		"mctutil.transform.memmap_prep": types.SimpleNamespace(
+			memmap_prep=types.SimpleNamespace(callback=callback_for("prep")),
+		),
+		"mctutil.ng.precompute": types.SimpleNamespace(
+			precompute=types.SimpleNamespace(callback=callback_for("precompute")),
+		),
+		"mctutil.ng.downsample_pyramid": types.SimpleNamespace(
+			downsample_pyramid=types.SimpleNamespace(
+				callback=callback_for("downsample")
+			),
+		),
+		"mctutil.ng.shard": types.SimpleNamespace(
+			shard=types.SimpleNamespace(callback=callback_for("shard")),
+		),
+		"mctutil.transport.s3upload": types.SimpleNamespace(
+			upload_sharded_tree=callback_for("upload"),
+		),
+		"mctutil.shared.mesh": types.SimpleNamespace(
+			build_mesh=callback_for("mesh"),
+		),
+	}
+	monkeypatch.setattr(
+		module.importlib,
+		"import_module",
+		lambda name: modules[name],
+	)
+	dataset = tmp_path / "cell_labels"
+	dataset.mkdir()
+	plan = types.SimpleNamespace(
+		dataset=dataset,
+		layer_type="segmentation",
+		prep_input=dataset / "input.tif",
+		prep_output=dataset / "memmap.tif",
+		precompute_input=dataset / "memmap.tif",
+		precomputed=tmp_path / "precomputed",
+		staged=tmp_path / "staged",
+	)
+	options = {
+		"effective_stages": module.STAGES,
+		"selected_stages": module.STAGES,
+		"workers": 2,
+		"memory": 123,
+		"segmentation_encoding": "compressed_segmentation",
+		"voxel_resolution": (700, 800, 900),
+		"voxel_offset": (10, 20, 30),
+		"stage_include_mip0": True,
+		"upload_include_mip0": True,
+		"upload_jobs": 3,
+		"mesh_at": "s3",
+		"mesh_mip": 0,
+		"mesh_num_lod": 4,
+		"mesh_parallel": 5,
+		"overwrite_prep": False,
+		"s3_prefix": "s3://bucket/prefix",
+	}
+
+	for stage in module.STAGES:
+		module.run_stage(stage, plan, options)
+
+	assert set(calls) == set(module.STAGES)
+	for stage, (args, kwargs) in calls.items():
+		assert args == (), stage
+		assert kwargs["execute"] is True
+	assert calls["prep"][1]["input_tif"] == plan.prep_input
+	assert calls["precompute"][1]["voxel_offset"] == (10, 20, 30)
+	assert calls["downsample"][1]["layer_path"] == str(plan.precomputed)
+	assert calls["shard"][1]["destination"] == str(plan.staged)
+
+
 def test_publish_dry_run_reports_metadata_and_never_writes(
 	load_module,
 	tmp_path,
@@ -65,6 +163,40 @@ def test_publish_dry_run_reports_metadata_and_never_writes(
 	assert "prep: omitted" in result.output
 	assert "mesh: omitted" in result.output
 	assert not (dataset / ".mctutil_ng_publish.json").exists()
+
+
+@pytest.mark.parametrize(
+	"mesh_arguments",
+	(
+		("--mesh-at", "local"),
+		("--upload-exclude-mip0",),
+	),
+)
+def test_publish_warns_when_upload_precedes_local_mesh(
+	load_module,
+	tmp_path,
+	monkeypatch,
+	mesh_arguments,
+):
+	module = load_module("mctutil/ng/publish.py")
+	root = tmp_path / "root"
+	root.mkdir()
+	make_dataset(root, "cell_labels")
+	monkeypatch.setattr(module, "module_available", lambda _name: True)
+
+	result = CliRunner().invoke(
+		module.publish,
+		[
+			str(root),
+			"--s3-prefix", "s3://bucket/prefix",
+			"--dry-run",
+			*mesh_arguments,
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert "Warning: local mesh for cell_labels runs after upload" in result.output
+	assert "will not be present in S3" in result.output
 
 
 def test_missing_dependencies_abort_before_state_write(

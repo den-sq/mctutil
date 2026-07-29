@@ -32,7 +32,7 @@ STAGE_EXTRAS = {
 }
 EXTRA_MODULES = {
 	"ng": ("cloudvolume", "cloudfiles", "zarr"),
-	"mesh": ("igneous.task_creation", "taskqueue"),
+	"mesh": ("cloudvolume", "igneous.task_creation", "taskqueue"),
 	"aws": ("boto3",),
 }
 DERIVED_SUFFIXES = ("_precomputed", "_precomputed_sharded_local")
@@ -484,6 +484,23 @@ def mesh_target(plan: DatasetPlan, options: dict) -> str:
 	return f"precomputed://{plan.staged.resolve().as_uri()}"
 
 
+def local_mesh_upload_warning(
+	plan: DatasetPlan,
+	options: dict,
+) -> str | None:
+	if (
+		plan.layer_type != "segmentation"
+		or "upload" not in options["effective_stages"]
+		or "mesh" not in options["selected_stages"]
+		or mesh_target(plan, options).startswith("precomputed://s3://")
+	):
+		return None
+	return (
+		f"local mesh for {plan.dataset.name} runs after upload and will not be "
+		"present in S3; rerun upload afterward or use --mesh-at s3"
+	)
+
+
 def validate_prerequisites(
 	plan: DatasetPlan,
 	selected_stages: tuple[str, ...],
@@ -521,78 +538,78 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 	if stage == "prep":
 		module = importlib.import_module("mctutil.transform.memmap_prep")
 		module.memmap_prep.callback(
-			plan.prep_input,
-			plan.prep_output,
-			None,
-			"original",
-			"none",
-			None,
-			None,
-			0.1,
-			99.9,
-			32,
-			200_000,
-			0,
-			"auto",
-			True,
-			options["overwrite_prep"],
-			True,
-			True,
+			input_tif=plan.prep_input,
+			output=plan.prep_output,
+			output_dir=None,
+			out_dtypes="original",
+			normalize_mode="none",
+			norm_min=None,
+			norm_max=None,
+			pct_low=0.1,
+			pct_high=99.9,
+			sample_slices=32,
+			sample_pixels=200_000,
+			rng_seed=0,
+			bigtiff_mode="auto",
+			contiguous=True,
+			overwrite=options["overwrite_prep"],
+			verify=True,
+			execute=True,
 		)
 	elif stage == "precompute":
 		module = importlib.import_module("mctutil.ng.precompute")
 		module.precompute.callback(
-			resolved_precompute_input(plan, options),
-			plan.precomputed,
-			options["workers"],
-			plan.layer_type,
-			options["segmentation_encoding"],
-			None,
-			None,
-			(8, 8, 8),
-			options["voxel_resolution"],
-			options["voxel_offset"],
-			True,
+			input_path=resolved_precompute_input(plan, options),
+			output_path=plan.precomputed,
+			workers=options["workers"],
+			layer_type=plan.layer_type,
+			segmentation_encoding=options["segmentation_encoding"],
+			dtype_override=None,
+			chunk_size=None,
+			segmentation_block=(8, 8, 8),
+			voxel_resolution=options["voxel_resolution"],
+			voxel_offset=options["voxel_offset"],
+			execute=True,
 		)
 	elif stage == "downsample":
 		module = importlib.import_module("mctutil.ng.downsample_pyramid")
 		module.downsample_pyramid.callback(
-			str(plan.precomputed),
-			queue_root,
-			(64, 64, 64),
-			(16, 16, 16),
-			3,
-			16,
-			16,
-			options["memory"],
-			encoding,
-			3600,
-			True,
+			layer_path=str(plan.precomputed),
+			queue_dir=queue_root,
+			initial_chunk=(64, 64, 64),
+			extend_chunk=(16, 16, 16),
+			max_extend_passes=3,
+			initial_parallel=16,
+			extend_parallel=16,
+			memory=options["memory"],
+			encoding=encoding,
+			lease_seconds=3600,
+			execute=True,
 		)
 	elif stage == "shard":
 		module = importlib.import_module("mctutil.ng.shard")
 		module.shard.callback(
-			str(plan.precomputed),
-			str(plan.staged),
-			None,
-			(96, 96, 96),
-			(64, 64, 64),
-			(16, 16, 16),
-			options["memory"],
-			8,
-			options["stage_include_mip0"],
-			encoding,
-			queue_root,
-			3600,
-			True,
+			source=str(plan.precomputed),
+			destination=str(plan.staged),
+			mips=None,
+			low_chunk=(96, 96, 96),
+			mid_chunk=(64, 64, 64),
+			high_chunk=(16, 16, 16),
+			memory=options["memory"],
+			parallel=8,
+			include_mip0=options["stage_include_mip0"],
+			encoding=encoding,
+			queue_dir=queue_root,
+			lease_seconds=3600,
+			execute=True,
 		)
 	elif stage == "upload":
 		module = importlib.import_module("mctutil.transport.s3upload")
 		bucket, key = dataset_s3_target(plan, options["s3_prefix"])
 		module.upload_sharded_tree(
-			plan.staged,
-			key,
-			bucket,
+			source_folder=plan.staged,
+			target_folder=key,
+			bucket_name=bucket,
 			jobs=options["upload_jobs"],
 			include_mip0=options["upload_include_mip0"],
 			execute=True,
@@ -600,7 +617,7 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 	elif stage == "mesh":
 		module = importlib.import_module("mctutil.shared.mesh")
 		module.build_mesh(
-			mesh_target(plan, options),
+			layer_path=mesh_target(plan, options),
 			mip=options["mesh_mip"],
 			num_lod=options["mesh_num_lod"],
 			parallel=options["mesh_parallel"],
@@ -806,6 +823,10 @@ def publish(
 			"upload_include_mip0": upload_include_mip0,
 			"overwrite_prep": overwrite_prep,
 		}
+		for plan in plans:
+			warning = local_mesh_upload_warning(plan, options)
+			if warning is not None:
+				click.echo(f"Warning: {warning}", err=True)
 		for plan in plans:
 			load_dataset_state(plan)
 			validate_prerequisites(plan, selected_stages, options)
