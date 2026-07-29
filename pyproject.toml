@@ -45,6 +45,7 @@ mesh = [
   "task-queue",
 ]
 aws = [
+  "cloud-volume",
   "boto3",
 ]
 # ORS Dragonfly is Windows-only and runs these scripts inside its embedded
