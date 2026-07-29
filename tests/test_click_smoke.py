@@ -26,6 +26,7 @@ CASES = [
 	CommandCase("mctutil/flats/medianize.py", "medianize"),
 	CommandCase("mctutil/flats/series_digest.py", "series_digest"),
 	CommandCase("mctutil/ng/change_color.py", "change_color"),
+	CommandCase("mctutil/ng/downsample_pyramid.py", "downsample_pyramid"),
 	CommandCase("mctutil/ng/layer_copy.py", "layer_copy"),
 	CommandCase("mctutil/ng/layer_extract.py", "layer_extract"),
 	CommandCase("mctutil/ng/layer_tag.py", "layer_tag"),

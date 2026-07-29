@@ -9,6 +9,7 @@ command's options.
 
 - **`build`** — Build a Neuroglancer precomputed volume (image or segmentation) from a stack.
 - **`precompute`** — Write resumable, process-parallel CloudVolume MIP-0 output from TIFF input.
+- **`downsample-pyramid`** — Build a volumetric MIP pyramid with durable Igneous task queues.
 - **`layer-copy`** — Merge annotation layers from one Neuroglancer JSON into another, writing a new file.
 - **`layer-extract`** — Extract layers from a Neuroglancer JSON into a new file.
 - **`layer-recolor`** — Recolor the segment colors of a named annotation.
