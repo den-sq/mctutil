@@ -28,6 +28,27 @@ transform = [
   "numpy",
   "tifffile",
 ]
+ng = [
+  "neuroglancer-scripts",
+]
+# The recon half of the sinogram stack (tomopy) is conda-forge-only and stays
+# in environment.yml; scikit-image is the pip-installable stack dependency.
+sino = [
+  "scikit-image",
+]
+mesh = [
+  "igneous-pipeline",
+  "task-queue",
+]
+aws = [
+  "cloud-volume",
+  "boto3",
+]
+# ORS Dragonfly is Windows-only and runs these scripts inside its embedded
+# Python console (config.pythonConsoleAutoImport); it is not published on
+# PyPI, so there is no pip-installable dependency to declare. The extra is
+# kept empty to reserve and document the name.
+dragonfly = []
 
 [project.scripts]
 mctutil = "mctutil.cli:main"

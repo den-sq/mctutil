@@ -10,9 +10,9 @@ remote storage, and doing a small amount of HPC-side housekeeping.
 
 The staged cleanup in [REFACTOR_PLAN.md](REFACTOR_PLAN.md) is substantially
 complete: every tool now lives in a single installable `mctutil` package and is
-exposed through a unified `mctutil <category> <task>` console script. A few
-follow-ups remain open — the optional-dependency extras (#86) and a handful of
-surveyed-but-unregistered commands (#87).
+exposed through a unified `mctutil <category> <task>` console script. A
+follow-up remains open for a handful of surveyed-but-unregistered commands
+(#87).
 
 ## Installation
 
@@ -31,9 +31,13 @@ Notes:
 - A few packages are still pulled through the `pip:` section because they are
   not published on conda-forge today: `cloud-volume`, `dicom2jpg`,
   `igneous-pipeline`, `neuroglancer-scripts`, and `task-queue`.
-- The `[als832]` and `[flats]` optional-dependency extras are declared; the
-  remaining extras (`[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]`) are
-  tracked in #86.
+- Optional-dependency extras are declared for the heavy, orthogonal stacks:
+  `[als832]`, `[flats]`, `[ng]`, `[sino]`, `[mesh]`, `[aws]`, and
+  `[dragonfly]`, so e.g. `python -m pip install -e .[mesh]` pulls only the
+  mesh dependencies. The extras are complementary to `environment.yml`, not
+  a replacement: conda-only packages stay in the conda env (`tomopy` for the
+  sinogram/recon stack), and `[dragonfly]` is intentionally empty because
+  ORS Dragonfly is Windows-only and not published on PyPI.
 - Python indentation uses tabs in this repository.
 - No autoformatter is configured at this time.
 - Linting is enforced with `flake8`, the pre-commit hooks in
