@@ -41,7 +41,7 @@ CASES = [
 	CommandCase("mctutil/ng/publish.py", "publish", ("--help",)),
 	CommandCase("mctutil/ng/shard.py", "shard"),
 	CommandCase("mctutil/ng/shift_angle.py", "shift_angle"),
-	CommandCase("mctutil/ng/serve.py", "serve"),
+	CommandCase("mctutil/serve/ng.py", "ng"),
 	CommandCase("mctutil/ng/validate.py", "validate"),
 	CommandCase("mctutil/parse/meta_shift.py", "meta_shift"),
 	CommandCase("mctutil/parse/pull_config.py", "get_conf"),

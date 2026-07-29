@@ -41,7 +41,7 @@ def test_serve_dry_run_is_loopback_safe_and_dependency_free(
 	tmp_path,
 	monkeypatch,
 ):
-	module = load_module("mctutil/ng/serve.py")
+	module = load_module("mctutil/serve/ng.py")
 	layer = make_layer(tmp_path)
 	monkeypatch.setattr(
 		module,
@@ -50,7 +50,7 @@ def test_serve_dry_run_is_loopback_safe_and_dependency_free(
 	)
 
 	result = CliRunner().invoke(
-		module.serve,
+		module.ng,
 		[
 			str(layer),
 			"--backend", "flask",
@@ -67,11 +67,11 @@ def test_serve_dry_run_is_loopback_safe_and_dependency_free(
 
 
 def test_serve_requires_explicit_exposure(load_module, tmp_path):
-	module = load_module("mctutil/ng/serve.py")
+	module = load_module("mctutil/serve/ng.py")
 	layer = make_layer(tmp_path)
 
 	result = CliRunner().invoke(
-		module.serve,
+		module.ng,
 		[str(layer), "--bind", "0.0.0.0", "--dry-run"],
 	)
 
@@ -79,7 +79,7 @@ def test_serve_requires_explicit_exposure(load_module, tmp_path):
 	assert "requires the explicit --expose option" in result.output
 
 	exposed = CliRunner().invoke(
-		module.serve,
+		module.ng,
 		[str(layer), "--expose", "--dry-run"],
 	)
 	assert exposed.exit_code == 0, exposed.output
@@ -87,7 +87,7 @@ def test_serve_requires_explicit_exposure(load_module, tmp_path):
 
 
 def test_serve_advertises_configured_host(load_module):
-	module = load_module("mctutil/ng/serve.py")
+	module = load_module("mctutil/serve/ng.py")
 
 	assert module.advertise_url(
 		"http://0.0.0.0:8080/v/token/",
@@ -104,7 +104,7 @@ def test_serve_wires_viewer_browser_qr_without_real_side_effects(
 	tmp_path,
 	monkeypatch,
 ):
-	module = load_module("mctutil/ng/serve.py")
+	module = load_module("mctutil/serve/ng.py")
 	layer = make_layer(tmp_path)
 	events = []
 
@@ -140,7 +140,7 @@ def test_serve_wires_viewer_browser_qr_without_real_side_effects(
 	qr_path = tmp_path / "viewer.png"
 
 	result = CliRunner().invoke(
-		module.serve,
+		module.ng,
 		[
 			str(layer),
 			"--data-port", "0",
@@ -346,7 +346,7 @@ def test_range_server_supports_cors_and_byte_ranges(
 	tmp_path,
 ):
 	pytest.importorskip("RangeHTTPServer")
-	module = load_module("mctutil/ng/serve.py")
+	module = load_module("mctutil/serve/ng.py")
 	layer = make_layer(tmp_path)
 	(layer / "chunk").write_bytes(b"0123456789")
 	server = module.create_range_server(layer, "127.0.0.1", 0, True)
@@ -373,7 +373,7 @@ def test_flask_server_supports_cors_and_byte_ranges(
 ):
 	pytest.importorskip("flask")
 	pytest.importorskip("flask_cors")
-	module = load_module("mctutil/ng/serve.py")
+	module = load_module("mctutil/serve/ng.py")
 	layer = make_layer(tmp_path)
 	(layer / "chunk").write_bytes(b"0123456789")
 	server = module.create_flask_server(layer, "127.0.0.1", 0, True)
@@ -394,8 +394,10 @@ def test_flask_server_supports_cors_and_byte_ranges(
 		thread.join()
 
 
-def test_ng_helper_dependencies_are_declared():
+def test_server_dependencies_are_owned_by_serve_extra():
 	pyproject = Path("pyproject.toml").read_text(encoding="utf-8").lower()
+	ng_extra = pyproject.split("ng = [", 1)[1].split("\n]\n", 1)[0]
+	serve_extra = pyproject.split("serve = [", 1)[1].split("\n]\n", 1)[0]
 	for dependency in (
 		'"flask"',
 		'"flask-cors"',
@@ -403,4 +405,23 @@ def test_ng_helper_dependencies_are_declared():
 		'"qrcode[pil]"',
 		'"rangehttpserver"',
 	):
-		assert dependency in pyproject
+		assert dependency in serve_extra
+		assert dependency not in ng_extra
+	assert '"cloud-volume"' in ng_extra
+
+
+def test_server_is_routed_through_serve_category():
+	from mctutil.cli import main
+
+	runner = CliRunner()
+	serve_help = runner.invoke(main, ["serve", "--help"])
+	assert serve_help.exit_code == 0, serve_help.output
+	assert "ng" in serve_help.output
+
+	server_help = runner.invoke(main, ["serve", "ng", "--help"])
+	assert server_help.exit_code == 0, server_help.output
+	assert "--backend" in server_help.output
+
+	old_route = runner.invoke(main, ["ng", "serve", "--help"])
+	assert old_route.exit_code != 0
+	assert "No such command 'serve'" in old_route.output

@@ -46,7 +46,7 @@ def _require_range_handler():
 	except ImportError as exc:
 		raise RuntimeError(
 			"the range server requires RangeHTTPServer; "
-			"install with pip install -e '.[ng]'"
+			"install with pip install -e '.[serve]'"
 		) from exc
 	return RangeRequestHandler
 
@@ -100,10 +100,10 @@ def create_flask_server(
 	except ImportError as exc:
 		raise RuntimeError(
 			"the Flask server requires flask and flask-cors; "
-			"install with pip install -e '.[ng]'"
+			"install with pip install -e '.[serve]'"
 		) from exc
 
-	app = Flask("mctutil-ng-serve", static_folder=None)
+	app = Flask("mctutil-serve-ng", static_folder=None)
 	CORS(app)
 
 	@app.get("/<path:relative_path>")
@@ -162,7 +162,7 @@ def create_viewer(
 	except ImportError as exc:
 		raise RuntimeError(
 			"the viewer requires neuroglancer; "
-			"install with pip install -e '.[ng]'"
+			"install with pip install -e '.[serve]'"
 		) from exc
 
 	neuroglancer.set_server_bind_address(
@@ -186,7 +186,7 @@ def save_qr_code(url: str, path: Path) -> None:
 		import qrcode
 	except ImportError as exc:
 		raise RuntimeError(
-			"QR creation requires qrcode; install with pip install -e '.[ng]'"
+			"QR creation requires qrcode; install with pip install -e '.[serve]'"
 		) from exc
 	path.parent.mkdir(parents=True, exist_ok=True)
 	qrcode.make(url).save(path)
@@ -216,7 +216,7 @@ def run_server(
 		server.server_close()
 
 
-@click.command("serve")
+@click.command("ng")
 @click.argument(
 	"layer_root",
 	type=click.Path(exists=True, file_okay=False, path_type=Path),
@@ -249,7 +249,7 @@ def run_server(
 @click.option("--qr", "qr_path", type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--quiet-http/--verbose-http", default=True, show_default=True)
 @click.option("--execute/--dry-run", default=True, show_default=True)
-def serve(
+def ng(
 	layer_root: Path,
 	backend: str,
 	bind: str,
@@ -326,4 +326,4 @@ def serve(
 
 
 if __name__ == "__main__":
-	serve()
+	ng()

@@ -13,7 +13,6 @@ command's options.
 - **`http-check`** — Smoke-test `info` and explicit chunk URLs with GET or HEAD.
 - **`publish`** — Run the stage-aware, resumable sharded publishing pipeline.
 - **`shard`** — Stage a precomputed pyramid into sharded per-mip output.
-- **`serve`** — Serve local precomputed data with Range/CORS or Flask and an optional viewer.
 - **`validate`** — Validate precomputed metadata and representative origin/center reads.
 - **`layer-copy`** — Merge annotation layers from one Neuroglancer JSON into another, writing a new file.
 - **`layer-extract`** — Extract layers from a Neuroglancer JSON into a new file.

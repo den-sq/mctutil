@@ -23,7 +23,6 @@ main = LazyGroup(
 		"publish": "mctutil.ng.publish:publish",
 		"shard": "mctutil.ng.shard:shard",
 		"shift-angle": "mctutil.ng.shift_angle:shift_angle",
-		"serve": "mctutil.ng.serve:serve",
 		"validate": "mctutil.ng.validate:validate",
 	},
 )
