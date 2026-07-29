@@ -215,7 +215,8 @@ def open_tiff_zarr(tif):
 		import zarr
 	except ImportError as exc:
 		raise RuntimeError(
-			"memmap preparation requires zarr; install with pip install -e '.[ng]'"
+			"memmap preparation requires zarr; "
+			"install with pip install -e '.[transform]'"
 		) from exc
 
 	store = tif.aszarr()

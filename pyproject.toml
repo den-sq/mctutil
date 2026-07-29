@@ -27,6 +27,7 @@ transform = [
   "h5py",
   "numpy",
   "tifffile",
+  "zarr<3",
 ]
 ng = [
   "neuroglancer-scripts",
