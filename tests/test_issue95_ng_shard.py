@@ -96,7 +96,7 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 	assert result.exit_code == 0, result.output
 	assert [call["mip"] for call in task_calls] == [1, 2]
 	assert all(call["fill_missing"] is True for call in task_calls)
-	assert all(call["compress"] == "br" for call in task_calls)
+	assert all(call["compress"] == "gzip" for call in task_calls)
 	assert len(queue_calls) == 1
 	assert queue_calls[0][2] == 3
 	state_files = list(queue.rglob("pipeline.json"))
@@ -104,6 +104,65 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 	state = json.loads(state_files[0].read_text(encoding="utf-8"))
 	assert state["completed_mips"] == [1, 2]
 	assert state["complete"] is True
+
+
+def test_shard_legacy_transfer_uses_gzip(load_module, monkeypatch):
+	module = load_module("mctutil/ng/shard.py")
+	task_calls = []
+
+	def create_transfer(
+		_source,
+		_destination,
+		*,
+		mip,
+		chunk_size,
+		fill_missing,
+		encoding,
+		memory_target,
+		compress,
+		sharded,
+	):
+		task_calls.append(
+			{
+				"mip": mip,
+				"chunk_size": chunk_size,
+				"fill_missing": fill_missing,
+				"encoding": encoding,
+				"memory_target": memory_target,
+				"compress": compress,
+				"sharded": sharded,
+			}
+		)
+		return ["legacy-task"]
+
+	task_creation = types.SimpleNamespace(create_transfer_tasks=create_transfer)
+	monkeypatch.setattr(
+		module,
+		"_require_dependencies",
+		lambda: (FakeVolume, task_creation),
+	)
+
+	tasks = module.create_shard_tasks(
+		"source",
+		"destination",
+		2,
+		(32, 32, 32),
+		"raw",
+		100_000_000,
+	)
+
+	assert tasks == ["legacy-task"]
+	assert task_calls == [
+		{
+			"mip": 2,
+			"chunk_size": (32, 32, 32),
+			"fill_missing": True,
+			"encoding": "raw",
+			"memory_target": 100_000_000,
+			"compress": "gzip",
+			"sharded": True,
+		}
+	]
 
 
 def test_detect_mips_matches_source_key_and_directory_rules(load_module, tmp_path):
@@ -197,6 +256,7 @@ def test_shard_executes_real_igneous_transfer(tmp_path, monkeypatch):
 
 	staged = CloudVolume(destination.resolve().as_uri(), parallel=False)
 	assert staged.scale["sharding"]["@type"] == "neuroglancer_uint64_sharded_v1"
+	assert staged.scale["sharding"]["data_encoding"] == "gzip"
 	assert np.array_equal(np.asarray(staged[:]), data)
 	assert module.destination_scale_complete(str(destination), 0) is True
 
