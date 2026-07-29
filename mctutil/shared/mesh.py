@@ -1,10 +1,12 @@
 """Shared Igneous mesh-building workflow."""
 
 from multiprocessing import cpu_count
+from pathlib import Path
 
 import click
 
 from mctutil.shared.log import log, LOG
+from mctutil.shared.persistent_queue import run_persistent_tasks, stable_fingerprint
 
 
 def _require_mesh_dependencies():
@@ -14,7 +16,7 @@ def _require_mesh_dependencies():
 	except ImportError as exc:
 		raise click.ClickException(
 			"Mesh support requires igneous-pipeline and task-queue; "
-			"install the project environment from environment.yml."
+			"install with pip install -e '.[mesh]'"
 		) from exc
 
 	return LocalTaskQueue, task_creation
@@ -39,6 +41,8 @@ def build_mesh(
 	vertex_quantization_bits=16,
 	min_chunk_size=(256, 256, 256),
 	execute=True,
+	queue_dir=None,
+	lease_seconds=3600,
 ):
 	"""Build and merge an unsharded multiresolution mesh.
 
@@ -60,6 +64,8 @@ def build_mesh(
 	:param vertex_quantization_bits: Vertex precision for multiresolution meshes.
 	:param min_chunk_size: Minimum highest-resolution mesh chunk size.
 	:param execute: Whether to run tasks or only describe the workflow.
+	:param queue_dir: Optional durable file-queue root for resumable execution.
+	:param lease_seconds: FileQueue task lease duration.
 	:return: None.
 	"""
 	parallel = cpu_count() if parallel is None else parallel
@@ -79,6 +85,75 @@ def build_mesh(
 		return
 
 	LocalTaskQueue, task_creation = _require_mesh_dependencies()
+	if queue_dir is not None:
+		queue_dir = Path(queue_dir)
+		forge_specification = {
+			"stage": "mesh-forge",
+			"layer_path": layer_path,
+			"mip": mip,
+			"shape": tuple(shape),
+			"simplification": simplification,
+			"max_simplification_error": max_simplification_error,
+			"mesh_dir": mesh_dir,
+			"cdn_cache": cdn_cache,
+			"dust_threshold": dust_threshold,
+			"object_ids": None if not object_ids else list(object_ids),
+			"fill_missing": fill_missing,
+			"encoding": encoding,
+			"spatial_index": spatial_index,
+		}
+		forge_fingerprint = stable_fingerprint(forge_specification)
+		run_persistent_tasks(
+			queue_dir / "forge" / forge_fingerprint,
+			forge_fingerprint,
+			lambda: task_creation.create_meshing_tasks(
+				layer_path,
+				mip,
+				shape=tuple(shape),
+				simplification=simplification,
+				max_simplification_error=max_simplification_error,
+				mesh_dir=mesh_dir,
+				cdn_cache=cdn_cache,
+				dust_threshold=dust_threshold,
+				object_ids=None if not object_ids else list(object_ids),
+				progress=False,
+				fill_missing=fill_missing,
+				encoding=encoding,
+				spatial_index=spatial_index,
+				sharded=False,
+			),
+			parallel,
+			lease_seconds,
+		)
+		log.write("Mesh", "Meshing pass complete", log_level=LOG.STATUS)
+
+		merge_specification = {
+			"stage": "mesh-merge",
+			"layer_path": layer_path,
+			"num_lod": num_lod,
+			"magnitude": magnitude,
+			"mesh_dir": mesh_dir,
+			"vertex_quantization_bits": vertex_quantization_bits,
+			"min_chunk_size": tuple(min_chunk_size),
+		}
+		merge_fingerprint = stable_fingerprint(merge_specification)
+		run_persistent_tasks(
+			queue_dir / "merge" / merge_fingerprint,
+			merge_fingerprint,
+			lambda: task_creation.create_unsharded_multires_mesh_tasks(
+				layer_path,
+				num_lod=num_lod,
+				magnitude=magnitude,
+				mesh_dir=mesh_dir,
+				vertex_quantization_bits=vertex_quantization_bits,
+				min_chunk_size=tuple(min_chunk_size),
+			),
+			parallel,
+			lease_seconds,
+		)
+		log.write("Mesh", "Multiresolution merge pass complete", log_level=LOG.STATUS)
+		return
+
 	task_queue = LocalTaskQueue(parallel=parallel)
 
 	mesh_tasks = task_creation.create_meshing_tasks(

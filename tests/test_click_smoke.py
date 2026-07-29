@@ -37,6 +37,7 @@ CASES = [
 	CommandCase("mctutil/ng/point_sort.py", "point_sort"),
 	CommandCase("mctutil/ng/position_copy.py", "position_copy"),
 	CommandCase("mctutil/ng/precompute.py", "precompute"),
+	CommandCase("mctutil/ng/publish.py", "publish", ("--help",)),
 	CommandCase("mctutil/ng/shard.py", "shard"),
 	CommandCase("mctutil/ng/shift_angle.py", "shift_angle"),
 	CommandCase("mctutil/parse/meta_shift.py", "meta_shift"),

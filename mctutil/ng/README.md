@@ -10,6 +10,7 @@ command's options.
 - **`build`** — Build a Neuroglancer precomputed volume (image or segmentation) from a stack.
 - **`precompute`** — Write resumable, process-parallel CloudVolume MIP-0 output from TIFF input.
 - **`downsample-pyramid`** — Build a volumetric MIP pyramid with durable Igneous task queues.
+- **`publish`** — Run the stage-aware, resumable sharded publishing pipeline.
 - **`shard`** — Stage a precomputed pyramid into sharded per-mip output.
 - **`layer-copy`** — Merge annotation layers from one Neuroglancer JSON into another, writing a new file.
 - **`layer-extract`** — Extract layers from a Neuroglancer JSON into a new file.
@@ -26,3 +27,20 @@ command's options.
 Note: `ng build` wraps the former `transform/ng.py` neuroglance command.
 `ng precompute` is the CloudVolume backend used by the sharded publishing
 pipeline and intentionally coexists with `ng build`.
+
+## Sharded publishing
+
+The complete pipeline requires:
+
+```console
+pip install -e '.[ng,mesh,aws]'
+mctutil ng publish ROOT --s3-prefix s3://BUCKET/PREFIX
+```
+
+`publish` checks the selected range before writing anything. Short ranges only
+require their stage groups: prep/precompute use `[ng]`, downsample/shard/mesh use
+`[mesh]`, and upload uses `[aws]`. For example, `--stop-after precompute` needs
+only `[ng]`, `--start-at upload` is an `[aws]`-only upload resume, and
+`--no-upload` removes the `[aws]` requirement. Use `--dry-run` to inspect every
+dataset's run/skip/omitted decisions. Voxel resolution defaults to
+`700,700,700` nm and voxel offset independently defaults to `0,0,0`.

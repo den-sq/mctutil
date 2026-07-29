@@ -41,6 +41,7 @@ sino = [
   "scikit-image",
 ]
 mesh = [
+  "cloud-volume",
   "igneous-pipeline",
   "task-queue",
 ]
