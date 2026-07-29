@@ -21,6 +21,8 @@ from mctutil.shared.persistent_queue import (
 	write_state,
 )
 
+SHARD_COMPRESSION = "gzip"
+
 
 def _require_dependencies():
 	try:
@@ -139,7 +141,7 @@ def create_shard_tasks(
 			fill_missing=True,
 			encoding=encoding,
 			memory_target=memory,
-			compress="br",
+			compress=SHARD_COMPRESSION,
 			# Preserve absolute mip positions when staging multiple or
 			# non-contiguous scales through sequential factory calls.
 			truncate_scales=False,
@@ -158,7 +160,7 @@ def create_shard_tasks(
 		fill_missing=True,
 		encoding=encoding,
 		memory_target=memory,
-		compress="br",
+		compress=SHARD_COMPRESSION,
 		sharded=True,
 	)
 
@@ -206,7 +208,7 @@ def shard_volume(
 		"mid_chunk": mid_chunk,
 		"high_chunk": high_chunk,
 		"encoding": encoding,
-		"compression": "br",
+		"compression": SHARD_COMPRESSION,
 		"memory": memory,
 	}
 	fingerprint = stable_fingerprint(configuration)
@@ -360,7 +362,7 @@ def shard(
 			)
 			click.echo(
 				f"Mip {mip}: chunk={chunk}, fill_missing=True, "
-				f"compression=br, status={status}"
+				f"compression={SHARD_COMPRESSION}, status={status}"
 			)
 		if not execute:
 			return
