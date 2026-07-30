@@ -5,6 +5,11 @@ from pathlib import Path
 
 import click
 
+from mctutil.shared.aws import (
+	configure_aws_profile,
+	preflight_s3_info,
+	s3_location,
+)
 from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import run_persistent_tasks, stable_fingerprint
 
@@ -43,6 +48,7 @@ def build_mesh(
 	execute=True,
 	queue_dir=None,
 	lease_seconds=3600,
+	aws_profile=None,
 ):
 	"""Build and merge an unsharded multiresolution mesh.
 
@@ -66,11 +72,27 @@ def build_mesh(
 	:param execute: Whether to run tasks or only describe the workflow.
 	:param queue_dir: Optional durable file-queue root for resumable execution.
 	:param lease_seconds: FileQueue task lease duration.
+	:param aws_profile: Named AWS profile used when layer_path is on S3.
 	:return: None.
 	"""
 	parallel = cpu_count() if parallel is None else parallel
 	if parallel < 1:
 		raise click.ClickException("parallel must be at least 1.")
+
+	resolved_aws_profile = None
+	location = s3_location(layer_path)
+	if location is not None:
+		resolved_aws_profile = configure_aws_profile(
+			aws_profile,
+			location[0],
+		)
+		log.write(
+			"Mesh",
+			f"AWS profile: {resolved_aws_profile}",
+			log_level=LOG.STATUS,
+		)
+		if execute:
+			preflight_s3_info(layer_path, resolved_aws_profile)
 
 	if not execute:
 		log.write(

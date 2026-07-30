@@ -113,6 +113,7 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 	options = {
 		"effective_stages": module.STAGES,
 		"selected_stages": module.STAGES,
+		"aws_profile": "test-profile",
 		"workers": 2,
 		"memory": 123,
 		"release_queue_leases": True,
@@ -144,6 +145,8 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 	assert calls["downsample"][1]["release_leases"] is True
 	assert calls["shard"][1]["destination"] == str(plan.staged)
 	assert calls["shard"][1]["release_leases"] is True
+	assert calls["upload"][1]["aws_profile"] == "test-profile"
+	assert calls["mesh"][1]["aws_profile"] == "test-profile"
 
 
 def test_publish_dry_run_reports_metadata_and_never_writes(

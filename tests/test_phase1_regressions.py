@@ -101,7 +101,7 @@ def test_s3upload_does_not_require_client_close(load_module, monkeypatch, tmp_pa
 		def client(self, *_args, **_kwargs):
 			return DummyClient()
 
-	monkeypatch.setattr(module, "_session", DummySession())
+	monkeypatch.setattr(module, "_get_session", lambda _profile: DummySession())
 	monkeypatch.setattr(module, "upload_folder_to_s3_parallel", lambda *_args, **_kwargs: None)
 
 	module.s3upload.callback(Path("prefix"), "bucket", 4, False, True, source_dir, Path("target"))

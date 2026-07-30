@@ -40,6 +40,8 @@ def test_build_mesh_runs_forge_then_multires_merge(load_module, monkeypatch):
 		create_unsharded_multires_mesh_tasks=create_unsharded_multires_mesh_tasks,
 	)
 	monkeypatch.setattr(module, "_require_mesh_dependencies", lambda: (RecordingTaskQueue, task_creation))
+	monkeypatch.setattr(module, "configure_aws_profile", lambda _profile, _bucket: "chenglab")
+	monkeypatch.setattr(module, "preflight_s3_info", lambda _path, _profile: {"scales": [{}]})
 	monkeypatch.setattr(module.log, "write", lambda *_args, **_kwargs: None)
 
 	module.build_mesh(
@@ -199,6 +201,7 @@ def test_mesh_command_forwards_configured_options(load_module, monkeypatch):
 		"vertex_quantization_bits": 10,
 		"min_chunk_size": (32, 32, 16),
 		"execute": False,
+		"aws_profile": None,
 	}
 
 
@@ -219,6 +222,7 @@ def test_s3upload_routes_meshing_through_shared_helper(load_module, monkeypatch,
 		[
 			"--bucket-prefix", "prefix",
 			"--bucket-name", "bucket",
+			"--aws-profile", "test-profile",
 			"--process-count", "3",
 			"--mesh",
 			"--dry-run",
@@ -234,4 +238,5 @@ def test_s3upload_routes_meshing_through_shared_helper(load_module, monkeypatch,
 		"num_lod": 4,
 		"parallel": 1,
 		"execute": False,
+		"aws_profile": "test-profile",
 	}

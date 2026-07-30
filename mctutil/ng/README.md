@@ -41,11 +41,19 @@ mctutil ng publish ROOT --s3-prefix s3://BUCKET/PREFIX
 
 `publish` checks the selected range before writing anything. Short ranges only
 require their stage groups: prep/precompute use `[ng]`, downsample/shard/mesh use
-`[mesh]`, and upload uses `[aws]`. For example, `--stop-after precompute` needs
-only `[ng]`, `--start-at upload` is an `[aws]`-only upload resume, and
-`--no-upload` removes the `[aws]` requirement. Use `--dry-run` to inspect every
-dataset's run/skip/omitted decisions. Voxel resolution defaults to
-`700,700,700` nm and voxel offset independently defaults to `0,0,0`.
+`[mesh]`, and upload or S3 meshing uses `[aws]`. For example,
+`--stop-after precompute` needs only `[ng]`, `--start-at upload` is an
+`[aws]`-only upload resume, and `--no-upload --mesh-at local` removes the
+`[aws]` requirement. Use `--dry-run` to inspect every dataset's
+run/skip/omitted decisions. Voxel resolution defaults to `700,700,700` nm and
+voxel offset independently defaults to `0,0,0`.
+
+Upload and in-place S3 meshing share one named AWS profile. `--aws-profile`
+wins over `AWS_PROFILE`; if neither is supplied, the profile defaults to
+`chenglab`. To prevent CloudFiles from silently using a different identity,
+`publish` refuses legacy `.cloudvolume`/`.cloudfiles` AWS secret JSON files and
+raw AWS access-key environment variables. Named profiles may use static,
+temporary, SSO, or assume-role credentials through Boto3.
 
 `ng precompute` deliberately rewrites all MIP-0 planes when invoked again;
 individual chunk writes are fast enough that scanning every planned chunk before
