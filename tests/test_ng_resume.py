@@ -154,6 +154,7 @@ def test_downsample_rejects_incomplete_mip0_unless_forced(
 
 	incomplete = types.SimpleNamespace(
 		complete=False,
+		verifiable=True,
 		summary=lambda: "bytes: expected=48, actual=24",
 	)
 	monkeypatch.setattr(
@@ -188,6 +189,46 @@ def test_downsample_rejects_incomplete_mip0_unless_forced(
 	assert forced.exit_code == 0, forced.output
 	assert "forcing downsample" in forced.output
 	assert len(calls) == 1
+
+
+def test_downsample_reports_nonlocal_mip0_as_unverifiable(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/ng/downsample_pyramid.py")
+
+	class FakeVolume:
+		def __init__(self, *_args, **_kwargs):
+			self.info = {
+				"type": "image",
+				"scales": [{"encoding": "raw"}],
+			}
+
+	unverifiable = types.SimpleNamespace(
+		complete=False,
+		verifiable=False,
+		summary=lambda: "completeness checks require a local file:// layer",
+	)
+	monkeypatch.setattr(
+		module,
+		"_require_dependencies",
+		lambda: (FakeVolume, types.SimpleNamespace()),
+	)
+	monkeypatch.setattr(module, "check_mip0_completeness", lambda _path: unverifiable)
+
+	result = CliRunner().invoke(
+		module.downsample_pyramid,
+		[
+			"s3://bucket/layer",
+			"--queue", str(tmp_path / "queue"),
+			"--max-extend-passes", "0",
+		],
+	)
+
+	assert result.exit_code != 0
+	assert "source MIP 0 completeness could not be verified" in result.output
+	assert "source MIP 0 is incomplete" not in result.output
 
 
 def test_publish_precompute_artifact_uses_completeness_predicate(
@@ -235,6 +276,49 @@ def test_persistent_queue_resume_releases_existing_leases(tmp_path, capsys):
 	assert state["status"] == "complete"
 	assert queue.is_empty() is True
 	assert "Released 1 existing task lease(s)" in capsys.readouterr().out
+
+
+def test_persistent_queue_resume_can_preserve_existing_leases(
+	tmp_path,
+	monkeypatch,
+	capsys,
+):
+	taskqueue = pytest.importorskip("taskqueue")
+	module = importlib.import_module("mctutil.shared.persistent_queue")
+	queue_path = tmp_path / "preserve"
+	queue = taskqueue.TaskQueue(module.file_queue_url(queue_path), progress=False)
+	queue.insert([taskqueue.PrintTask("preserved")])
+	leased_task = queue.lease(seconds=3600)
+	assert leased_task is not None
+	module.write_state(
+		queue_path / "mctutil-state.json",
+		{
+			"fingerprint": "resume-preserve",
+			"status": "executing",
+			"inserted": 1,
+		},
+	)
+	observed = {}
+
+	def drain(queue_url, _parallel, _lease_seconds):
+		resumed = taskqueue.TaskQueue(queue_url, progress=False)
+		observed["leased"] = resumed.leased
+		resumed.delete(leased_task, tally=True)
+
+	monkeypatch.setattr(module, "drain_file_queue", drain)
+
+	state = module.run_persistent_tasks(
+		queue_path,
+		"resume-preserve",
+		lambda: (_ for _ in ()).throw(AssertionError("tasks were reinserted")),
+		parallel=1,
+		lease_seconds=60,
+		release_leases=False,
+	)
+
+	assert state["status"] == "complete"
+	assert observed["leased"] == 1
+	assert "Preserved 1 existing task lease(s)" in capsys.readouterr().out
 
 
 def test_missing_expected_queue_announces_full_reinsert(tmp_path, capsys):

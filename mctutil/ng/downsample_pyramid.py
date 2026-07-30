@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlparse
 
 import click
 
-from mctutil.ng.completeness import check_mip0_completeness
+from mctutil.ng.completeness import Mip0Completeness, check_mip0_completeness
 from mctutil.shared.cli import XYZ
 from mctutil.shared.persistent_queue import (
 	read_state,
@@ -61,6 +61,15 @@ def inspect_volume(layer_path: str) -> tuple[str, str, int]:
 		raise ValueError("precomputed volume has no scales")
 	encoding = scales[0].get("encoding", "raw")
 	return layer_type, encoding, len(scales) - 1
+
+
+def mip0_failure_message(completeness: Mip0Completeness) -> str:
+	if completeness.verifiable:
+		return f"source MIP 0 is incomplete: {completeness.summary()}"
+	return (
+		"source MIP 0 completeness could not be verified: "
+		f"{completeness.summary()}"
+	)
 
 
 def create_downsample_tasks(
@@ -312,17 +321,12 @@ def downsample_pyramid(
 		completeness = check_mip0_completeness(layer_path)
 		if completeness.complete:
 			click.echo(f"MIP 0 completeness check passed: {completeness.summary()}")
-		elif force:
-			click.echo(
-				f"Warning: forcing downsample despite MIP 0 completeness failure: "
-				f"{completeness.summary()}",
-				err=True,
-			)
 		else:
-			raise ValueError(
-				f"source MIP 0 is incomplete: {completeness.summary()}; "
-				"use --force to override"
-			)
+			failure = mip0_failure_message(completeness)
+			if force:
+				click.echo(f"Warning: forcing downsample despite {failure}", err=True)
+			else:
+				raise ValueError(f"{failure}; use --force to override")
 		downsample_volume(
 			layer_path,
 			queue_dir,

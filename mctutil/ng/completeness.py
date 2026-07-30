@@ -26,6 +26,10 @@ class Mip0Completeness:
 	actual: int | None
 	detail: str
 
+	@property
+	def verifiable(self) -> bool:
+		return self.metric != "unavailable"
+
 	def summary(self) -> str:
 		if self.expected is None or self.actual is None:
 			return self.detail
