@@ -7,6 +7,9 @@ for a command's options.
 
 ## Commands
 
+- **`find-errs`** — Classify directories containing non-empty versus empty
+  scheduler error files. Matching defaults to `err*`; `--errors-out` and
+  `--clean-out` optionally write the two sorted directory lists.
 - **`meta-shift`** — Run the per-sample meta-shift engine, delegating lab-specific schema (folder conventions, status enum, sbatch parsing, sheet layout) to a `--schema` adapter (e.g. `chenglab`).
 - **`pull-config`** — Copy config files found under a root into a target directory.
 - **`scanlog-fetch`** — Copy scanlogs into a target location.

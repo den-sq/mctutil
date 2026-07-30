@@ -9,4 +9,4 @@ module load miniconda/3
 module load cuda
 source activate recon
 srun nvidia-smi
-python cuda.py
+python -c 'import torch; print(torch.cuda.is_available())'

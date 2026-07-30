@@ -50,12 +50,6 @@ Still open after the chain:
   promotions; `[ng]`, `[sino]`, `[mesh]`, `[aws]`, `[dragonfly]` extras
   remain planned but undeclared. Runtime deps still source from
   `environment.yml` (conda). **Tracked in #86.**
-- Surveyed CLI commands not yet on the unified surface: `mem list`
-  (unimplemented), `parse find-errs` (source
-  `mctutil/parse/find_err_general.py` exists but is unregistered), and
-  `hpc cuda-check` (source `hpc_env/cuda.py` still at top level,
-  unregistered). **Tracked in #87.**
-
 Later additions (June–July 2026), on top of the phase chain:
 
 - Issue #72 / `b11_flat_handling` promotion — `als832` + `flats` groups (#74;
@@ -248,9 +242,9 @@ mapping stays familiar:
 | `ng` | `layer copy`, `layer extract`, `layer tag`, `layer urlshift`, `layer recolor`, `point add`, `point merge`, `point sort`, `point shift`, `position copy`, `shift-angle`, `build` (= current `transform/ng.py`) | All shipped (#52); `ng build` wraps the former `transform/ng.py`. |
 | `mesh` | `build`, `manifest` (the two-pass igneous flow) | `mesh build` is the sole command after #37 and runs the forge plus unsharded multiresolution merge passes. |
 | `transport` | `s3 upload`, `cv fetch` | Shipped as `transport s3-upload` and `transport cv-fetch` (#52). |
-| `mem` | `clean`, `mark`, `list` | `mem clean`, `mem mark`, `mem from-file`, `mem from-range` shipped (#52). `list` not implemented — **open**. |
-| `parse` | `meta-shift` (the consolidated `meta_*.py`), `scanlog-fetch`, `pull-config`, `find-errs`, `prune-empty` | `parse meta-shift`, `parse pull-config`, `parse scanlog-fetch` shipped (#52); `parse prune-empty` shipped in #56. `find-errs` not implemented — **open**. |
-| `hpc` | `cuda-check`, `time-check` | `hpc time-check` shipped (#52); `cuda-check` not registered (`hpc_env/cuda.py` is a 2-line script) — **open**. |
+| `mem` | `clean`, `mark`, `list` | `mem clean`, `mem mark`, `mem from-file`, `mem from-range` shipped (#52). `list` was dropped in #87 because `mem clean` defaults to listing. |
+| `parse` | `meta-shift` (the consolidated `meta_*.py`), `scanlog-fetch`, `pull-config`, `find-errs`, `prune-empty` | `parse meta-shift`, `parse pull-config`, `parse scanlog-fetch` shipped (#52); `parse prune-empty` shipped in #56; `parse find-errs` shipped in #87. |
+| `hpc` | `cuda-check`, `time-check` | `hpc time-check` shipped (#52); `cuda-check` was dropped in #87 while its sbatch probe template was retained. |
 
 Implementation: one Click `Group` per category, registered into the
 top-level `Group` via `add_command`. Each leaf is the existing
@@ -294,7 +288,7 @@ The "remove every `sys.path.append(parents[1])`" part of option (a) is
 `chenglab/` stays at top level by design (it hosts the meta_shift adapter
 and is referenced from `mctutil.parse.meta_shift`'s adapter registry);
 `hpc_env/` and `hpc_work/` stay at top level as non-Python data buckets
-(sbatch templates + yaml configs + the 2-line `cuda.py` probe).
+(sbatch templates + yaml configs).
 
 ---
 
