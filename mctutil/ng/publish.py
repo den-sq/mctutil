@@ -124,6 +124,27 @@ def mesh_uses_s3(
 	return use_s3
 
 
+def resolve_publish_aws_profile(
+	stages: tuple[str, ...],
+	mesh_at: str,
+	mesh_mip: int,
+	upload_include_mip0: bool,
+	s3_prefix: str | None,
+	aws_profile: str | None,
+) -> tuple[bool, str | None]:
+	"""Resolve S3-mesh planning and the invocation's shared AWS profile."""
+	s3_mesh = mesh_uses_s3(
+		stages,
+		mesh_at,
+		mesh_mip,
+		upload_include_mip0,
+	)
+	if "upload" not in stages and not s3_mesh:
+		return s3_mesh, None
+	bucket, _prefix = parse_s3_prefix(s3_prefix)
+	return s3_mesh, configure_aws_profile(aws_profile, bucket)
+
+
 def missing_dependencies(
 	extras: tuple[str, ...],
 ) -> dict[str, tuple[str, ...]]:
@@ -492,17 +513,12 @@ def stage_decision(
 
 
 def mesh_target(plan: DatasetPlan, options: dict) -> str:
-	use_s3 = options["mesh_at"] == "s3" or (
-		options["mesh_at"] == "auto"
-		and "upload" in options["effective_stages"]
-	)
-	if (
-		use_s3
-		and options["mesh_mip"] == 0
-		and not options["upload_include_mip0"]
+	if mesh_uses_s3(
+		options["effective_stages"],
+		options["mesh_at"],
+		options["mesh_mip"],
+		options["upload_include_mip0"],
 	):
-		use_s3 = False
-	if use_s3:
 		bucket, key = dataset_s3_target(plan, options["s3_prefix"])
 		return f"precomputed://s3://{bucket}/{key}"
 	return f"precomputed://{plan.staged.resolve().as_uri()}"
@@ -669,6 +685,27 @@ def print_dependency_plan(
 		click.echo("Dependency preflight: satisfied")
 
 
+def print_publish_plan(
+	root: Path,
+	selected_stages: tuple[str, ...],
+	no_upload: bool,
+	extras: tuple[str, ...],
+	missing: dict[str, tuple[str, ...]],
+	aws_profile: str | None,
+	voxel_resolution: tuple[int, int, int],
+	voxel_offset: tuple[int, int, int],
+) -> None:
+	click.echo(f"Root: {root.resolve()}")
+	click.echo(f"Selected stages: {', '.join(selected_stages)}")
+	if no_upload and "upload" in selected_stages:
+		click.echo("Upload is explicitly omitted by --no-upload.")
+	print_dependency_plan(extras, missing)
+	if aws_profile is not None:
+		click.echo(f"AWS profile: {aws_profile}")
+	click.echo(f"Voxel resolution (nm): {voxel_resolution}")
+	click.echo(f"Voxel offset: {voxel_offset}")
+
+
 def publish_datasets(
 	plans: tuple[DatasetPlan, ...],
 	selected_stages: tuple[str, ...],
@@ -824,30 +861,27 @@ def publish(
 			s3_prefix,
 		)
 
-		s3_mesh = mesh_uses_s3(
+		s3_mesh, aws_profile = resolve_publish_aws_profile(
 			effective,
 			mesh_at,
 			mesh_mip,
 			upload_include_mip0,
+			s3_prefix,
+			aws_profile,
 		)
-		uses_s3 = "upload" in effective or s3_mesh
-		if uses_s3:
-			bucket, _prefix = parse_s3_prefix(s3_prefix)
-			aws_profile = configure_aws_profile(aws_profile, bucket)
-		else:
-			aws_profile = None
 
 		extras = required_extras(effective, s3_mesh=s3_mesh)
 		missing = missing_dependencies(extras)
-		click.echo(f"Root: {root.resolve()}")
-		click.echo(f"Selected stages: {', '.join(selected_stages)}")
-		if no_upload and "upload" in selected_stages:
-			click.echo("Upload is explicitly omitted by --no-upload.")
-		print_dependency_plan(extras, missing)
-		if aws_profile is not None:
-			click.echo(f"AWS profile: {aws_profile}")
-		click.echo(f"Voxel resolution (nm): {voxel_resolution}")
-		click.echo(f"Voxel offset: {voxel_offset}")
+		print_publish_plan(
+			root,
+			selected_stages,
+			no_upload,
+			extras,
+			missing,
+			aws_profile,
+			voxel_resolution,
+			voxel_offset,
+		)
 
 		datasets = discover_datasets(root)
 		if not datasets:

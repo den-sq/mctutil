@@ -112,6 +112,55 @@ def test_s3_mesh_adds_aws_dependency_without_upload(load_module):
 	assert module.required_extras(stages) == ("mesh",)
 
 
+@pytest.mark.parametrize(
+	(
+		"stages",
+		"mesh_at",
+		"mesh_mip",
+		"include_mip0",
+		"expected_s3",
+	),
+	(
+		(("mesh",), "s3", 0, True, True),
+		(("upload", "mesh"), "auto", 0, True, True),
+		(("mesh",), "auto", 0, True, False),
+		(("upload", "mesh"), "auto", 0, False, False),
+		(("upload", "mesh"), "s3", 1, False, True),
+	),
+)
+def test_mesh_target_matches_s3_dependency_planning(
+	load_module,
+	tmp_path,
+	stages,
+	mesh_at,
+	mesh_mip,
+	include_mip0,
+	expected_s3,
+):
+	module = load_module("mctutil/ng/publish.py")
+	plan = types.SimpleNamespace(
+		dataset=tmp_path / "sample",
+		staged=tmp_path / "sample_precomputed_sharded_local",
+	)
+	options = {
+		"effective_stages": stages,
+		"mesh_at": mesh_at,
+		"mesh_mip": mesh_mip,
+		"upload_include_mip0": include_mip0,
+		"s3_prefix": "s3://bucket/prefix",
+	}
+
+	target = module.mesh_target(plan, options)
+
+	assert module.mesh_uses_s3(
+		stages,
+		mesh_at,
+		mesh_mip,
+		include_mip0,
+	) is expected_s3
+	assert target.startswith("precomputed://s3://") is expected_s3
+
+
 def test_publish_reports_aws_for_s3_mesh_without_upload(
 	load_module,
 	monkeypatch,

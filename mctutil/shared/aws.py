@@ -12,6 +12,8 @@ import click
 
 
 DEFAULT_AWS_PROFILE = "chenglab"
+# Reject lone token variables too: they signal a partial or stale raw-key
+# environment that would otherwise be inherited unchanged by worker processes.
 RAW_AWS_CREDENTIAL_VARIABLES = (
 	"AWS_ACCESS_KEY_ID",
 	"AWS_SECRET_ACCESS_KEY",
