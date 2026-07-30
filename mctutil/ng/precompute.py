@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +15,7 @@ import tifffile
 
 from mctutil.shared.cli import XYZ
 from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
+from mctutil.ng.completeness import check_mip0_completeness
 
 
 LAYER_TYPES = ("auto", "image", "segmentation")
@@ -49,6 +50,14 @@ class VolumePlan:
 	voxel_offset: tuple[int, int, int]
 	chunk_size: tuple[int, int, int]
 	segmentation_block: tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class WorkerBatchResult:
+	"""Completed planes and an optional process-pool failure."""
+
+	completed: frozenset[int]
+	failure: BrokenProcessPool | None
 
 
 def _require_cloudvolume():
@@ -299,30 +308,6 @@ def open_or_create_volume(output_path: Path, plan: VolumePlan, input_spec: Input
 	return volume, True
 
 
-def slice_complete(volume, z_index: int, input_spec: InputSpec, plan: VolumePlan) -> bool:
-	z_count, y_size, x_size = input_spec.shape
-	del z_count
-	offset_x, offset_y, offset_z = plan.voxel_offset
-	bounds = [
-		offset_x,
-		offset_y,
-		offset_z + z_index,
-		offset_x + x_size,
-		offset_y + y_size,
-		offset_z + z_index + 1,
-	]
-	exists = volume.image.exists(bounds)
-	return bool(exists) and all(exists.values())
-
-
-def missing_slices(volume, input_spec: InputSpec, plan: VolumePlan) -> list[int]:
-	return [
-		z_index
-		for z_index in range(input_spec.shape[0])
-		if not slice_complete(volume, z_index, input_spec, plan)
-	]
-
-
 def _init_worker(
 	cloudpath: str,
 	dtype_name: str,
@@ -360,18 +345,32 @@ def _write_slice(z_index: int) -> int:
 	return z_index
 
 
+def _harvest_completed_futures(futures, completed: set[int]) -> None:
+	for future in futures:
+		if not future.done() or future.cancelled():
+			continue
+		try:
+			completed.add(future.result())
+		except (BrokenProcessPool, CancelledError):
+			continue
+
+
 def _execute_slices(
 	cloudpath: str,
 	input_spec: InputSpec,
 	plan: VolumePlan,
 	z_indices: list[int],
 	workers: int,
-) -> None:
+) -> WorkerBatchResult:
 	pool_options = {}
 	if sys.version_info >= (3, 11):
 		pool_options["max_tasks_per_child"] = 500
 
-	with ProcessPoolExecutor(
+	click.echo(
+		f"Starting Z-plane writers for {len(z_indices)} plane(s) "
+		f"with {workers} worker(s)."
+	)
+	pool = ProcessPoolExecutor(
 		max_workers=workers,
 		initializer=_init_worker,
 		initargs=(
@@ -382,51 +381,63 @@ def _execute_slices(
 			plan.voxel_offset[2],
 		),
 		**pool_options,
-	) as pool:
-		futures = [pool.submit(_write_slice, z_index) for z_index in z_indices]
+	)
+	futures = []
+	completed = set()
+	failure = None
+	try:
+		for z_index in z_indices:
+			futures.append(pool.submit(_write_slice, z_index))
 		with click.progressbar(
 			as_completed(futures),
 			length=len(futures),
-			label=f"Writing missing Z planes ({workers} workers)",
-		) as completed:
-			for future in completed:
-				future.result()
+			label=f"Writing Z planes ({workers} workers)",
+		) as completed_futures:
+			for future in completed_futures:
+				completed.add(future.result())
+	except BrokenProcessPool as exc:
+		failure = exc
+	finally:
+		pool.shutdown(wait=True, cancel_futures=failure is not None)
+
+	if failure is not None:
+		_harvest_completed_futures(futures, completed)
+	return WorkerBatchResult(frozenset(completed), failure)
 
 
-def write_missing_slices(
-	volume,
+def write_all_slices(
 	output_path: Path,
 	input_spec: InputSpec,
 	plan: VolumePlan,
 	workers: int,
 ) -> int:
-	"""Write missing planes, retrying a broken pool at lower parallelism."""
-	remaining = missing_slices(volume, input_spec, plan)
-	initial_missing = len(remaining)
-	if not remaining:
-		click.echo("All Z planes are already present; nothing to write.")
-		return 0
-
+	"""Write every plane, retrying incomplete work from a broken worker pool."""
+	remaining = set(range(input_spec.shape[0]))
+	initial_count = len(remaining)
 	active_workers = min(workers, len(remaining))
 	while remaining:
-		try:
-			_execute_slices(
-				cloudpath_for(output_path),
-				input_spec,
-				plan,
-				remaining,
-				active_workers,
-			)
-		except BrokenProcessPool:
+		result = _execute_slices(
+			cloudpath_for(output_path),
+			input_spec,
+			plan,
+			sorted(remaining),
+			active_workers,
+		)
+		remaining.difference_update(result.completed)
+		if result.failure is not None:
 			if active_workers == 1:
-				raise
+				raise result.failure
 			active_workers = max(1, active_workers // 2)
-			click.echo(f"Worker pool failed; retrying with {active_workers} workers.")
-		remaining = missing_slices(volume, input_spec, plan)
-
-	if missing_slices(volume, input_spec, plan):
-		raise RuntimeError("precompute finished with missing Z chunks")
-	return initial_missing
+			click.echo(
+				f"Worker pool failed after {len(result.completed)} plane(s); "
+				f"retrying {len(remaining)} plane(s) with {active_workers} workers."
+			)
+			continue
+		if remaining:
+			raise RuntimeError(
+				f"worker pool exited without completing {len(remaining)} Z plane(s)"
+			)
+	return initial_count
 
 
 def describe_plan(
@@ -526,8 +537,18 @@ def precompute(
 			return
 
 		volume, created = open_or_create_volume(output_path, plan, input_spec)
-		click.echo("Created MIP 0 metadata." if created else "Resuming existing MIP 0 volume.")
-		written = write_missing_slices(volume, output_path, input_spec, plan, workers)
+		click.echo(
+			"Created MIP 0 metadata."
+			if created
+			else "Using compatible existing MIP 0 metadata; rewriting all Z planes."
+		)
+		written = write_all_slices(output_path, input_spec, plan, workers)
+		completeness = check_mip0_completeness(output_path, volume.info)
+		if not completeness.complete:
+			raise RuntimeError(
+				f"MIP 0 completeness check failed: {completeness.summary()}"
+			)
+		click.echo(f"MIP 0 completeness check passed: {completeness.summary()}")
 		click.echo(f"Precompute complete; wrote {written} Z plane(s).")
 	except click.ClickException:
 		raise

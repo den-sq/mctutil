@@ -9,6 +9,13 @@ import numpy as np
 import pytest
 
 
+def complete_mip0():
+	return types.SimpleNamespace(
+		complete=True,
+		summary=lambda: "bytes: expected=1, actual=1",
+	)
+
+
 class FakeVolume:
 	max_mip = 0
 
@@ -53,9 +60,19 @@ def test_downsample_uses_persistent_pass_state(load_module, tmp_path, monkeypatc
 
 	task_creation = types.SimpleNamespace(create_downsampling_tasks=create_tasks)
 	monkeypatch.setattr(module, "_require_dependencies", lambda: (FakeVolume, task_creation))
+	monkeypatch.setattr(module, "check_mip0_completeness", lambda _path: complete_mip0())
 
-	def run_tasks(queue_path, fingerprint, tasks_factory, parallel, lease_seconds):
-		queue_calls.append((queue_path, fingerprint, parallel, lease_seconds))
+	def run_tasks(
+		queue_path,
+		fingerprint,
+		tasks_factory,
+		parallel,
+		lease_seconds,
+		**kwargs,
+	):
+		queue_calls.append(
+			(queue_path, fingerprint, parallel, lease_seconds, kwargs)
+		)
 		tasks_factory()
 		FakeVolume.max_mip += 1
 		return {"status": "complete"}
@@ -73,6 +90,7 @@ def test_downsample_uses_persistent_pass_state(load_module, tmp_path, monkeypatc
 			"--max-extend-passes", "2",
 			"--initial-parallel", "3",
 			"--extend-parallel", "2",
+			"--preserve-leases",
 		],
 	)
 
@@ -84,6 +102,7 @@ def test_downsample_uses_persistent_pass_state(load_module, tmp_path, monkeypatc
 	assert task_calls[1]["mip"] == 1
 	assert task_calls[1]["chunk_size"] == (16, 16, 16)
 	assert [call[2] for call in queue_calls] == [3, 2, 2]
+	assert all(call[4]["release_leases"] is False for call in queue_calls)
 
 	state_files = list(queue.rglob("pipeline.json"))
 	assert len(state_files) == 1
@@ -118,7 +137,7 @@ def test_downsample_restart_drains_recorded_source_mip(load_module, tmp_path, mo
 	)
 	recorded = []
 
-	def fake_run_pass(_layer, _root, _name, source_mip, *_args):
+	def fake_run_pass(_layer, _root, _name, source_mip, *_args, **_kwargs):
 		recorded.append(source_mip)
 
 	monkeypatch.setattr(module, "run_pass", fake_run_pass)

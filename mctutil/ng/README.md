@@ -8,7 +8,7 @@ command's options.
 ## Commands
 
 - **`build`** — Build a Neuroglancer precomputed volume (image or segmentation) from a stack.
-- **`precompute`** — Write resumable, process-parallel CloudVolume MIP-0 output from TIFF input.
+- **`precompute`** — Write process-parallel CloudVolume MIP-0 output from TIFF input.
 - **`downsample-pyramid`** — Build a volumetric MIP pyramid with durable Igneous task queues.
 - **`http-check`** — Smoke-test `info` and explicit chunk URLs with GET or HEAD.
 - **`publish`** — Run the stage-aware, resumable sharded publishing pipeline.
@@ -46,3 +46,15 @@ only `[ng]`, `--start-at upload` is an `[aws]`-only upload resume, and
 `--no-upload` removes the `[aws]` requirement. Use `--dry-run` to inspect every
 dataset's run/skip/omitted decisions. Voxel resolution defaults to
 `700,700,700` nm and voxel offset independently defaults to `0,0,0`.
+
+`ng precompute` deliberately rewrites all MIP-0 planes when invoked again;
+individual chunk writes are fast enough that scanning every planned chunk before
+writing is counterproductive. It verifies completion with one local scale-folder
+enumeration. `ng downsample-pyramid` refuses an incomplete MIP 0 unless
+`--force` is supplied.
+
+Downsampling and sharding resume from their durable Igneous FileQueues. A
+resumed queue releases existing leases before draining so tasks from a killed
+run are immediately available. Use `--preserve-leases` on the leaf commands, or
+`--preserve-queue-leases` on `ng publish`, when other workers intentionally
+share the same queue.

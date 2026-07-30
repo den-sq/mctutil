@@ -7,6 +7,7 @@ from urllib.parse import unquote, urlparse
 
 import click
 
+from mctutil.ng.completeness import Mip0Completeness, check_mip0_completeness
 from mctutil.shared.cli import XYZ
 from mctutil.shared.persistent_queue import (
 	read_state,
@@ -62,6 +63,15 @@ def inspect_volume(layer_path: str) -> tuple[str, str, int]:
 	return layer_type, encoding, len(scales) - 1
 
 
+def mip0_failure_message(completeness: Mip0Completeness) -> str:
+	if completeness.verifiable:
+		return f"source MIP 0 is incomplete: {completeness.summary()}"
+	return (
+		"source MIP 0 completeness could not be verified: "
+		f"{completeness.summary()}"
+	)
+
+
 def create_downsample_tasks(
 	layer_path: str,
 	source_mip: int,
@@ -92,6 +102,8 @@ def run_pass(
 	memory: int,
 	parallel: int,
 	lease_seconds: int,
+	release_leases: bool = True,
+	expected_existing: bool = False,
 ) -> None:
 	specification = {
 		"stage": "downsample",
@@ -117,6 +129,8 @@ def run_pass(
 		),
 		parallel,
 		lease_seconds,
+		release_leases=release_leases,
+		expected_existing=expected_existing,
 	)
 
 
@@ -135,6 +149,7 @@ def downsample_volume(
 	memory: int,
 	encoding: str,
 	lease_seconds: int,
+	release_leases: bool = True,
 ) -> None:
 	configuration = {
 		"layer_path": normalize_layer_path(layer_path),
@@ -149,6 +164,7 @@ def downsample_volume(
 		state_path,
 		{
 			"configuration": configuration,
+			"initial_started": False,
 			"initial_complete": False,
 			"extensions": [],
 			"complete": False,
@@ -160,6 +176,10 @@ def downsample_volume(
 
 	pass_root = state_path.parent
 	if not state["initial_complete"]:
+		expected_existing = state.get("initial_started", False)
+		if not expected_existing:
+			state["initial_started"] = True
+			write_state(state_path, state)
 		click.echo(f"Initial downsample from mip 0 with chunks {initial_chunk}.")
 		run_pass(
 			layer_path,
@@ -171,6 +191,8 @@ def downsample_volume(
 			memory,
 			initial_parallel,
 			lease_seconds,
+			release_leases=release_leases,
+			expected_existing=expected_existing,
 		)
 		state["initial_complete"] = True
 		write_state(state_path, state)
@@ -182,12 +204,17 @@ def downsample_volume(
 			_layer_type, _source_encoding, source_mip = inspect_volume(layer_path)
 			extension = {
 				"source_mip": source_mip,
+				"started": False,
 				"complete": False,
 			}
 			state["extensions"].append(extension)
 			write_state(state_path, state)
 
 		if not extension["complete"]:
+			expected_existing = extension.get("started", False)
+			if not expected_existing:
+				extension["started"] = True
+				write_state(state_path, state)
 			click.echo(
 				f"Extension pass {pass_index + 1} from mip {extension['source_mip']} "
 				f"with chunks {extend_chunk}."
@@ -202,6 +229,8 @@ def downsample_volume(
 				memory,
 				extend_parallel,
 				lease_seconds,
+				release_leases=release_leases,
+				expected_existing=expected_existing,
 			)
 			extension["complete"] = True
 			write_state(state_path, state)
@@ -245,6 +274,17 @@ def downsample_volume(
 	help="Destination encoding; auto chooses from the layer type/source metadata.",
 )
 @click.option("--lease-seconds", type=click.IntRange(min=10), default=3600, show_default=True)
+@click.option(
+	"--release-leases/--preserve-leases",
+	default=True,
+	show_default=True,
+	help="Release existing FileQueue leases when resuming; preserve for shared queues.",
+)
+@click.option(
+	"--force",
+	is_flag=True,
+	help="Allow downsampling when local MIP-0 completeness cannot be confirmed.",
+)
 @click.option("--execute/--dry-run", default=True, show_default=True)
 def downsample_pyramid(
 	layer_path: str,
@@ -257,6 +297,8 @@ def downsample_pyramid(
 	memory: int,
 	encoding: str,
 	lease_seconds: int,
+	release_leases: bool,
+	force: bool,
 	execute: bool,
 ) -> None:
 	"""Build a volumetric MIP pyramid with durable task-level resume."""
@@ -276,6 +318,15 @@ def downsample_pyramid(
 		)
 		if not execute:
 			return
+		completeness = check_mip0_completeness(layer_path)
+		if completeness.complete:
+			click.echo(f"MIP 0 completeness check passed: {completeness.summary()}")
+		else:
+			failure = mip0_failure_message(completeness)
+			if force:
+				click.echo(f"Warning: forcing downsample despite {failure}", err=True)
+			else:
+				raise ValueError(f"{failure}; use --force to override")
 		downsample_volume(
 			layer_path,
 			queue_dir,
@@ -287,6 +338,7 @@ def downsample_pyramid(
 			memory,
 			encoding,
 			lease_seconds,
+			release_leases,
 		)
 	except click.ClickException:
 		raise

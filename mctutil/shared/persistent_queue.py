@@ -10,6 +10,8 @@ from pathlib import Path
 import threading
 import time
 
+import click
+
 
 def stable_fingerprint(value) -> str:
 	"""Return a stable short identifier for JSON-compatible configuration."""
@@ -124,21 +126,75 @@ def drain_file_queue(
 		raise RuntimeError(f"{len(failed)} task worker(s) failed with exit codes {failed}")
 
 
+def _announce_queue_start(
+	queue_path: Path,
+	state: dict | None,
+	expected_existing: bool,
+) -> None:
+	if state is not None:
+		click.echo(
+			f"Persistent queue resume: {queue_path} "
+			f"(status={state.get('status', 'unknown')})."
+		)
+	elif expected_existing:
+		click.echo(
+			f"Persistent queue is missing; regenerating the full task set: {queue_path}"
+		)
+	else:
+		click.echo(f"Persistent queue fresh insert: {queue_path}")
+
+
+def _finish_insertion(queue, state: dict, state_path: Path, tasks_factory) -> None:
+	if state["status"] != "inserting":
+		return
+	if queue.inserted == 0:
+		# FileQueue commits its insertion counter only after the full insert
+		# returns. If a process dies mid-insert, retrying the complete task
+		# set can duplicate idempotent tasks but cannot accept a partial set.
+		state["inserted"] = queue.insert(tasks_factory())
+	else:
+		state["inserted"] = queue.inserted
+	state["status"] = "enqueued"
+	write_state(state_path, state)
+	click.echo(
+		f"Queue tasks: inserted={state['inserted']}; remaining={queue.enqueued}."
+	)
+
+
+def _release_resume_leases(queue, state: dict, release_leases: bool) -> None:
+	if state["status"] not in {"enqueued", "executing"}:
+		return
+	leased = queue.leased
+	if release_leases:
+		queue.release_all()
+		click.echo(f"Released {leased} existing task lease(s) before resume.")
+	else:
+		click.echo(f"Preserved {leased} existing task lease(s) before resume.")
+	click.echo(
+		f"Queue tasks: inserted={state.get('inserted', queue.inserted)}; "
+		f"remaining={queue.enqueued}."
+	)
+
+
 def run_persistent_tasks(
 	queue_path: Path,
 	task_fingerprint: str,
 	tasks_factory,
 	parallel: int,
 	lease_seconds: int = 3600,
+	release_leases: bool = True,
+	expected_existing: bool = False,
 ) -> dict:
 	"""Insert a task set once and resume its durable queue until completion."""
 	_QueueEmptyError, TaskQueue = _require_taskqueue()
 	queue_path = queue_path.resolve()
 	state_path = queue_path / "mctutil-state.json"
 	state = read_state(state_path)
+	resumed = state is not None
 	if state is not None and state.get("fingerprint") != task_fingerprint:
 		raise RuntimeError(f"persistent queue fingerprint mismatch: {queue_path}")
 
+	_announce_queue_start(queue_path, state, expected_existing)
 	queue = TaskQueue(file_queue_url(queue_path), progress=False)
 	if state is None:
 		state = {
@@ -148,19 +204,18 @@ def run_persistent_tasks(
 		}
 		write_state(state_path, state)
 
-	if state["status"] == "inserting":
-		if queue.inserted == 0:
-			# FileQueue commits its insertion counter only after the full insert
-			# returns. If a process dies mid-insert, retrying the complete task
-			# set can duplicate idempotent tasks but cannot accept a partial set.
-			state["inserted"] = queue.insert(tasks_factory())
-		else:
-			state["inserted"] = queue.inserted
-		state["status"] = "enqueued"
-		write_state(state_path, state)
+	_finish_insertion(queue, state, state_path, tasks_factory)
 
 	if state["status"] == "complete":
+		click.echo(
+			f"Queue tasks: inserted={state.get('inserted', queue.inserted)}; "
+			"remaining=0."
+		)
 		return state
+
+	if resumed:
+		_release_resume_leases(queue, state, release_leases)
+
 	if queue.is_empty():
 		state["status"] = "complete"
 		write_state(state_path, state)
@@ -173,4 +228,7 @@ def run_persistent_tasks(
 		raise RuntimeError(f"persistent queue did not drain: {queue_path}")
 	state["status"] = "complete"
 	write_state(state_path, state)
+	click.echo(
+		f"Queue drained: inserted={state.get('inserted', queue.inserted)}; remaining=0."
+	)
 	return state

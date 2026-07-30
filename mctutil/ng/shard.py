@@ -198,6 +198,7 @@ def shard_volume(
 	memory: int,
 	parallel: int,
 	lease_seconds: int,
+	release_leases: bool = True,
 ) -> None:
 	configuration = {
 		"stage": "shard",
@@ -220,6 +221,7 @@ def shard_volume(
 			"configuration": configuration,
 			"completed_mips": [],
 			"attempt": 0,
+			"attempt_started": False,
 			"complete": False,
 		},
 	)
@@ -236,6 +238,7 @@ def shard_volume(
 		return
 	if state["complete"]:
 		state["attempt"] = state.get("attempt", 0) + 1
+		state["attempt_started"] = False
 		state["completed_mips"] = sorted(verified_completed)
 		state["complete"] = False
 		write_state(state_path, state)
@@ -257,6 +260,10 @@ def shard_volume(
 			"pending": pending,
 		}
 	)
+	expected_existing = state.get("attempt_started", False)
+	if not expected_existing:
+		state["attempt_started"] = True
+		write_state(state_path, state)
 	run_persistent_tasks(
 		stage_root / f"tasks-{state.get('attempt', 0)}",
 		task_fingerprint,
@@ -272,6 +279,8 @@ def shard_volume(
 		),
 		parallel,
 		lease_seconds,
+		release_leases=release_leases,
+		expected_existing=expected_existing,
 	)
 	state["completed_mips"] = sorted(set(state["completed_mips"]) | set(pending))
 	state["complete"] = True
@@ -318,6 +327,12 @@ def shard_volume(
 )
 @click.option("--queue", "queue_dir", type=click.Path(path_type=Path))
 @click.option("--lease-seconds", type=click.IntRange(min=10), default=3600, show_default=True)
+@click.option(
+	"--release-leases/--preserve-leases",
+	default=True,
+	show_default=True,
+	help="Release existing FileQueue leases when resuming; preserve for shared queues.",
+)
 @click.option("--execute/--dry-run", default=True, show_default=True)
 def shard(
 	source: str,
@@ -332,6 +347,7 @@ def shard(
 	encoding: str,
 	queue_dir: Path | None,
 	lease_seconds: int,
+	release_leases: bool,
 	execute: bool,
 ) -> None:
 	"""Stage a precomputed pyramid into sharded Neuroglancer scales."""
@@ -378,6 +394,7 @@ def shard(
 			memory,
 			parallel,
 			lease_seconds,
+			release_leases,
 		)
 	except click.ClickException:
 		raise
