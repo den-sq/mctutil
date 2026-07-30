@@ -115,6 +115,7 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 		"selected_stages": module.STAGES,
 		"workers": 2,
 		"memory": 123,
+		"release_queue_leases": True,
 		"segmentation_encoding": "compressed_segmentation",
 		"voxel_resolution": (700, 800, 900),
 		"voxel_offset": (10, 20, 30),
@@ -139,7 +140,10 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 	assert calls["prep"][1]["input_tif"] == plan.prep_input
 	assert calls["precompute"][1]["voxel_offset"] == (10, 20, 30)
 	assert calls["downsample"][1]["layer_path"] == str(plan.precomputed)
+	assert calls["downsample"][1]["force"] is False
+	assert calls["downsample"][1]["release_leases"] is True
 	assert calls["shard"][1]["destination"] == str(plan.staged)
+	assert calls["shard"][1]["release_leases"] is True
 
 
 def test_publish_dry_run_reports_metadata_and_never_writes(

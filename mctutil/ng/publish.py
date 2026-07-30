@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import click
 
+from mctutil.ng.completeness import check_mip0_completeness
 from mctutil.shared.cli import XYZ
 from mctutil.shared.persistent_queue import (
 	read_state,
@@ -345,8 +346,7 @@ def stage_artifact_valid(stage: str, plan: DatasetPlan) -> bool:
 	if stage == "prep":
 		return valid_memmap(plan)
 	if stage == "precompute":
-		info = _read_info(plan.precomputed)
-		return bool(info and info.get("scales"))
+		return check_mip0_completeness(plan.precomputed).complete
 	if stage == "downsample":
 		info = _read_info(plan.precomputed)
 		return bool(info and len(info.get("scales", [])) > 1)
@@ -584,6 +584,8 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			memory=options["memory"],
 			encoding=encoding,
 			lease_seconds=3600,
+			release_leases=options["release_queue_leases"],
+			force=False,
 			execute=True,
 		)
 	elif stage == "shard":
@@ -601,6 +603,7 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			encoding=encoding,
 			queue_dir=queue_root,
 			lease_seconds=3600,
+			release_leases=options["release_queue_leases"],
 			execute=True,
 		)
 	elif stage == "upload":
@@ -720,6 +723,12 @@ def publish_datasets(
 @click.option("--no-upload", is_flag=True, help="Explicitly omit upload from the range.")
 @click.option("--workers", type=click.IntRange(min=1), default=8, show_default=True)
 @click.option("--memory", type=click.IntRange(min=1), default=10_000_000_000, show_default=True)
+@click.option(
+	"--release-queue-leases/--preserve-queue-leases",
+	default=True,
+	show_default=True,
+	help="Release existing Igneous FileQueue leases when resuming.",
+)
 @click.option("--upload-jobs", type=click.IntRange(min=1), default=6, show_default=True)
 @click.option("--mesh-parallel", type=click.IntRange(min=1), default=16, show_default=True)
 @click.option("--mesh-mip", type=click.IntRange(min=0), default=0, show_default=True)
@@ -763,6 +772,7 @@ def publish(
 	no_upload: bool,
 	workers: int,
 	memory: int,
+	release_queue_leases: bool,
 	upload_jobs: int,
 	mesh_parallel: int,
 	mesh_mip: int,
@@ -811,6 +821,7 @@ def publish(
 			"no_upload": no_upload,
 			"workers": workers,
 			"memory": memory,
+			"release_queue_leases": release_queue_leases,
 			"upload_jobs": upload_jobs,
 			"mesh_parallel": mesh_parallel,
 			"mesh_mip": mesh_mip,

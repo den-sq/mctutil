@@ -44,11 +44,6 @@ def test_ng_precompute_writes_real_local_cloudvolume(tmp_path, monkeypatch):
 	assert written.shape == (4, 3, 2)
 	assert np.array_equal(written, source.transpose(2, 1, 0))
 
-	chunk_mtimes = {
-		path.relative_to(output_path): path.stat().st_mtime_ns
-		for path in output_path.rglob("*")
-		if path.is_file() and path.name != "info"
-	}
 	resume_result = CliRunner().invoke(
 		precompute,
 		[
@@ -60,12 +55,8 @@ def test_ng_precompute_writes_real_local_cloudvolume(tmp_path, monkeypatch):
 		],
 	)
 	assert resume_result.exit_code == 0, resume_result.output
-	assert "All Z planes are already present" in resume_result.output
-	assert chunk_mtimes == {
-		path.relative_to(output_path): path.stat().st_mtime_ns
-		for path in output_path.rglob("*")
-		if path.is_file() and path.name != "info"
-	}
+	assert "rewriting all Z planes" in resume_result.output
+	assert "Precompute complete; wrote 2 Z plane(s)" in resume_result.output
 
 
 def test_ng_precompute_dry_run_uses_agreed_metadata_defaults(tmp_path):

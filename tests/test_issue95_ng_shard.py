@@ -70,8 +70,17 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 		lambda: (FakeVolume, task_creation),
 	)
 
-	def run_tasks(queue_path, fingerprint, tasks_factory, parallel, lease_seconds):
-		queue_calls.append((queue_path, fingerprint, parallel, lease_seconds))
+	def run_tasks(
+		queue_path,
+		fingerprint,
+		tasks_factory,
+		parallel,
+		lease_seconds,
+		**kwargs,
+	):
+		queue_calls.append(
+			(queue_path, fingerprint, parallel, lease_seconds, kwargs)
+		)
 		assert list(tasks_factory()) == ["mip-1", "mip-2"]
 		return {"status": "complete"}
 
@@ -90,6 +99,7 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 			"--exclude-mip0",
 			"--queue", str(queue),
 			"--parallel", "3",
+			"--preserve-leases",
 		],
 	)
 
@@ -99,6 +109,7 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 	assert all(call["compress"] == "gzip" for call in task_calls)
 	assert len(queue_calls) == 1
 	assert queue_calls[0][2] == 3
+	assert queue_calls[0][4]["release_leases"] is False
 	state_files = list(queue.rglob("pipeline.json"))
 	assert len(state_files) == 1
 	state = json.loads(state_files[0].read_text(encoding="utf-8"))
