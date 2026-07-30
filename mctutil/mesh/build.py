@@ -71,6 +71,7 @@ MESH_VECTOR = DelimitedRecord(
 	help="Durable FileQueue root for crash-resumable forge and merge passes.",
 )
 @click.option("--lease-seconds", type=click.IntRange(min=10), default=3600, show_default=True)
+@click.option("--aws-profile", help="Named AWS profile when LAYER_PATH is on S3.")
 @click.argument("layer_path", type=click.STRING)
 def mesh(
 	parallel,
@@ -92,6 +93,7 @@ def mesh(
 	execute,
 	queue_dir,
 	lease_seconds,
+	aws_profile,
 	layer_path,
 ):
 	"""Build an unsharded multiresolution mesh for LAYER_PATH."""
@@ -113,6 +115,7 @@ def mesh(
 		vertex_quantization_bits=vertex_quantization_bits,
 		min_chunk_size=min_chunk_size,
 		execute=execute,
+		aws_profile=aws_profile,
 	)
 	if queue_dir is not None:
 		options["queue_dir"] = queue_dir

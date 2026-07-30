@@ -4,29 +4,40 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 import json
 from botocore.exceptions import ClientError
 
-import boto3
 import click
 
 
+from mctutil.shared.aws import (
+	configure_aws_profile,
+	create_boto3_session,
+	resolve_aws_profile,
+)
 from mctutil.shared.log import log, LOG
 from mctutil.shared.mesh import build_mesh
 
-_session = None
+_sessions = {}
 
 
-def _get_session():
-	global _session
-	if _session is None:
-		_session = boto3.Session(profile_name='chenglab')
-	return _session
+def _get_session(aws_profile):
+	profile = resolve_aws_profile(aws_profile)
+	if profile not in _sessions:
+		_sessions[profile] = create_boto3_session(profile)
+	return _sessions[profile]
 
 
-def upload_file_to_s3(file_path, key, bucket_name, content_encoding, execute=True):
+def upload_file_to_s3(
+	file_path,
+	key,
+	bucket_name,
+	content_encoding,
+	execute=True,
+	aws_profile=None,
+):
 	if not execute:
 		log.write("S3 Upload", f"Would upload {file_path} -> s3://{bucket_name}/{key}", log_level=LOG.INFO)
 		return
 
-	s3 = _get_session().client('s3')
+	s3 = _get_session(aws_profile).client('s3')
 	if file_path.is_dir():  # Handle directory
 		try:
 			s3.put_object(Bucket=bucket_name, Key=f"{key}/")
@@ -47,16 +58,39 @@ def upload_file_to_s3(file_path, key, bucket_name, content_encoding, execute=Tru
 	log.write("S3 Upload", f"uploaded: {key}", log_level=LOG.STATUS)
 
 
-def upload_folder_to_s3_parallel(folder_path, target_folder, bucket_name, num_processes, execute=True):
+def upload_folder_to_s3_parallel(
+	folder_path,
+	target_folder,
+	bucket_name,
+	num_processes,
+	execute=True,
+	aws_profile=None,
+):
 	folder_path = Path(folder_path)
 	with ProcessPoolExecutor(max_workers=num_processes) as executor:
 		for entry in folder_path.rglob("*"):
 			key = target_folder.joinpath(entry.relative_to(folder_path))
 			if entry.is_dir():
-				executor.submit(upload_file_to_s3, entry, key, bucket_name, None, execute)
+				executor.submit(
+					upload_file_to_s3,
+					entry,
+					key,
+					bucket_name,
+					None,
+					execute,
+					aws_profile,
+				)
 			else:
 				content_encoding = 'gzip' if entry.name != 'info' else None
-				executor.submit(upload_file_to_s3, entry, key, bucket_name, content_encoding, execute)
+				executor.submit(
+					upload_file_to_s3,
+					entry,
+					key,
+					bucket_name,
+					content_encoding,
+					execute,
+					aws_profile,
+				)
 
 
 def _join_key(*parts) -> str:
@@ -185,12 +219,14 @@ def upload_sharded_tree(
 	jobs: int = 6,
 	include_mip0: bool = True,
 	execute: bool = False,
+	aws_profile: str | None = None,
 ) -> dict[str, int]:
 	"""Incrementally upload root metadata and selected sharded scale dirs."""
+	aws_profile = configure_aws_profile(aws_profile, bucket_name)
 	source_folder = Path(source_folder)
 	scales = read_sharded_scales(source_folder, include_mip0=include_mip0)
 	target_folder = str(target_folder).strip("/")
-	client = _get_session().client("s3") if execute else None
+	client = _get_session(aws_profile).client("s3") if execute else None
 	counts = {"planned": 0, "skipped": 0, "uploaded": 0}
 
 	for path in sorted(source_folder.iterdir()):
@@ -236,6 +272,7 @@ def upload_sharded_tree(
 @click.command()
 @click.option("-p", "--bucket-prefix", type=click.Path(path_type=Path), required=True)
 @click.option("-n", "--bucket-name", type=click.STRING, required=True, help="Name of target s3 bucket.")
+@click.option("--aws-profile", help="Named AWS profile for upload and optional S3 mesh.")
 @click.option("-t", "--process-count", type=click.IntRange(min=1), default=60,
 				help="Number of simultaneous uploads.")
 @click.option("--mesh", type=click.BOOL, is_flag=True, show_default=True, default=False,
@@ -269,17 +306,20 @@ def s3upload(
 	from_sharded_tree=False,
 	include_mip0=True,
 	jobs=6,
+	aws_profile=None,
 ):
 	if execute is None:
 		execute = not from_sharded_tree
 
+	aws_profile = configure_aws_profile(aws_profile, bucket_name)
 	target_full = bucket_prefix.joinpath(target_folder)
 
 	log.write("S3 Upload", f"target bucket: {bucket_name}", log_level=LOG.STATUS)
 	log.write("S3 Upload", f"target folder: {target_full}", log_level=LOG.STATUS)
+	log.write("S3 Upload", f"AWS profile: {aws_profile}", log_level=LOG.STATUS)
 
 	if execute and not from_sharded_tree:
-		s3 = _get_session().client('s3')
+		s3 = _get_session(aws_profile).client('s3')
 		s3.put_object(Bucket=bucket_name, Key=f"{target_full}/")
 	elif not execute:
 		log.write("S3 Upload", f"Would create prefix s3://{bucket_name}/{target_full}/", log_level=LOG.INFO)
@@ -293,6 +333,7 @@ def s3upload(
 				jobs=jobs,
 				include_mip0=include_mip0,
 				execute=execute,
+				aws_profile=aws_profile,
 			)
 		except click.ClickException:
 			raise
@@ -305,6 +346,7 @@ def s3upload(
 			bucket_name,
 			num_processes=process_count,
 			execute=execute,
+			aws_profile=aws_profile,
 		)
 
 	if mesh:
@@ -316,6 +358,7 @@ def s3upload(
 			num_lod=4,
 			parallel=max(1, process_count // 4),
 			execute=execute,
+			aws_profile=aws_profile,
 		)
 
 

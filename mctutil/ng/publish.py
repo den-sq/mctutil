@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import click
 
 from mctutil.ng.completeness import check_mip0_completeness
+from mctutil.shared.aws import configure_aws_profile
 from mctutil.shared.cli import XYZ
 from mctutil.shared.persistent_queue import (
 	read_state,
@@ -91,13 +92,36 @@ def effective_stages(
 	)
 
 
-def required_extras(stages: tuple[str, ...]) -> tuple[str, ...]:
+def required_extras(
+	stages: tuple[str, ...],
+	s3_mesh: bool = False,
+) -> tuple[str, ...]:
 	required = {
 		extra
 		for stage in stages
 		for extra in STAGE_EXTRAS[stage]
 	}
+	if s3_mesh:
+		required.add("aws")
 	return tuple(extra for extra in ("ng", "mesh", "aws") if extra in required)
+
+
+def mesh_uses_s3(
+	stages: tuple[str, ...],
+	mesh_at: str,
+	mesh_mip: int,
+	upload_include_mip0: bool,
+) -> bool:
+	"""Whether the selected mesh stage will use an S3 layer target."""
+	if "mesh" not in stages:
+		return False
+	use_s3 = mesh_at == "s3" or (
+		mesh_at == "auto"
+		and "upload" in stages
+	)
+	if use_s3 and mesh_mip == 0 and not upload_include_mip0:
+		return False
+	return use_s3
 
 
 def missing_dependencies(
@@ -616,6 +640,7 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			jobs=options["upload_jobs"],
 			include_mip0=options["upload_include_mip0"],
 			execute=True,
+			aws_profile=options["aws_profile"],
 		)
 	elif stage == "mesh":
 		module = importlib.import_module("mctutil.shared.mesh")
@@ -627,6 +652,7 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			fill_missing=True,
 			queue_dir=queue_root / "mesh",
 			execute=True,
+			aws_profile=options["aws_profile"],
 		)
 
 
@@ -714,6 +740,7 @@ def publish_datasets(
 	type=click.Path(exists=True, file_okay=False, path_type=Path),
 )
 @click.option("--s3-prefix", help="Destination prefix, e.g. s3://bucket/path.")
+@click.option("--aws-profile", help="Named AWS profile for S3 upload and meshing.")
 @click.option("--start-at", type=click.Choice(STAGES), default="prep", show_default=True)
 @click.option(
 	"--stop-after",
@@ -767,6 +794,7 @@ def publish_datasets(
 def publish(
 	root: Path,
 	s3_prefix: str | None,
+	aws_profile: str | None,
 	start_at: str,
 	stop_after: str | None,
 	no_upload: bool,
@@ -796,13 +824,28 @@ def publish(
 			s3_prefix,
 		)
 
-		extras = required_extras(effective)
+		s3_mesh = mesh_uses_s3(
+			effective,
+			mesh_at,
+			mesh_mip,
+			upload_include_mip0,
+		)
+		uses_s3 = "upload" in effective or s3_mesh
+		if uses_s3:
+			bucket, _prefix = parse_s3_prefix(s3_prefix)
+			aws_profile = configure_aws_profile(aws_profile, bucket)
+		else:
+			aws_profile = None
+
+		extras = required_extras(effective, s3_mesh=s3_mesh)
 		missing = missing_dependencies(extras)
 		click.echo(f"Root: {root.resolve()}")
 		click.echo(f"Selected stages: {', '.join(selected_stages)}")
 		if no_upload and "upload" in selected_stages:
 			click.echo("Upload is explicitly omitted by --no-upload.")
 		print_dependency_plan(extras, missing)
+		if aws_profile is not None:
+			click.echo(f"AWS profile: {aws_profile}")
 		click.echo(f"Voxel resolution (nm): {voxel_resolution}")
 		click.echo(f"Voxel offset: {voxel_offset}")
 
@@ -819,6 +862,7 @@ def publish(
 			"selected_stages": selected_stages,
 			"effective_stages": effective,
 			"no_upload": no_upload,
+			"aws_profile": aws_profile,
 			"workers": workers,
 			"memory": memory,
 			"release_queue_leases": release_queue_leases,

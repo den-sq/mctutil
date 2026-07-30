@@ -77,7 +77,7 @@ def test_sharded_upload_excludes_mip0_and_private_dirs(
 	monkeypatch.setattr(
 		module,
 		"_get_session",
-		lambda: types.SimpleNamespace(client=lambda _name: client),
+		lambda _profile: types.SimpleNamespace(client=lambda _name: client),
 	)
 
 	counts = module.upload_sharded_tree(
@@ -117,7 +117,7 @@ def test_excluding_mip0_allows_it_to_be_unstaged(
 	monkeypatch.setattr(
 		module,
 		"_get_session",
-		lambda: types.SimpleNamespace(client=lambda _name: client),
+		lambda _profile: types.SimpleNamespace(client=lambda _name: client),
 	)
 
 	counts = module.upload_sharded_tree(
@@ -140,7 +140,7 @@ def test_sharded_upload_is_incremental(load_module, tmp_path, monkeypatch):
 	monkeypatch.setattr(
 		module,
 		"_get_session",
-		lambda: types.SimpleNamespace(client=lambda _name: client),
+		lambda _profile: types.SimpleNamespace(client=lambda _name: client),
 	)
 
 	first = module.upload_sharded_tree(
@@ -173,7 +173,7 @@ def test_sharded_upload_dry_run_never_constructs_s3_client(
 	monkeypatch.setattr(
 		module,
 		"_get_session",
-		lambda: (_ for _ in ()).throw(AssertionError("S3 session created")),
+		lambda _profile: (_ for _ in ()).throw(AssertionError("S3 session created")),
 	)
 
 	result = CliRunner().invoke(
@@ -209,7 +209,7 @@ def test_legacy_upload_without_flag_preserves_execute_default(
 	monkeypatch.setattr(
 		module,
 		"_get_session",
-		lambda: types.SimpleNamespace(client=lambda _name: fake_s3),
+		lambda _profile: types.SimpleNamespace(client=lambda _name: fake_s3),
 	)
 	monkeypatch.setattr(
 		module,
@@ -246,7 +246,7 @@ def test_explicit_dry_run_overrides_legacy_execute_default(
 	monkeypatch.setattr(
 		module,
 		"_get_session",
-		lambda: (_ for _ in ()).throw(AssertionError("S3 session created")),
+		lambda _profile: (_ for _ in ()).throw(AssertionError("S3 session created")),
 	)
 	monkeypatch.setattr(
 		module,
