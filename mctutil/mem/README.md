@@ -12,6 +12,17 @@ command's options.
 - **`from-file`** — Submit an sbatch script for each node listed in a file.
 - **`from-range`** — Submit an sbatch script for each node in a `--prefix` / `--start` / `--stop` range.
 
+There is no separate `mem list` command because listing is already the safe
+default of the cleanup workflow:
+
+```console
+# List matching entries on this node without unlinking them.
+mctutil mem clean
+
+# Submit reporting jobs to eligible Slurm nodes without unlinking entries.
+mctutil mem mark --node-call --dry-run
+```
+
 Safety: `clean` and `mark` **default to `--dry-run`** (unlinking shared-memory
 segments and submitting cleanup jobs are both consequential); pass `--execute`
 to act. The node-submission commands `from-file` and `from-range` instead

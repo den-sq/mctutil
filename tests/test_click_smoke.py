@@ -43,6 +43,7 @@ CASES = [
 	CommandCase("mctutil/ng/shift_angle.py", "shift_angle"),
 	CommandCase("mctutil/serve/ng.py", "ng"),
 	CommandCase("mctutil/ng/validate.py", "validate"),
+	CommandCase("mctutil/parse/find_err_general.py", "find_errs"),
 	CommandCase("mctutil/parse/meta_shift.py", "meta_shift"),
 	CommandCase("mctutil/parse/pull_config.py", "get_conf"),
 	CommandCase("mctutil/parse/scanlog_fetch.py", "scanlog_fetch"),

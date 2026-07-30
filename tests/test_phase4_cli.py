@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from click.testing import CliRunner
 
 from mctutil.cli import main
@@ -24,6 +26,23 @@ def test_mem_group_help_lists_collapsed_commands():
 	assert result.exit_code == 0, result.output
 	for name in ["clean", "mark", "from-file", "from-range"]:
 		assert name in result.output
+	assert "\n  list " not in result.output
+
+
+def test_parse_group_help_lists_find_errs():
+	result = CliRunner().invoke(main, ["parse", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "find-errs" in result.output
+
+
+def test_hpc_group_keeps_cuda_probe_as_template_only():
+	result = CliRunner().invoke(main, ["hpc", "--help"])
+	assert result.exit_code == 0, result.output
+	assert "cuda-check" not in result.output
+
+	template = Path("hpc_env/cuda.sbatch").read_text(encoding="utf-8")
+	assert "cuda.py" not in template
+	assert "torch.cuda.is_available()" in template
 
 
 def test_mem_leaf_help_lists_config_and_node_selection_options():
