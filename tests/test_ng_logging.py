@@ -143,6 +143,8 @@ def test_lazy_task_creation_warning_is_normalized_during_iteration(
 	capsys,
 	monkeypatch,
 ):
+	from collections.abc import Iterable, Iterator
+
 	from mctutil.shared.log import log
 
 	monkeypatch.setenv("USER", "lazy-user")
@@ -151,19 +153,40 @@ def test_lazy_task_creation_warning_is_normalized_during_iteration(
 		'user.email". Using unix $USER instead.'
 	)
 
-	def lazy_factory():
-		def tasks():
-			print(upstream_warning)
-			yield "first"
-			print(upstream_warning)
-			yield "second"
+	class FinelyDividedShape:
+		"""Reusable task iterable with the protocol Igneous factories return."""
 
-		return tasks()
+		def __init__(self, tasks):
+			self.tasks = tasks
+
+		def __iter__(self):
+			yield from self.tasks
+			print(upstream_warning)
+
+		def __len__(self):
+			return len(self.tasks)
+
+		def __getitem__(self, index):
+			value = self.tasks[index]
+			if isinstance(index, slice):
+				return FinelyDividedShape(value)
+			return value
+
+	def lazy_factory():
+		return FinelyDividedShape(["first", "second"])
 
 	log.set_threshold(LOG_MASK_ALL)
 	try:
 		with igneous_output_session():
-			assert list(capture_igneous_call(lazy_factory)) == [
+			source = lazy_factory()
+			assert isinstance(source, Iterable)
+			assert not isinstance(source, Iterator)
+			captured = capture_igneous_call(lambda: source)
+			assert captured is not source
+			assert len(captured) == 2
+			assert captured[0] == "first"
+			assert list(captured[0:1]) == ["first"]
+			assert list(captured) == [
 				"first",
 				"second",
 			]

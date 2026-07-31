@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from contextvars import ContextVar
 from functools import wraps
@@ -126,6 +126,39 @@ class _CapturedIterator:
 		)
 
 
+class _CapturedIterable:
+	"""Proxy a reusable lazy iterable without dropping its sequence protocol."""
+
+	def __init__(self, iterable, normalizer):
+		self._iterable = iterable
+		self._normalizer = normalizer
+
+	def __iter__(self):
+		iterator = _capture_output(
+			self._normalizer,
+			lambda: iter(self._iterable),
+		)
+		return _CapturedIterator(iterator, self._normalizer)
+
+	def __len__(self):
+		return _capture_output(
+			self._normalizer,
+			lambda: len(self._iterable),
+		)
+
+	def __getitem__(self, index):
+		value = _capture_output(
+			self._normalizer,
+			lambda: self._iterable[index],
+		)
+		if isinstance(index, slice):
+			return _CapturedIterable(value, self._normalizer)
+		return value
+
+	def __getattr__(self, name):
+		return getattr(self._iterable, name)
+
+
 def capture_igneous_call(function, *args, **kwargs):
 	"""Call an Igneous factory and normalize eager or lazy output."""
 	with igneous_output_session() as normalizer:
@@ -135,4 +168,12 @@ def capture_igneous_call(function, *args, **kwargs):
 		)
 		if isinstance(result, Iterator):
 			return _CapturedIterator(result, normalizer)
+		if (
+			isinstance(result, Iterable)
+			and not isinstance(
+				result,
+				(str, bytes, bytearray, dict, list, tuple, set, frozenset),
+			)
+		):
+			return _CapturedIterable(result, normalizer)
 		return result
