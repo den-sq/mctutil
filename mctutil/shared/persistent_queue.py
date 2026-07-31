@@ -202,11 +202,16 @@ def _parallel_worker_events(
 		if poll is not None:
 			poll()
 		_collect_worker_events(event_queue, events)
-		next(
-			process
-			for process in processes
-			if process.is_alive()
-		).join(timeout=poll_interval)
+		live_process = next(
+			(
+				process
+				for process in processes
+				if process.is_alive()
+			),
+			None,
+		)
+		if live_process is not None:
+			live_process.join(timeout=poll_interval)
 	for process in processes:
 		process.join()
 	if poll is not None:

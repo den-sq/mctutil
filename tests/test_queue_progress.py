@@ -30,6 +30,68 @@ class RecordingProgress:
 		return False
 
 
+def test_parallel_poll_tolerates_last_worker_exiting_during_selection(
+	monkeypatch,
+):
+	module = importlib.import_module("mctutil.shared.persistent_queue")
+
+	class FakeEventQueue:
+		def get_nowait(self):
+			raise module.EventQueueEmpty
+
+		def close(self):
+			pass
+
+		def join_thread(self):
+			pass
+
+	class ExitingProcess:
+		exitcode = 0
+
+		def __init__(self):
+			self.alive_checks = 0
+			self.joins = []
+
+		def start(self):
+			pass
+
+		def is_alive(self):
+			self.alive_checks += 1
+			return self.alive_checks == 1
+
+		def join(self, timeout=None):
+			self.joins.append(timeout)
+
+	process = ExitingProcess()
+
+	class FakeContext:
+		def Queue(self):
+			return FakeEventQueue()
+
+		def Process(self, **_kwargs):
+			return process
+
+	monkeypatch.setattr(
+		module.multiprocessing,
+		"get_context",
+		lambda _method: FakeContext(),
+	)
+
+	processes, events = module._parallel_worker_events(
+		"fq://unused",
+		parallel=1,
+		lease_seconds=60,
+		task_modules=(),
+		poll=None,
+		poll_interval=0,
+	)
+
+	assert processes == [process]
+	assert events == []
+	assert process.alive_checks >= 2
+	assert process.joins == [None]
+
+
 def test_progress_renders_resume_position_on_first_frame():
 	terminal = TtyBuffer()
 
