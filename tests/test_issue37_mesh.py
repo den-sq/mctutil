@@ -127,9 +127,23 @@ def test_build_mesh_uses_durable_queues_when_requested(
 		lambda: (FakeTaskQueue, task_creation),
 	)
 
-	def run_tasks(queue, fingerprint, tasks_factory, parallel, lease_seconds):
+	def run_tasks(
+		queue,
+		fingerprint,
+		tasks_factory,
+		parallel,
+		lease_seconds,
+		**kwargs,
+	):
 		calls.append(
-			(queue, fingerprint, list(tasks_factory()), parallel, lease_seconds)
+			(
+				queue,
+				fingerprint,
+				list(tasks_factory()),
+				parallel,
+				lease_seconds,
+				kwargs,
+			)
 		)
 
 	monkeypatch.setattr(module, "run_persistent_tasks", run_tasks)
@@ -143,7 +157,11 @@ def test_build_mesh_uses_durable_queues_when_requested(
 	)
 
 	assert [call[2] for call in calls] == [["forge"], ["merge"]]
-	assert [call[3:] for call in calls] == [(3, 120), (3, 120)]
+	assert [call[3:5] for call in calls] == [(3, 120), (3, 120)]
+	assert [call[5]["progress_label"] for call in calls] == [
+		"Mesh Forge",
+		"Mesh Merge",
+	]
 	assert calls[0][0].parts[-2] == "forge"
 	assert calls[1][0].parts[-2] == "merge"
 

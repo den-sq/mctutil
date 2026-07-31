@@ -10,6 +10,10 @@ from mctutil.shared.aws import (
 	preflight_s3_info,
 	s3_location,
 )
+from mctutil.shared.igneous_output import (
+	capture_igneous_call,
+	igneous_output_command,
+)
 from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import run_persistent_tasks, stable_fingerprint
 
@@ -27,6 +31,7 @@ def _require_mesh_dependencies():
 	return LocalTaskQueue, task_creation
 
 
+@igneous_output_command
 def build_mesh(
 	layer_path,
 	mip=0,
@@ -89,7 +94,7 @@ def build_mesh(
 		log.write(
 			"Mesh",
 			f"AWS profile: {resolved_aws_profile}",
-			log_level=LOG.STATUS,
+			log_level=LOG.INFO,
 		)
 		if execute:
 			preflight_s3_info(layer_path, resolved_aws_profile)
@@ -128,7 +133,8 @@ def build_mesh(
 		run_persistent_tasks(
 			queue_dir / "forge" / forge_fingerprint,
 			forge_fingerprint,
-			lambda: task_creation.create_meshing_tasks(
+			lambda: capture_igneous_call(
+				task_creation.create_meshing_tasks,
 				layer_path,
 				mip,
 				shape=tuple(shape),
@@ -146,6 +152,7 @@ def build_mesh(
 			),
 			parallel,
 			lease_seconds,
+			progress_label="Mesh Forge",
 		)
 		log.write("Mesh", "Meshing pass complete", log_level=LOG.STATUS)
 
@@ -162,7 +169,8 @@ def build_mesh(
 		run_persistent_tasks(
 			queue_dir / "merge" / merge_fingerprint,
 			merge_fingerprint,
-			lambda: task_creation.create_unsharded_multires_mesh_tasks(
+			lambda: capture_igneous_call(
+				task_creation.create_unsharded_multires_mesh_tasks,
 				layer_path,
 				num_lod=num_lod,
 				magnitude=magnitude,
@@ -172,13 +180,15 @@ def build_mesh(
 			),
 			parallel,
 			lease_seconds,
+			progress_label="Mesh Merge",
 		)
 		log.write("Mesh", "Multiresolution merge pass complete", log_level=LOG.STATUS)
 		return
 
 	task_queue = LocalTaskQueue(parallel=parallel)
 
-	mesh_tasks = task_creation.create_meshing_tasks(
+	mesh_tasks = capture_igneous_call(
+		task_creation.create_meshing_tasks,
 		layer_path,
 		mip,
 		shape=tuple(shape),
@@ -198,7 +208,8 @@ def build_mesh(
 	task_queue.execute()
 	log.write("Mesh", "Meshing pass complete", log_level=LOG.STATUS)
 
-	merge_tasks = task_creation.create_unsharded_multires_mesh_tasks(
+	merge_tasks = capture_igneous_call(
+		task_creation.create_unsharded_multires_mesh_tasks,
 		layer_path,
 		num_lod=num_lod,
 		magnitude=magnitude,

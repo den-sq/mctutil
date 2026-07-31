@@ -50,9 +50,11 @@ class FakeClient:
 				"HeadObject",
 			)
 
-	def upload_file(self, filename, bucket, key, ExtraArgs):
+	def upload_file(self, filename, bucket, key, ExtraArgs, Callback=None):
 		path = Path(filename)
 		self.uploads.append((path, bucket, key, ExtraArgs))
+		if Callback is not None:
+			Callback(path.stat().st_size)
 		self.objects[(bucket, key)] = {
 			"ContentLength": path.stat().st_size,
 			"Metadata": ExtraArgs["Metadata"],

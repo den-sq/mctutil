@@ -16,6 +16,8 @@ import click
 from mctutil.ng.completeness import check_mip0_completeness
 from mctutil.shared.aws import configure_aws_profile
 from mctutil.shared.cli import XYZ
+from mctutil.shared.igneous_output import igneous_output_command
+from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import (
 	read_state,
 	stable_fingerprint,
@@ -676,13 +678,29 @@ def print_dependency_plan(
 	extras: tuple[str, ...],
 	missing: dict[str, tuple[str, ...]],
 ) -> None:
-	click.echo(f"Required extras: {', '.join(f'[{extra}]' for extra in extras) or 'none'}")
+	log.write(
+		"Publish Plan",
+		f"Required extras: {', '.join(f'[{extra}]' for extra in extras) or 'none'}",
+		log_level=LOG.INFO,
+	)
 	if missing:
 		for extra, modules in missing.items():
-			click.echo(f"Missing [{extra}]: {', '.join(modules)}")
-		click.echo(f"Install with: {install_command(extras)}")
+			log.write(
+				"Publish Plan",
+				f"Missing [{extra}]: {', '.join(modules)}",
+				log_level=LOG.WARN,
+			)
+		log.write(
+			"Publish Plan",
+			f"Install with: {install_command(extras)}",
+			log_level=LOG.WARN,
+		)
 	else:
-		click.echo("Dependency preflight: satisfied")
+		log.write(
+			"Publish Plan",
+			"Dependency preflight: satisfied",
+			log_level=LOG.INFO,
+		)
 
 
 def print_publish_plan(
@@ -695,15 +713,35 @@ def print_publish_plan(
 	voxel_resolution: tuple[int, int, int],
 	voxel_offset: tuple[int, int, int],
 ) -> None:
-	click.echo(f"Root: {root.resolve()}")
-	click.echo(f"Selected stages: {', '.join(selected_stages)}")
+	log.write("Publish Plan", f"Root: {root.resolve()}", log_level=LOG.INFO)
+	log.write(
+		"Publish Plan",
+		f"Selected stages: {', '.join(selected_stages)}",
+		log_level=LOG.INFO,
+	)
 	if no_upload and "upload" in selected_stages:
-		click.echo("Upload is explicitly omitted by --no-upload.")
+		log.write(
+			"Publish Plan",
+			"Upload is explicitly omitted by --no-upload.",
+			log_level=LOG.INFO,
+		)
 	print_dependency_plan(extras, missing)
 	if aws_profile is not None:
-		click.echo(f"AWS profile: {aws_profile}")
-	click.echo(f"Voxel resolution (nm): {voxel_resolution}")
-	click.echo(f"Voxel offset: {voxel_offset}")
+		log.write(
+			"Publish Plan",
+			f"AWS profile: {aws_profile}",
+			log_level=LOG.INFO,
+		)
+	log.write(
+		"Publish Plan",
+		f"Voxel resolution (nm): {voxel_resolution}",
+		log_level=LOG.INFO,
+	)
+	log.write(
+		"Publish Plan",
+		f"Voxel offset: {voxel_offset}",
+		log_level=LOG.INFO,
+	)
 
 
 def publish_datasets(
@@ -714,11 +752,23 @@ def publish_datasets(
 ) -> None:
 	for plan in plans:
 		state = load_dataset_state(plan)
-		click.echo(f"\nDataset: {plan.dataset.name} ({plan.layer_type})")
-		click.echo(f"  state: {plan.state_path}")
+		log.write(
+			"Publish Plan",
+			f"Dataset: {plan.dataset.name} ({plan.layer_type})",
+			log_level=LOG.INFO,
+		)
+		log.write(
+			"Publish Plan",
+			f"State: {plan.state_path}",
+			log_level=LOG.DEBUG,
+		)
 		for stage in STAGES:
 			if stage not in selected_stages:
-				click.echo(f"  {stage}: not-run (outside selected range)")
+				log.write(
+					"Publish Plan",
+					f"{stage}: not-run (outside selected range)",
+					log_level=LOG.INFO,
+				)
 				continue
 			decision, reason = stage_decision(
 				stage,
@@ -727,7 +777,11 @@ def publish_datasets(
 				options,
 			)
 			suffix = f" — {reason}" if reason else ""
-			click.echo(f"  {stage}: {decision}{suffix}")
+			log.write(
+				"Publish Plan",
+				f"{stage}: {decision}{suffix}",
+				log_level=LOG.INFO,
+			)
 
 		if not execute:
 			continue
@@ -760,7 +814,11 @@ def publish_datasets(
 					state["updated_at"] = utc_now()
 					write_state(plan.state_path, state)
 				continue
-			click.echo(f"Running {stage} for {plan.dataset.name}.")
+			log.write(
+				"Publish",
+				f"Running {stage} for {plan.dataset.name}.",
+				log_level=LOG.STATUS,
+			)
 			run_stage(stage, plan, options)
 			state["stages"][stage] = {
 				"status": "complete",
@@ -769,6 +827,11 @@ def publish_datasets(
 			}
 			state["updated_at"] = utc_now()
 			write_state(plan.state_path, state)
+		log.write(
+			"Publish",
+			f"Completed selected stages for {plan.dataset.name}.",
+			log_level=LOG.STATUS,
+		)
 
 
 @click.command("publish")
@@ -828,6 +891,7 @@ def publish_datasets(
 @click.option("--upload-include-mip0/--upload-exclude-mip0", default=True, show_default=True)
 @click.option("--overwrite-prep", is_flag=True)
 @click.option("--execute/--dry-run", default=True, show_default=True)
+@igneous_output_command
 def publish(
 	root: Path,
 	s3_prefix: str | None,
@@ -915,7 +979,11 @@ def publish(
 		for plan in plans:
 			warning = local_mesh_upload_warning(plan, options)
 			if warning is not None:
-				click.echo(f"Warning: {warning}", err=True)
+				log.write(
+					"Publish",
+					f"Warning: {warning}",
+					log_level=LOG.WARN,
+				)
 		for plan in plans:
 			load_dataset_state(plan)
 			validate_prerequisites(plan, selected_stages, options)

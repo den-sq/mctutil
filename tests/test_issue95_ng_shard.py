@@ -24,7 +24,12 @@ class FakeVolume:
 		}
 
 
-def test_shard_dry_run_reports_per_mip_mapping(load_module, tmp_path, monkeypatch):
+def test_shard_dry_run_reports_per_mip_mapping(
+	load_module,
+	tmp_path,
+	monkeypatch,
+	verbose_logging,
+):
 	module = load_module("mctutil/ng/shard.py")
 	monkeypatch.setattr(
 		module,
@@ -110,6 +115,7 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 	assert len(queue_calls) == 1
 	assert queue_calls[0][2] == 3
 	assert queue_calls[0][4]["release_leases"] is False
+	assert queue_calls[0][4]["progress_label"] == "Shard Tasks"
 	state_files = list(queue.rglob("pipeline.json"))
 	assert len(state_files) == 1
 	state = json.loads(state_files[0].read_text(encoding="utf-8"))

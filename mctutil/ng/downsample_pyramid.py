@@ -9,6 +9,11 @@ import click
 
 from mctutil.ng.completeness import Mip0Completeness, check_mip0_completeness
 from mctutil.shared.cli import XYZ
+from mctutil.shared.igneous_output import (
+	capture_igneous_call,
+	igneous_output_command,
+)
+from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import (
 	read_state,
 	run_persistent_tasks,
@@ -80,7 +85,8 @@ def create_downsample_tasks(
 	memory: int,
 ):
 	_CloudVolume, task_creation = _require_dependencies()
-	return task_creation.create_downsampling_tasks(
+	return capture_igneous_call(
+		task_creation.create_downsampling_tasks,
 		normalize_layer_path(layer_path),
 		mip=source_mip,
 		fill_missing=True,
@@ -131,6 +137,7 @@ def run_pass(
 		lease_seconds,
 		release_leases=release_leases,
 		expected_existing=expected_existing,
+		progress_label=f"Downsample {pass_name.replace('-', ' ')}",
 	)
 
 
@@ -171,7 +178,11 @@ def downsample_volume(
 		},
 	)
 	if state["complete"]:
-		click.echo("Downsample pyramid is already complete for this configuration.")
+		log.write(
+			"Downsample",
+			"Pyramid is already complete for this configuration.",
+			log_level=LOG.STATUS,
+		)
 		return
 
 	pass_root = state_path.parent
@@ -180,7 +191,11 @@ def downsample_volume(
 		if not expected_existing:
 			state["initial_started"] = True
 			write_state(state_path, state)
-		click.echo(f"Initial downsample from mip 0 with chunks {initial_chunk}.")
+		log.write(
+			"Downsample",
+			f"Initial pass from mip 0 with chunks {initial_chunk}.",
+			log_level=LOG.STATUS,
+		)
 		run_pass(
 			layer_path,
 			pass_root,
@@ -215,9 +230,11 @@ def downsample_volume(
 			if not expected_existing:
 				extension["started"] = True
 				write_state(state_path, state)
-			click.echo(
+			log.write(
+				"Downsample",
 				f"Extension pass {pass_index + 1} from mip {extension['source_mip']} "
-				f"with chunks {extend_chunk}."
+				f"with chunks {extend_chunk}.",
+				log_level=LOG.STATUS,
 			)
 			run_pass(
 				layer_path,
@@ -237,7 +254,11 @@ def downsample_volume(
 
 		_layer_type, _source_encoding, current_max_mip = inspect_volume(layer_path)
 		if current_max_mip <= extension["source_mip"]:
-			click.echo(f"No new mip appeared after extension pass {pass_index + 1}.")
+			log.write(
+				"Downsample",
+				f"No new mip appeared after extension pass {pass_index + 1}.",
+				log_level=LOG.STATUS,
+			)
 			state["complete"] = True
 			write_state(state_path, state)
 			return
@@ -286,6 +307,7 @@ def downsample_volume(
 	help="Allow downsampling when local MIP-0 completeness cannot be confirmed.",
 )
 @click.option("--execute/--dry-run", default=True, show_default=True)
+@igneous_output_command
 def downsample_pyramid(
 	layer_path: str,
 	queue_dir: Path | None,
@@ -309,22 +331,37 @@ def downsample_pyramid(
 			if layer_type == "segmentation" and encoding == "raw":
 				encoding = "compressed_segmentation"
 		queue_dir = queue_dir or default_queue_root(layer_path)
-		click.echo(f"Layer: {normalize_layer_path(layer_path)}")
-		click.echo(f"Layer type: {layer_type}; encoding: {encoding}; current max mip: {max_mip}")
-		click.echo(f"Queue root: {queue_dir.resolve()}")
-		click.echo(
-			f"Plan: mip 0 at {initial_chunk}, then up to {max_extend_passes} "
-			f"extension pass(es) at {extend_chunk}; factor=(2, 2, 2), compression=br"
-		)
+		for statement in (
+			f"Layer: {normalize_layer_path(layer_path)}",
+			(
+				f"Layer type: {layer_type}; encoding: {encoding}; "
+				f"current max mip: {max_mip}"
+			),
+			f"Queue root: {queue_dir.resolve()}",
+			(
+				f"Plan: mip 0 at {initial_chunk}, then up to "
+				f"{max_extend_passes} extension pass(es) at {extend_chunk}; "
+				"factor=(2, 2, 2), compression=br"
+			),
+		):
+			log.write("Downsample", statement, log_level=LOG.INFO)
 		if not execute:
 			return
 		completeness = check_mip0_completeness(layer_path)
 		if completeness.complete:
-			click.echo(f"MIP 0 completeness check passed: {completeness.summary()}")
+			log.write(
+				"Downsample",
+				f"MIP 0 completeness check passed: {completeness.summary()}",
+				log_level=LOG.INFO,
+			)
 		else:
 			failure = mip0_failure_message(completeness)
 			if force:
-				click.echo(f"Warning: forcing downsample despite {failure}", err=True)
+				log.write(
+					"Downsample",
+					f"Warning: forcing downsample despite {failure}",
+					log_level=LOG.WARN,
+				)
 			else:
 				raise ValueError(f"{failure}; use --force to override")
 		downsample_volume(
@@ -340,6 +377,7 @@ def downsample_pyramid(
 			lease_seconds,
 			release_leases,
 		)
+		log.write("Downsample", "Pyramid complete.", log_level=LOG.STATUS)
 	except click.ClickException:
 		raise
 	except Exception as exc:

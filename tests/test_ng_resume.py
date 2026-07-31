@@ -116,13 +116,15 @@ def test_precompute_retries_only_in_process_incomplete_planes(monkeypatch, tmp_p
 	failure = BrokenProcessPool("worker died")
 	calls = []
 
-	def execute(_cloudpath, _spec, _plan, z_indices, workers):
+	def execute(_cloudpath, _spec, _plan, z_indices, workers, progress):
 		calls.append((tuple(z_indices), workers))
 		if len(calls) == 1:
+			progress.update(101)
 			return precompute_module.WorkerBatchResult(
 				frozenset(z_indices[:101]),
 				failure,
 			)
+		progress.update(len(z_indices))
 		return precompute_module.WorkerBatchResult(frozenset(z_indices), None)
 
 	monkeypatch.setattr(precompute_module, "_execute_slices", execute)
@@ -300,10 +302,12 @@ def test_persistent_queue_resume_can_preserve_existing_leases(
 	)
 	observed = {}
 
-	def drain(queue_url, _parallel, _lease_seconds):
+	def drain(queue_url, _parallel, _lease_seconds, poll):
 		resumed = taskqueue.TaskQueue(queue_url, progress=False)
 		observed["leased"] = resumed.leased
 		resumed.delete(leased_task, tally=True)
+		poll()
+		return []
 
 	monkeypatch.setattr(module, "drain_file_queue", drain)
 

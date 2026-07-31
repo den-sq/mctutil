@@ -165,6 +165,7 @@ def test_publish_reports_aws_for_s3_mesh_without_upload(
 	load_module,
 	monkeypatch,
 	tmp_path,
+	verbose_logging,
 ):
 	module = load_module("mctutil/ng/publish.py")
 	root = tmp_path / "root"
@@ -273,7 +274,7 @@ def test_s3_mesh_queue_workers_inherit_selected_profile(
 	)
 	worker_profiles = []
 
-	def run_tasks(_queue, _fingerprint, tasks_factory, *_args):
+	def run_tasks(_queue, _fingerprint, tasks_factory, *_args, **_kwargs):
 		worker_profiles.append(os.environ.get("AWS_PROFILE"))
 		assert list(tasks_factory())
 
