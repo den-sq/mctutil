@@ -235,6 +235,43 @@ def test_parallel_worker_output_is_emitted_after_parent_progress(
 	assert final_position < output.index("buffered-worker-b")
 
 
+def test_worker_provenance_warnings_are_deduplicated_by_parent(
+	capsys,
+	monkeypatch,
+):
+	module = importlib.import_module("mctutil.shared.persistent_queue")
+	monkeypatch.setenv("USER", "worker-user")
+	upstream_warning = (
+		'Unable to determine provenance contact email. Set "git config '
+		'user.email". Using unix $USER instead.'
+	)
+	events = [
+		{
+			"status": "complete",
+			"stdout": f"{upstream_warning}\n{upstream_warning}\n",
+			"stderr": "",
+		},
+		{
+			"status": "complete",
+			"stdout": upstream_warning,
+			"stderr": "",
+		},
+	]
+
+	log.set_threshold(LOG_MASK_ALL)
+	try:
+		module._emit_worker_events(events)
+	finally:
+		log.set_threshold(LOG_MASK_DEFAULT)
+
+	output = capsys.readouterr().out
+	assert output.count("WARN  |Igneous") == 1
+	assert output.count("DEBUG |Igneous") == 2
+	assert output.count("using Unix user 'worker-user'") == 3
+	assert "Unable to determine provenance contact email" not in output
+	assert "$USER" not in output
+
+
 def test_worker_failure_closes_progress_before_diagnostics(
 	tmp_path,
 	monkeypatch,
