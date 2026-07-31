@@ -128,9 +128,9 @@ class ProgressHandle:
 		)
 		if start is not None:
 			self.logger.write(self.step, start, log_level=self.log_level)
-		self._bar.__enter__()
 		if self.initial:
-			self._bar.update(self.initial)
+			self._bar.pos = self.initial
+		self._bar.__enter__()
 		self._entered = True
 		return self
 

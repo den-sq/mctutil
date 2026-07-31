@@ -292,6 +292,7 @@ def shard_volume(
 		lease_seconds,
 		release_leases=release_leases,
 		expected_existing=expected_existing,
+		progress_label="Shard Tasks",
 	)
 	state["completed_mips"] = sorted(set(state["completed_mips"]) | set(pending))
 	state["complete"] = True

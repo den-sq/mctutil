@@ -137,6 +137,7 @@ def run_pass(
 		lease_seconds,
 		release_leases=release_leases,
 		expected_existing=expected_existing,
+		progress_label=f"Downsample {pass_name.replace('-', ' ')}",
 	)
 
 

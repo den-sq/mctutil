@@ -302,10 +302,12 @@ def test_persistent_queue_resume_can_preserve_existing_leases(
 	)
 	observed = {}
 
-	def drain(queue_url, _parallel, _lease_seconds):
+	def drain(queue_url, _parallel, _lease_seconds, poll):
 		resumed = taskqueue.TaskQueue(queue_url, progress=False)
 		observed["leased"] = resumed.leased
 		resumed.delete(leased_task, tally=True)
+		poll()
+		return []
 
 	monkeypatch.setattr(module, "drain_file_queue", drain)
 

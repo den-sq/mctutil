@@ -108,6 +108,11 @@ def test_downsample_uses_persistent_pass_state(load_module, tmp_path, monkeypatc
 	assert task_calls[1]["chunk_size"] == (16, 16, 16)
 	assert [call[2] for call in queue_calls] == [3, 2, 2]
 	assert all(call[4]["release_leases"] is False for call in queue_calls)
+	assert [call[4]["progress_label"] for call in queue_calls] == [
+		"Downsample initial",
+		"Downsample extend 1",
+		"Downsample extend 2",
+	]
 
 	state_files = list(queue.rglob("pipeline.json"))
 	assert len(state_files) == 1

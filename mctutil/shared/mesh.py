@@ -152,6 +152,7 @@ def build_mesh(
 			),
 			parallel,
 			lease_seconds,
+			progress_label="Mesh Forge",
 		)
 		log.write("Mesh", "Meshing pass complete", log_level=LOG.STATUS)
 
@@ -179,6 +180,7 @@ def build_mesh(
 			),
 			parallel,
 			lease_seconds,
+			progress_label="Mesh Merge",
 		)
 		log.write("Mesh", "Multiresolution merge pass complete", log_level=LOG.STATUS)
 		return

@@ -29,12 +29,22 @@ class IgneousOutputNormalizer:
 	def __init__(self):
 		self._seen = set()
 
-	def emit(self, text: str, *, stderr: bool = False) -> None:
+	def emit(
+		self,
+		text: str,
+		*,
+		stderr: bool = False,
+		unexpected_level: LOG = LOG.WARN,
+	) -> None:
 		for raw_line in text.splitlines():
 			line = _ANSI_ESCAPE.sub("", raw_line).strip()
 			if not line:
 				continue
-			log_level, key, statement = self._classify(line, stderr)
+			log_level, key, statement = self._classify(
+				line,
+				stderr,
+				unexpected_level,
+			)
 			if key is not None:
 				if key in self._seen:
 					if key == _PROVENANCE_CONTACT_KEY:
@@ -46,7 +56,11 @@ class IgneousOutputNormalizer:
 			log.write("Igneous", statement, log_level=log_level)
 
 	@staticmethod
-	def _classify(line: str, stderr: bool) -> tuple[LOG, str | None, str]:
+	def _classify(
+		line: str,
+		stderr: bool,
+		unexpected_level: LOG,
+	) -> tuple[LOG, str | None, str]:
 		if line.startswith("Volume Bounds:"):
 			return LOG.INFO, f"bounds:{line}", line
 		if line.startswith("Selected ROI:"):
@@ -67,7 +81,7 @@ class IgneousOutputNormalizer:
 			return LOG.INFO, "no-scales-generated", "No additional scales generated."
 		if line.startswith("No factors generated."):
 			return LOG.INFO, f"no-factors:{line}", line
-		return LOG.WARN, None, line if not stderr else f"stderr: {line}"
+		return unexpected_level, None, line if not stderr else f"stderr: {line}"
 
 
 @contextmanager
