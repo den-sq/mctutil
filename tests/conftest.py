@@ -8,12 +8,24 @@ import types
 
 import pytest
 
+from mctutil.shared.log import log, LOG_MASK_DEFAULT, LOG_MASK_VERBOSE
+
 
 @dataclass
 class WorkspacePaths:
 	root: Path
 	input_dir: Path
 	output_dir: Path
+
+
+@pytest.fixture()
+def verbose_logging():
+	"""Expose INFO planning records for direct subcommand tests."""
+	log.set_threshold(LOG_MASK_VERBOSE)
+	try:
+		yield
+	finally:
+		log.set_threshold(LOG_MASK_DEFAULT)
 
 
 @pytest.fixture()

@@ -15,6 +15,7 @@ import tifffile
 
 from mctutil.shared.cli import XYZ
 from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
+from mctutil.shared.log import log, LOG
 from mctutil.ng.completeness import check_mip0_completeness
 
 
@@ -361,15 +362,12 @@ def _execute_slices(
 	plan: VolumePlan,
 	z_indices: list[int],
 	workers: int,
+	progress=None,
 ) -> WorkerBatchResult:
 	pool_options = {}
 	if sys.version_info >= (3, 11):
 		pool_options["max_tasks_per_child"] = 500
 
-	click.echo(
-		f"Starting Z-plane writers for {len(z_indices)} plane(s) "
-		f"with {workers} worker(s)."
-	)
 	pool = ProcessPoolExecutor(
 		max_workers=workers,
 		initializer=_init_worker,
@@ -388,20 +386,20 @@ def _execute_slices(
 	try:
 		for z_index in z_indices:
 			futures.append(pool.submit(_write_slice, z_index))
-		with click.progressbar(
-			as_completed(futures),
-			length=len(futures),
-			label=f"Writing Z planes ({workers} workers)",
-		) as completed_futures:
-			for future in completed_futures:
-				completed.add(future.result())
+		for future in as_completed(futures):
+			completed.add(future.result())
+			if progress is not None:
+				progress.update(1)
 	except BrokenProcessPool as exc:
 		failure = exc
 	finally:
 		pool.shutdown(wait=True, cancel_futures=failure is not None)
 
 	if failure is not None:
+		known_completed = set(completed)
 		_harvest_completed_futures(futures, completed)
+		if progress is not None:
+			progress.update(len(completed - known_completed))
 	return WorkerBatchResult(frozenset(completed), failure)
 
 
@@ -415,28 +413,45 @@ def write_all_slices(
 	remaining = set(range(input_spec.shape[0]))
 	initial_count = len(remaining)
 	active_workers = min(workers, len(remaining))
-	while remaining:
-		result = _execute_slices(
-			cloudpath_for(output_path),
-			input_spec,
-			plan,
-			sorted(remaining),
-			active_workers,
-		)
-		remaining.difference_update(result.completed)
-		if result.failure is not None:
-			if active_workers == 1:
-				raise result.failure
-			active_workers = max(1, active_workers // 2)
-			click.echo(
-				f"Worker pool failed after {len(result.completed)} plane(s); "
-				f"retrying {len(remaining)} plane(s) with {active_workers} workers."
+	with log.progress(
+		"Z Planes",
+		length=initial_count,
+		start_message=(
+			f"Writing {initial_count} Z plane(s) with {active_workers} worker(s)."
+		),
+		final_message=lambda handle: (
+			f"Wrote {handle.position} Z plane(s)."
+		),
+	) as progress:
+		while remaining:
+			result = _execute_slices(
+				cloudpath_for(output_path),
+				input_spec,
+				plan,
+				sorted(remaining),
+				active_workers,
+				progress=progress,
 			)
-			continue
-		if remaining:
-			raise RuntimeError(
-				f"worker pool exited without completing {len(remaining)} Z plane(s)"
-			)
+			remaining.difference_update(result.completed)
+			if result.failure is not None:
+				if active_workers == 1:
+					raise result.failure
+				active_workers = max(1, active_workers // 2)
+				log.write(
+					"Z Planes",
+					(
+						f"Worker pool failed after {len(result.completed)} "
+						f"plane(s); retrying {len(remaining)} plane(s) with "
+						f"{active_workers} workers."
+					),
+					log_level=LOG.WARN,
+				)
+				continue
+			if remaining:
+				raise RuntimeError(
+					f"worker pool exited without completing "
+					f"{len(remaining)} Z plane(s)"
+				)
 	return initial_count
 
 
@@ -447,15 +462,20 @@ def describe_plan(
 	plan: VolumePlan,
 	workers: int,
 ) -> None:
-	click.echo(f"Input: {input_path.resolve()} ({input_spec.mode})")
-	click.echo(f"Output: {output_path.resolve()}")
-	click.echo(f"Shape (Z,Y,X): {input_spec.shape}; source dtype: {input_spec.dtype}")
-	click.echo(
-		f"Layer: {plan.layer_type}; encoding: {plan.encoding}; output dtype: {plan.dtype}"
+	statements = (
+		f"Input: {input_path.resolve()} ({input_spec.mode})",
+		f"Output: {output_path.resolve()}",
+		f"Shape (Z,Y,X): {input_spec.shape}; source dtype: {input_spec.dtype}",
+		(
+			f"Layer: {plan.layer_type}; encoding: {plan.encoding}; "
+			f"output dtype: {plan.dtype}"
+		),
+		f"Voxel resolution (nm): {plan.resolution}",
+		f"Voxel offset: {plan.voxel_offset}",
+		f"Chunk size: {plan.chunk_size}; workers: {workers}",
 	)
-	click.echo(f"Voxel resolution (nm): {plan.resolution}")
-	click.echo(f"Voxel offset: {plan.voxel_offset}")
-	click.echo(f"Chunk size: {plan.chunk_size}; workers: {workers}")
+	for statement in statements:
+		log.write("Precompute", statement, log_level=LOG.INFO)
 
 
 @click.command("precompute")
@@ -537,10 +557,12 @@ def precompute(
 			return
 
 		volume, created = open_or_create_volume(output_path, plan, input_spec)
-		click.echo(
+		log.write(
+			"Precompute",
 			"Created MIP 0 metadata."
 			if created
-			else "Using compatible existing MIP 0 metadata; rewriting all Z planes."
+			else "Using compatible existing MIP 0 metadata; rewriting all Z planes.",
+			log_level=LOG.STATUS,
 		)
 		written = write_all_slices(output_path, input_spec, plan, workers)
 		completeness = check_mip0_completeness(output_path, volume.info)
@@ -548,8 +570,16 @@ def precompute(
 			raise RuntimeError(
 				f"MIP 0 completeness check failed: {completeness.summary()}"
 			)
-		click.echo(f"MIP 0 completeness check passed: {completeness.summary()}")
-		click.echo(f"Precompute complete; wrote {written} Z plane(s).")
+		log.write(
+			"Precompute",
+			f"MIP 0 completeness check passed: {completeness.summary()}",
+			log_level=LOG.INFO,
+		)
+		log.write(
+			"Precompute",
+			f"Precompute complete; wrote {written} Z plane(s).",
+			log_level=LOG.STATUS,
+		)
 	except click.ClickException:
 		raise
 	except Exception as exc:

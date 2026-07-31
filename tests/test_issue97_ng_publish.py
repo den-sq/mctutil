@@ -153,6 +153,7 @@ def test_publish_dry_run_reports_metadata_and_never_writes(
 	load_module,
 	tmp_path,
 	monkeypatch,
+	verbose_logging,
 ):
 	module = load_module("mctutil/ng/publish.py")
 	root = tmp_path / "root"
@@ -275,6 +276,7 @@ def test_start_at_upload_is_aws_only_and_resumable(
 	load_module,
 	tmp_path,
 	monkeypatch,
+	verbose_logging,
 ):
 	module = load_module("mctutil/ng/publish.py")
 	root = tmp_path / "root"
@@ -307,7 +309,7 @@ def test_start_at_upload_is_aws_only_and_resumable(
 	assert calls == ["upload"]
 
 
-def test_publish_real_prep_precompute_and_resume(tmp_path):
+def test_publish_real_prep_precompute_and_resume(tmp_path, verbose_logging):
 	pytest.importorskip("zarr")
 	tifffile = pytest.importorskip("tifffile")
 	CloudVolume = pytest.importorskip("cloudvolume").CloudVolume

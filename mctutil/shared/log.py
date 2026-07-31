@@ -18,16 +18,21 @@ Module-level singleton: `log = Logger()`. Idiomatic import shape is
 `from mctutil.shared.log import log, LOG`.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import IntFlag
 from functools import reduce
 from operator import ior
 from pathlib import Path
 from sys import stdout, exc_info
-from typing import TextIO
+from typing import Callable, Iterable, TextIO
 
 import click
 import psutil
+
+
+_DEFAULT_PROGRESS_MESSAGE = object()
 
 
 class LOG(IntFlag):
@@ -58,6 +63,116 @@ LOG_MASK_QUIET = LOG.ERROR
 LOG_MASK_DEFAULT = LOG.ERROR | LOG.STATUS | LOG.TIME | LOG.WARN
 LOG_MASK_VERBOSE = LOG.ERROR | LOG.STATUS | LOG.TIME | LOG.WARN | LOG.INFO
 LOG_MASK_ALL = LOG.ERROR | LOG.STATUS | LOG.TIME | LOG.WARN | LOG.INFO | LOG.DEBUG
+
+
+class ProgressHandle:
+	"""Context-managed progress that supports iteration and manual updates."""
+
+	def __init__(
+		self,
+		logger,
+		step: str,
+		items: Iterable | None,
+		length: int | None,
+		disp,
+		out: TextIO,
+		log_level: LOG,
+		initial: int,
+		start_message: str | Callable | None | object,
+		final_message: str | Callable | None | object,
+	):
+		if items is None and length is None:
+			raise TypeError("items or length is required")
+		self.logger = logger
+		self.step = step
+		self.items = items
+		self.length = length
+		self.log_level = log_level
+		self.initial = initial
+		self.position = initial
+		self.start_message = start_message
+		self.final_message = final_message
+		self._entered = False
+		self._enabled = logger.screen_enabled(log_level)
+		self._interactive = (
+			self._enabled
+			and bool(getattr(out, "isatty", lambda: False)())
+		)
+		self._bar = click.progressbar(
+			items,
+			length=length,
+			item_show_func=disp,
+			file=out,
+			show_eta=True,
+			show_pos=True,
+			label=logger.progress_label(step, log_level),
+			info_sep="|",
+			width=39,
+			bar_template="%(label)s|%(bar)s|%(info)s|",
+			hidden=not self._interactive,
+		)
+		if self.length is None:
+			self.length = self._bar.length
+
+	def _message(self, value, default: str) -> str | None:
+		if value is _DEFAULT_PROGRESS_MESSAGE:
+			return default
+		if callable(value):
+			return value(self)
+		return value
+
+	def __enter__(self):
+		start = self._message(
+			self.start_message,
+			f"Started; total={self.length}.",
+		)
+		if start is not None:
+			self.logger.write(self.step, start, log_level=self.log_level)
+		self._bar.__enter__()
+		if self.initial:
+			self._bar.update(self.initial)
+		self._entered = True
+		return self
+
+	def __iter__(self):
+		if not self._entered:
+			raise RuntimeError("progress handle must be entered before iteration")
+		if not self._interactive:
+			for item in self._bar.iter:
+				yield item
+				self.update(1)
+			return
+		for item in self._bar:
+			yield item
+			self.position = self._bar.pos
+		self.position = self._bar.pos
+
+	def update(self, count: int) -> None:
+		"""Advance manually by ``count`` completed units."""
+		if not self._entered:
+			raise RuntimeError("progress handle must be entered before update")
+		if count < 0:
+			raise ValueError("progress updates must be non-negative")
+		self.position += count
+		self._bar.update(count)
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		try:
+			return self._bar.__exit__(exc_type, exc_value, traceback)
+		finally:
+			self._entered = False
+			self.position = self._bar.pos
+			if exc_type is None:
+				final = self._message(
+					self.final_message,
+					f"Completed {self.position}/{self.length}.",
+				)
+				if final is not None:
+					self.logger.write(
+						self.step,
+						final,
+						log_level=self.log_level,
+					)
 
 
 class Logger:
@@ -92,6 +207,10 @@ class Logger:
 	def set_threshold(self, mask):
 		"""Convenience: set stdout mask to ``mask`` and stderr mask to ``LOG.ERROR``."""
 		self.set_screen(stdout_mask=mask, stderr_mask=LOG.ERROR)
+
+	def screen_enabled(self, log_level: LOG) -> bool:
+		"""Return whether ``log_level`` is enabled on the progress stream."""
+		return bool(self.__log_screen.get("stdout", LOG.SILENT) & log_level)
 
 	def set_log_file(self, name, path, mask=None):
 		"""Add or replace a named file destination.
@@ -155,12 +274,42 @@ class Logger:
 		return click.prompt(self.__log_message(step, statement, log_level),
 								err=(log_level == LOG.ERROR), default=default)
 
-	def progress(self, step, items, length=None, disp=None, out: TextIO = stdout):
-		"""mctutil-specific: wrap ``click.progressbar`` with a STATUS-styled label."""
-		styled_type = click.style(f'{LOG.STATUS.name:6}', LOG.STATUS.color)
-		return click.progressbar(items, length=length, item_show_func=disp, file=out, show_eta=True,
-									show_pos=True, label=f'{styled_type}|{step[:20]:20}',
-									info_sep='|', width=39, bar_template="%(label)s|%(bar)s|%(info)s|")
+	def progress_label(self, step: str, log_level: LOG = LOG.STATUS) -> str:
+		"""Return the structured label used by interactive progress bars."""
+		styled_type = click.style(f'{log_level.name:6}', log_level.color)
+		return f'{styled_type}|{step[:20]:20}'
+
+	def progress(
+		self,
+		step,
+		items=None,
+		length=None,
+		disp=None,
+		out: TextIO | None = None,
+		log_level=LOG.STATUS,
+		initial=0,
+		start_message=_DEFAULT_PROGRESS_MESSAGE,
+		final_message=_DEFAULT_PROGRESS_MESSAGE,
+	):
+		"""Create a progress handle for iteration or manual ``update()`` calls.
+
+		Interactive bars are restricted to TTY output. Durable start/final
+		records still flow through ``write()`` in captured output, and both the
+		bar and records honor the configured log threshold.
+		"""
+		out = out or click.get_text_stream("stdout")
+		return ProgressHandle(
+			self,
+			step,
+			items,
+			length,
+			disp,
+			out,
+			log_level,
+			initial,
+			start_message,
+			final_message,
+		)
 
 	def dump(self, statement, log_level=LOG.INFO, out=None, use_color=False):
 		"""Write a raw statement without the TYPE/STEP/TIMESTAMP/MEM preamble. Attached funcs aren't run."""

@@ -14,6 +14,11 @@ from mctutil.ng.downsample_pyramid import (
 	normalize_layer_path,
 )
 from mctutil.shared.cli import XYZ
+from mctutil.shared.igneous_output import (
+	capture_igneous_call,
+	igneous_output_command,
+)
+from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import (
 	read_state,
 	run_persistent_tasks,
@@ -133,7 +138,8 @@ def create_shard_tasks(
 		None,
 	)
 	if sharded_factory is not None:
-		return sharded_factory(
+		return capture_igneous_call(
+			sharded_factory,
 			source,
 			destination,
 			mip=mip,
@@ -152,7 +158,8 @@ def create_shard_tasks(
 		raise RuntimeError(
 			"installed igneous-pipeline has no sharded image transfer API"
 		)
-	return legacy_factory(
+	return capture_igneous_call(
+		legacy_factory,
 		source,
 		destination,
 		mip=mip,
@@ -234,7 +241,11 @@ def shard_volume(
 		destination_scale_complete(destination, mip)
 		for mip in mips
 	):
-		click.echo("Sharded staging is already complete for this configuration.")
+		log.write(
+			"Shard",
+			"Staging is already complete for this configuration.",
+			log_level=LOG.STATUS,
+		)
 		return
 	if state["complete"]:
 		state["attempt"] = state.get("attempt", 0) + 1
@@ -287,6 +298,42 @@ def shard_volume(
 	write_state(state_path, state)
 
 
+def describe_shard_plan(
+	source: str,
+	destination: str,
+	layer_type: str,
+	encoding: str,
+	queue_dir: Path,
+	parallel: int,
+	memory: int,
+	mips: tuple[int, ...],
+	low_chunk: tuple[int, int, int],
+	mid_chunk: tuple[int, int, int],
+	high_chunk: tuple[int, int, int],
+) -> None:
+	for statement in (
+		f"Source: {normalize_layer_path(source)}",
+		f"Destination: {normalize_layer_path(destination)}",
+		f"Layer type: {layer_type}; encoding: {encoding}",
+		f"Queue root: {queue_dir.resolve()}",
+		f"Parallel workers: {parallel}; memory target: {memory}",
+	):
+		log.write("Shard", statement, log_level=LOG.INFO)
+	for mip in mips:
+		chunk = chunk_for_mip(mip, low_chunk, mid_chunk, high_chunk)
+		status = (
+			"complete"
+			if destination_scale_complete(destination, mip)
+			else "pending"
+		)
+		log.write(
+			"Shard",
+			f"Mip {mip}: chunk={chunk}, fill_missing=True, "
+			f"compression={SHARD_COMPRESSION}, status={status}",
+			log_level=LOG.INFO,
+		)
+
+
 @click.command("shard")
 @click.argument("source")
 @click.argument("destination")
@@ -334,6 +381,7 @@ def shard_volume(
 	help="Release existing FileQueue leases when resuming; preserve for shared queues.",
 )
 @click.option("--execute/--dry-run", default=True, show_default=True)
+@igneous_output_command
 def shard(
 	source: str,
 	destination: str,
@@ -364,22 +412,19 @@ def shard(
 			raise ValueError("no mip levels selected for sharded staging")
 		queue_dir = queue_dir or default_queue_root(destination)
 
-		click.echo(f"Source: {normalize_layer_path(source)}")
-		click.echo(f"Destination: {normalize_layer_path(destination)}")
-		click.echo(f"Layer type: {layer_type}; encoding: {encoding}")
-		click.echo(f"Queue root: {queue_dir.resolve()}")
-		click.echo(f"Parallel workers: {parallel}; memory target: {memory}")
-		for mip in mips:
-			chunk = chunk_for_mip(mip, low_chunk, mid_chunk, high_chunk)
-			status = (
-				"complete"
-				if destination_scale_complete(destination, mip)
-				else "pending"
-			)
-			click.echo(
-				f"Mip {mip}: chunk={chunk}, fill_missing=True, "
-				f"compression={SHARD_COMPRESSION}, status={status}"
-			)
+		describe_shard_plan(
+			source,
+			destination,
+			layer_type,
+			encoding,
+			queue_dir,
+			parallel,
+			memory,
+			mips,
+			low_chunk,
+			mid_chunk,
+			high_chunk,
+		)
 		if not execute:
 			return
 		shard_volume(
@@ -396,6 +441,7 @@ def shard(
 			lease_seconds,
 			release_leases,
 		)
+		log.write("Shard", "Staging complete.", log_level=LOG.STATUS)
 	except click.ClickException:
 		raise
 	except Exception as exc:

@@ -29,7 +29,12 @@ class FakeVolume:
 		}
 
 
-def test_downsample_dry_run_reports_two_pass_plan(load_module, tmp_path, monkeypatch):
+def test_downsample_dry_run_reports_two_pass_plan(
+	load_module,
+	tmp_path,
+	monkeypatch,
+	verbose_logging,
+):
 	module = load_module("mctutil/ng/downsample_pyramid.py")
 	dependencies = (FakeVolume, types.SimpleNamespace())
 	monkeypatch.setattr(module, "_require_dependencies", lambda: dependencies)

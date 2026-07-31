@@ -59,7 +59,10 @@ def test_ng_precompute_writes_real_local_cloudvolume(tmp_path, monkeypatch):
 	assert "Precompute complete; wrote 2 Z plane(s)" in resume_result.output
 
 
-def test_ng_precompute_dry_run_uses_agreed_metadata_defaults(tmp_path):
+def test_ng_precompute_dry_run_uses_agreed_metadata_defaults(
+	tmp_path,
+	verbose_logging,
+):
 	input_path = tmp_path / "sample.tif"
 	output_path = tmp_path / "planned"
 	tifffile.imwrite(

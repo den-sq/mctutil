@@ -24,7 +24,12 @@ class FakeVolume:
 		}
 
 
-def test_shard_dry_run_reports_per_mip_mapping(load_module, tmp_path, monkeypatch):
+def test_shard_dry_run_reports_per_mip_mapping(
+	load_module,
+	tmp_path,
+	monkeypatch,
+	verbose_logging,
+):
 	module = load_module("mctutil/ng/shard.py")
 	monkeypatch.setattr(
 		module,

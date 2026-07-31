@@ -116,13 +116,15 @@ def test_precompute_retries_only_in_process_incomplete_planes(monkeypatch, tmp_p
 	failure = BrokenProcessPool("worker died")
 	calls = []
 
-	def execute(_cloudpath, _spec, _plan, z_indices, workers):
+	def execute(_cloudpath, _spec, _plan, z_indices, workers, progress):
 		calls.append((tuple(z_indices), workers))
 		if len(calls) == 1:
+			progress.update(101)
 			return precompute_module.WorkerBatchResult(
 				frozenset(z_indices[:101]),
 				failure,
 			)
+		progress.update(len(z_indices))
 		return precompute_module.WorkerBatchResult(frozenset(z_indices), None)
 
 	monkeypatch.setattr(precompute_module, "_execute_slices", execute)

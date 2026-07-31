@@ -165,6 +165,7 @@ def test_publish_reports_aws_for_s3_mesh_without_upload(
 	load_module,
 	monkeypatch,
 	tmp_path,
+	verbose_logging,
 ):
 	module = load_module("mctutil/ng/publish.py")
 	root = tmp_path / "root"
