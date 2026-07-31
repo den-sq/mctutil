@@ -13,6 +13,7 @@ from mctutil.shared.igneous_output import (
 from mctutil.shared.log import (
 	Logger,
 	LOG,
+	LOG_MASK_ALL,
 	LOG_MASK_DEFAULT,
 	LOG_MASK_QUIET,
 	LOG_MASK_VERBOSE,
@@ -101,9 +102,11 @@ def test_progress_handle_preserves_iterable_api(capsys):
 
 def test_igneous_task_creation_output_is_classified_and_deduplicated(
 	capsys,
+	monkeypatch,
 ):
 	from mctutil.shared.log import log
 
+	monkeypatch.setenv("USER", "test-user")
 	log.set_threshold(LOG_MASK_VERBOSE)
 
 	def noisy_factory():
@@ -126,10 +129,53 @@ def test_igneous_task_creation_output_is_classified_and_deduplicated(
 	output = capsys.readouterr().out
 	assert output.count("Volume Bounds") == 1
 	assert output.count("Selected ROI") == 1
-	assert output.count("provenance contact email") == 1
+	assert output.count("Provenance contact email") == 1
+	assert "using Unix user 'test-user'" in output
+	assert "`git config user.email <email>`" in output
+	assert "Unable to determine provenance contact email" not in output
+	assert "$USER" not in output
 	assert output.count("No additional scales generated.") == 1
 	assert "WARN  |Igneous" in output
 	assert "INFO  |Igneous" in output
+
+
+def test_lazy_task_creation_warning_is_normalized_during_iteration(
+	capsys,
+	monkeypatch,
+):
+	from mctutil.shared.log import log
+
+	monkeypatch.setenv("USER", "lazy-user")
+	upstream_warning = (
+		'Unable to determine provenance contact email. Set "git config '
+		'user.email". Using unix $USER instead.'
+	)
+
+	def lazy_factory():
+		def tasks():
+			print(upstream_warning)
+			yield "first"
+			print(upstream_warning)
+			yield "second"
+
+		return tasks()
+
+	log.set_threshold(LOG_MASK_ALL)
+	try:
+		with igneous_output_session():
+			assert list(capture_igneous_call(lazy_factory)) == [
+				"first",
+				"second",
+			]
+	finally:
+		log.set_threshold(LOG_MASK_DEFAULT)
+
+	output = capsys.readouterr().out
+	assert output.count("WARN  |Igneous") == 1
+	assert output.count("DEBUG |Igneous") == 1
+	assert output.count("using Unix user 'lazy-user'") == 2
+	assert "Unable to determine provenance contact email" not in output
+	assert "$USER" not in output
 
 
 def test_igneous_unexpected_output_remains_visible(capsys):
