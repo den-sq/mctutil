@@ -80,6 +80,7 @@ class ProgressHandle:
 		initial: int,
 		start_message: str | Callable | None | object,
 		final_message: str | Callable | None | object,
+		position_formatter: Callable[[int, int | None], str] | None,
 	):
 		if items is None and length is None:
 			raise TypeError("items or length is required")
@@ -111,6 +112,11 @@ class ProgressHandle:
 			bar_template="%(label)s|%(bar)s|%(info)s|",
 			hidden=not self._interactive,
 		)
+		if position_formatter is not None:
+			self._bar.format_pos = lambda: position_formatter(
+				self._bar.pos,
+				self._bar.length,
+			)
 		if self.length is None:
 			self.length = self._bar.length
 
@@ -290,6 +296,7 @@ class Logger:
 		initial=0,
 		start_message=_DEFAULT_PROGRESS_MESSAGE,
 		final_message=_DEFAULT_PROGRESS_MESSAGE,
+		position_formatter=None,
 	):
 		"""Create a progress handle for iteration or manual ``update()`` calls.
 
@@ -309,6 +316,7 @@ class Logger:
 			initial,
 			start_message,
 			final_message,
+			position_formatter,
 		)
 
 	def dump(self, statement, log_level=LOG.INFO, out=None, use_color=False):
