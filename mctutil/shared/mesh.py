@@ -16,6 +16,7 @@ from mctutil.shared.igneous_output import (
 )
 from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import run_persistent_tasks, stable_fingerprint
+from mctutil.shared.resource_monitor import record_active_workers
 
 
 def _require_mesh_dependencies():
@@ -185,6 +186,7 @@ def build_mesh(
 		log.write("Mesh", "Multiresolution merge pass complete", log_level=LOG.STATUS)
 		return
 
+	record_active_workers(parallel)
 	task_queue = LocalTaskQueue(parallel=parallel)
 
 	mesh_tasks = capture_igneous_call(

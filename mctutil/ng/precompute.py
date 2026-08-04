@@ -16,6 +16,7 @@ import tifffile
 from mctutil.shared.cli import XYZ
 from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
 from mctutil.shared.log import log, LOG
+from mctutil.shared.resource_monitor import record_active_workers
 from mctutil.ng.completeness import check_mip0_completeness
 
 
@@ -413,6 +414,7 @@ def write_all_slices(
 	remaining = set(range(input_spec.shape[0]))
 	initial_count = len(remaining)
 	active_workers = min(workers, len(remaining))
+	record_active_workers(active_workers)
 	with log.progress(
 		"Z Planes",
 		length=initial_count,
@@ -437,6 +439,7 @@ def write_all_slices(
 				if active_workers == 1:
 					raise result.failure
 				active_workers = max(1, active_workers // 2)
+				record_active_workers(active_workers)
 				log.write(
 					"Z Planes",
 					(
