@@ -18,6 +18,7 @@ from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
 from mctutil.shared.log import log, LOG
 from mctutil.shared.resource_monitor import record_active_workers
 from mctutil.ng.completeness import check_mip0_completeness
+from mctutil.ng.resource_planning import system_resources
 
 
 LAYER_TYPES = ("auto", "image", "segmentation")
@@ -490,9 +491,10 @@ def describe_plan(
 @click.option(
 	"--workers",
 	type=click.IntRange(min=1),
-	default=8,
-	show_default=True,
-	help="Number of process-parallel Z writers.",
+	help=(
+		"Number of process-parallel Z writers; defaults to the available "
+		"CPU count and cannot exceed it."
+	),
 )
 @click.option("--layer-type", type=click.Choice(LAYER_TYPES), default="auto", show_default=True)
 @click.option(
@@ -530,7 +532,7 @@ def describe_plan(
 def precompute(
 	input_path: Path,
 	output_path: Path | None,
-	workers: int,
+	workers: int | None,
 	layer_type: str,
 	segmentation_encoding: str,
 	dtype_override: str | None,
@@ -542,6 +544,8 @@ def precompute(
 ) -> None:
 	"""Write an unsharded Neuroglancer precomputed volume at MIP 0."""
 	try:
+		_, cpu_count = system_resources()
+		workers = min(workers or cpu_count, cpu_count)
 		input_spec = discover_input(input_path)
 		output_path = output_path or default_output_path(input_path)
 		plan = build_plan(

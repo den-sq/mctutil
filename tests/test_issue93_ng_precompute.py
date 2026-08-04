@@ -61,8 +61,14 @@ def test_ng_precompute_writes_real_local_cloudvolume(tmp_path, monkeypatch):
 
 def test_ng_precompute_dry_run_uses_agreed_metadata_defaults(
 	tmp_path,
+	monkeypatch,
 	verbose_logging,
 ):
+	monkeypatch.setattr(
+		precompute_module,
+		"system_resources",
+		lambda: (32 * 1024 ** 3, 6),
+	)
 	input_path = tmp_path / "sample.tif"
 	output_path = tmp_path / "planned"
 	tifffile.imwrite(
@@ -79,7 +85,21 @@ def test_ng_precompute_dry_run_uses_agreed_metadata_defaults(
 	assert result.exit_code == 0, result.output
 	assert "Voxel resolution (nm): (700, 700, 700)" in result.output
 	assert "Voxel offset: (0, 0, 0)" in result.output
+	assert "workers: 6" in result.output
 	assert not output_path.exists()
+
+	capped = CliRunner().invoke(
+		precompute,
+		[
+			str(input_path),
+			str(output_path),
+			"--workers", "12",
+			"--dry-run",
+		],
+	)
+
+	assert capped.exit_code == 0, capped.output
+	assert "workers: 6" in capped.output
 
 
 def test_ng_precompute_directory_input_uses_natural_order(tmp_path):

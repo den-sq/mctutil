@@ -80,10 +80,10 @@ class StageSummary:
 class StagePrediction:
 	"""Resource-plan inputs relevant to a running stage."""
 
+	reserve: int
+	capacity_multiplier: int
 	shard_capacity: int | None = None
 	downsample_memory: int | None = None
-	fixed_reserve: int = 16 * GIB
-	capacity_multiplier: int = 3
 
 
 class _StageAccumulator:
@@ -602,11 +602,11 @@ def format_stage_summary(
 			* prediction.shard_capacity
 			* active_workers
 		)
-		combined = prediction.fixed_reserve + worker_bytes
+		combined = prediction.reserve + worker_bytes
 		parts.append(
 			"ResourcePlan max shard capacity="
 			f"{_format_size(prediction.shard_capacity)}, prediction="
-			f"{_format_size(prediction.fixed_reserve)} + "
+			f"{_format_size(prediction.reserve)} + "
 			f"{active_workers} x {prediction.capacity_multiplier} x "
 			f"{_format_size(prediction.shard_capacity)} = "
 			f"{_format_size(combined)}"

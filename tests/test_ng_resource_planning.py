@@ -125,14 +125,22 @@ def test_binary_size_override_accepts_bytes_and_units(value, expected):
 
 
 @pytest.mark.parametrize(
-	("capacity", "workers"),
-	((2 * GIB, 16), (4 * GIB, 8), (8 * GIB, 4)),
+	("capacity", "downsample_workers", "shard_workers"),
+	(
+		(2 * GIB, 32, 23),
+		(4 * GIB, 23, 11),
+		(8 * GIB, 11, 5),
+	),
 )
-def test_worker_limit_scales_conservatively_with_shard_capacity(
+def test_stage_worker_limits_scale_with_shard_capacity(
 	capacity,
-	workers,
+	downsample_workers,
+	shard_workers,
 ):
-	assert resources(GIB, capacity=capacity).workers == workers
+	plan = resources(GIB, capacity=capacity)
+
+	assert plan.downsample_workers == downsample_workers
+	assert plan.shard_workers == shard_workers
 
 
 def test_worker_limit_honors_cpu_user_and_low_memory_bounds():
@@ -146,10 +154,60 @@ def test_worker_limit_honors_cpu_user_and_low_memory_bounds():
 	cpu_limited = resources(GIB, memory_capacity=256 * GIB, cpu_limit=6)
 	low_memory = resources(GIB, memory_capacity=16 * GIB)
 
-	assert user_limited.workers == 3
-	assert cpu_limited.workers == 6
-	assert low_memory.workers == 1
-	assert low_memory.warning is not None
+	assert user_limited.downsample_workers == 3
+	assert user_limited.shard_workers == 3
+	assert cpu_limited.downsample_workers == 6
+	assert cpu_limited.shard_workers == 6
+	assert low_memory.downsample_workers == 6
+	assert low_memory.shard_workers == 3
+	assert low_memory.warning is None
+
+
+@pytest.mark.parametrize(
+	("memory_capacity", "reserve"),
+	(
+		(16 * GIB, 4 * GIB),
+		(32 * GIB, 8 * GIB),
+		(96 * GIB, 24 * GIB),
+		(128 * GIB, 24 * GIB),
+	),
+)
+def test_memory_reserve_is_quarter_capacity_capped_at_24_gib(
+	memory_capacity,
+	reserve,
+):
+	assert resource_planning.calculate_memory_reserve(memory_capacity) == reserve
+
+
+@pytest.mark.parametrize(
+	("memory_capacity", "downsample_workers", "shard_workers"),
+	(
+		(16 * GIB, 6, 3),
+		(32 * GIB, 12, 6),
+	),
+)
+def test_low_memory_worker_counts(
+	memory_capacity,
+	downsample_workers,
+	shard_workers,
+):
+	plan = resources(GIB, memory_capacity=memory_capacity)
+
+	assert plan.downsample_workers == downsample_workers
+	assert plan.shard_workers == shard_workers
+
+
+def test_large_machine_uses_cpu_for_downsample_and_memory_for_shard():
+	plan = resources(
+		GIB,
+		capacity=2 * GIB,
+		memory_capacity=142 * GIB,
+		cpu_limit=32,
+	)
+
+	assert plan.memory_reserve == 24 * GIB
+	assert plan.downsample_workers == 32
+	assert plan.shard_workers == 29
 
 
 def test_system_resources_uses_capacity_not_current_usage(
@@ -260,11 +318,11 @@ def test_publish_keeps_full_mip0_workers_and_caps_later_stages(
 		module.run_stage(stage, plan, options)
 
 	assert calls["precompute"]["workers"] == 32
-	assert calls["downsample"]["initial_parallel"] == 4
-	assert calls["downsample"]["extend_parallel"] == 4
+	assert calls["downsample"]["initial_parallel"] == 11
+	assert calls["downsample"]["extend_parallel"] == 11
 	assert calls["downsample"]["memory"] == 10_000_000_000
 	assert calls["downsample"]["capacity_override"] == 8 * GIB
-	assert calls["shard"]["parallel"] == 4
+	assert calls["shard"]["parallel"] == 5
 	assert calls["shard"]["capacity_override"] == 8 * GIB
 
 
@@ -284,8 +342,12 @@ def test_stage_prediction_uses_actual_shard_payload_and_separate_target(
 	assert downsample.shard_capacity == max(
 		entry[3] for entry in resources.shards
 	)
+	assert downsample.reserve == 24 * GIB
+	assert downsample.capacity_multiplier == 1
 	assert downsample.downsample_memory == 10_000_000_000
 	assert shard.shard_capacity is not None
+	assert shard.reserve == 24 * GIB
+	assert shard.capacity_multiplier == 2
 	assert shard.downsample_memory is None
 
 

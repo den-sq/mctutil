@@ -17,7 +17,7 @@ from mctutil.shared.log import log, LOG
 
 GIB = 1024 ** 3
 TIB = 1024 ** 4
-MEMORY_RESERVE = 16 * GIB
+MAX_MEMORY_RESERVE = 24 * GIB
 
 LOW_CHUNK = (96, 96, 96)
 MID_CHUNK = (64, 64, 64)
@@ -45,10 +45,13 @@ class ResourcePlan:
 	# (mip, chunk size, chunks per shard, actual raw capacity)
 	shards: tuple[tuple[int, tuple[int, int, int], int, int], ...]
 	memory_capacity: int
+	memory_reserve: int
 	requested_workers: int
 	cpu_limit: int
-	memory_limit: int
-	workers: int
+	downsample_memory_limit: int
+	shard_memory_limit: int
+	downsample_workers: int
+	shard_workers: int
 	warning: str | None
 
 
@@ -106,6 +109,11 @@ def system_resources(
 	except (AttributeError, OSError):
 		cpus = os.cpu_count() or 1
 	return min(capacities), max(1, cpus)
+
+
+def calculate_memory_reserve(memory_capacity: int) -> int:
+	"""Reserve 25% of effective RAM, up to 24 GiB."""
+	return min(MAX_MEMORY_RESERVE, max(0, int(memory_capacity)) // 4)
 
 
 def _shard_plan(
@@ -182,25 +190,37 @@ def plan_resources(
 	memory_capacity = max(0, int(memory_capacity))
 	cpu_limit = max(1, int(cpu_limit))
 	capacity_budget = max(shard[3] for shard in shards)
-	warning = None
-	if memory_capacity <= MEMORY_RESERVE:
-		memory_limit = 1
-		warning = "memory capacity does not exceed the 16 GiB reserve; using one worker"
-	else:
-		memory_limit = max(
-			1,
-			(memory_capacity - MEMORY_RESERVE) // (3 * capacity_budget),
-		)
-	workers = max(1, min(requested_workers, cpu_limit, memory_limit))
+	reserve = calculate_memory_reserve(memory_capacity)
+	worker_memory = memory_capacity - reserve
+	downsample_raw_limit = worker_memory // capacity_budget
+	shard_raw_limit = worker_memory // (2 * capacity_budget)
+	downsample_memory_limit = max(1, downsample_raw_limit)
+	shard_memory_limit = max(1, shard_raw_limit)
+	downsample_workers = max(
+		1,
+		min(requested_workers, cpu_limit, downsample_memory_limit),
+	)
+	shard_workers = max(
+		1,
+		min(requested_workers, cpu_limit, shard_memory_limit),
+	)
+	warning = (
+		"memory budget supports fewer than one shard worker; using one worker"
+		if shard_raw_limit < 1
+		else None
+	)
 	return ResourcePlan(
 		logical_bytes=logical_bytes,
 		shard_ceiling=shard_ceiling,
 		shards=tuple(shards),
 		memory_capacity=memory_capacity,
+		memory_reserve=reserve,
 		requested_workers=requested_workers,
 		cpu_limit=cpu_limit,
-		memory_limit=memory_limit,
-		workers=workers,
+		downsample_memory_limit=downsample_memory_limit,
+		shard_memory_limit=shard_memory_limit,
+		downsample_workers=downsample_workers,
+		shard_workers=shard_workers,
 		warning=warning,
 	)
 
@@ -223,9 +243,12 @@ def log_resource_plan(
 		(
 			f"Resources: MIP 0={format_size(plan.logical_bytes)} logical; "
 			f"shards={format_size(plan.shard_ceiling)} ceiling; "
-			f"workers={plan.workers}/{plan.requested_workers} requested "
-			f"(CPU {plan.cpu_limit}, RAM limit {plan.memory_limit} from "
-			f"{format_size(plan.memory_capacity)} capacity minus 16 GiB reserve)."
+			f"workers=downsample {plan.downsample_workers}, "
+			f"shard {plan.shard_workers}/{plan.requested_workers} requested "
+			f"(CPU {plan.cpu_limit}; RAM limits "
+			f"{plan.downsample_memory_limit}/{plan.shard_memory_limit} from "
+			f"{format_size(plan.memory_capacity)} capacity minus "
+			f"{format_size(plan.memory_reserve)} reserve)."
 		),
 		log_level=LOG.INFO,
 	)

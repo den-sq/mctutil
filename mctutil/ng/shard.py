@@ -421,7 +421,7 @@ def shard(
 			queue_dir,
 			resources,
 			encoding,
-			resources.workers,
+			resources.shard_workers,
 			lease_seconds,
 			release_leases,
 		)
