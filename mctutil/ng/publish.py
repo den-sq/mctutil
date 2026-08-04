@@ -14,6 +14,13 @@ from urllib.parse import urlparse
 import click
 
 from mctutil.ng.completeness import check_mip0_completeness
+from mctutil.ng.resource_planning import (
+	log_resource_plan,
+	parse_size,
+	plan_resources,
+	ResourcePlan,
+	system_resources,
+)
 from mctutil.shared.aws import configure_aws_profile
 from mctutil.shared.cli import XYZ
 from mctutil.shared.igneous_output import igneous_output_command
@@ -430,6 +437,50 @@ def resolved_precompute_input(plan: DatasetPlan, options: dict) -> Path | None:
 	return plan.precompute_input
 
 
+def dataset_resources(
+	plan: DatasetPlan,
+	options: dict,
+	mips: tuple[int, ...] | None = None,
+) -> ResourcePlan | None:
+	info = _read_info(plan.precomputed)
+	if info is None:
+		return None
+	if mips is None:
+		mips = tuple(range(len(info["scales"])))
+	return plan_resources(
+		info,
+		mips,
+		options["workers"],
+		capacity_override=options["shard_capacity"],
+		memory_capacity=options["memory_capacity"],
+		cpu_limit=options["cpu_count"],
+	)
+
+
+def shard_configuration(plan: DatasetPlan, options: dict) -> dict:
+	"""Return only output-affecting shard settings for resume state."""
+	resources = dataset_resources(plan, options)
+	if resources is None:
+		return {
+			"capacity": options["shard_capacity"] or "auto-after-mip0",
+		}
+	shards = resources.shards
+	if not options["stage_include_mip0"]:
+		shards = tuple(shard for shard in shards if shard[0] != 0)
+	return {
+		"capacity_ceiling": resources.shard_ceiling,
+		"scale_plans": [
+			{
+				"mip": mip,
+				"chunk_size": chunk,
+				"chunks_per_shard": count,
+				"capacity": capacity,
+			}
+			for mip, chunk, count, capacity in shards
+		],
+	}
+
+
 def stage_configuration(
 	stage: str,
 	plan: DatasetPlan,
@@ -455,7 +506,7 @@ def stage_configuration(
 	elif stage == "downsample":
 		configuration.update(
 			layer=str(plan.precomputed),
-			memory=options["memory"],
+			memory=options["downsample_memory"],
 			initial_chunk=(64, 64, 64),
 			extend_chunk=(16, 16, 16),
 		)
@@ -464,7 +515,7 @@ def stage_configuration(
 			source=str(plan.precomputed),
 			destination=str(plan.staged),
 			include_mip0=options["stage_include_mip0"],
-			memory=options["memory"],
+			**shard_configuration(plan, options),
 		)
 	elif stage == "upload":
 		configuration.update(
@@ -614,6 +665,9 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			execute=True,
 		)
 	elif stage == "downsample":
+		resources = dataset_resources(plan, options, mips=(0, 3, 5))
+		if resources is None:
+			raise ValueError(f"MIP-0 resource metadata is missing: {plan.precomputed}")
 		module = importlib.import_module("mctutil.ng.downsample_pyramid")
 		module.downsample_pyramid.callback(
 			layer_path=str(plan.precomputed),
@@ -621,9 +675,10 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			initial_chunk=(64, 64, 64),
 			extend_chunk=(16, 16, 16),
 			max_extend_passes=3,
-			initial_parallel=16,
-			extend_parallel=16,
-			memory=options["memory"],
+			initial_parallel=resources.workers,
+			extend_parallel=resources.workers,
+			memory=options["downsample_memory"],
+			capacity_override=resources.shard_ceiling,
 			encoding=encoding,
 			lease_seconds=3600,
 			release_leases=options["release_queue_leases"],
@@ -631,6 +686,9 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			execute=True,
 		)
 	elif stage == "shard":
+		resources = dataset_resources(plan, options)
+		if resources is None:
+			raise ValueError(f"shard resource metadata is missing: {plan.precomputed}")
 		module = importlib.import_module("mctutil.ng.shard")
 		module.shard.callback(
 			source=str(plan.precomputed),
@@ -639,8 +697,8 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			low_chunk=(96, 96, 96),
 			mid_chunk=(64, 64, 64),
 			high_chunk=(16, 16, 16),
-			memory=options["memory"],
-			parallel=8,
+			capacity_override=resources.shard_ceiling,
+			parallel=resources.workers,
 			include_mip0=options["stage_include_mip0"],
 			encoding=encoding,
 			queue_dir=queue_root,
@@ -762,6 +820,13 @@ def publish_datasets(
 			f"State: {plan.state_path}",
 			log_level=LOG.DEBUG,
 		)
+		if not execute and {"downsample", "shard"} & set(selected_stages):
+			resources = dataset_resources(plan, options)
+			log_resource_plan(
+				"Publish Plan",
+				resources,
+				include_shards="shard" in selected_stages,
+			)
 		for stage in STAGES:
 			if stage not in selected_stages:
 				log.write(
@@ -848,8 +913,30 @@ def publish_datasets(
 	help="Last selected stage; starting at upload defaults to upload only.",
 )
 @click.option("--no-upload", is_flag=True, help="Explicitly omit upload from the range.")
-@click.option("--workers", type=click.IntRange(min=1), default=8, show_default=True)
-@click.option("--memory", type=click.IntRange(min=1), default=10_000_000_000, show_default=True)
+@click.option(
+	"--workers",
+	type=click.IntRange(min=1),
+	default=8,
+	show_default=True,
+	help="MIP-0 writers and maximum post-MIP-0 Igneous workers.",
+)
+@click.option(
+	"--downsample-memory",
+	"--memory",
+	"downsample_memory",
+	type=click.IntRange(min=1),
+	default=10_000_000_000,
+	show_default=True,
+	help="Igneous downsampling memory target in bytes.",
+)
+@click.option(
+	"--shard-capacity",
+	metavar="SIZE",
+	help=(
+		"Override the automatic 2/4/8 GiB uncompressed shard-capacity "
+		"ceiling; accepts bytes or a value such as 4GiB."
+	),
+)
 @click.option(
 	"--release-queue-leases/--preserve-queue-leases",
 	default=True,
@@ -900,7 +987,8 @@ def publish(
 	stop_after: str | None,
 	no_upload: bool,
 	workers: int,
-	memory: int,
+	downsample_memory: int,
+	shard_capacity: str | None,
 	release_queue_leases: bool,
 	upload_jobs: int,
 	mesh_parallel: int,
@@ -955,6 +1043,18 @@ def publish(
 			build_dataset_plan(dataset, needs_tiff)
 			for dataset in datasets
 		)
+		needs_post_mip_resources = bool(
+			{"downsample", "shard"} & set(selected_stages)
+		)
+		if needs_post_mip_resources:
+			memory_capacity, cpu_count = system_resources()
+			shard_capacity = (
+				parse_size(shard_capacity)
+				if shard_capacity is not None
+				else None
+			)
+		else:
+			memory_capacity, cpu_count = 0, 1
 		options = {
 			"s3_prefix": s3_prefix,
 			"selected_stages": selected_stages,
@@ -962,7 +1062,10 @@ def publish(
 			"no_upload": no_upload,
 			"aws_profile": aws_profile,
 			"workers": workers,
-			"memory": memory,
+			"downsample_memory": downsample_memory,
+			"shard_capacity": shard_capacity,
+			"memory_capacity": memory_capacity,
+			"cpu_count": cpu_count,
 			"release_queue_leases": release_queue_leases,
 			"upload_jobs": upload_jobs,
 			"mesh_parallel": mesh_parallel,

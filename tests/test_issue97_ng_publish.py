@@ -99,6 +99,14 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 		"import_module",
 		lambda name: modules[name],
 	)
+	monkeypatch.setattr(
+		module,
+		"dataset_resources",
+		lambda *_args, **_kwargs: types.SimpleNamespace(
+			shard_ceiling=2 * 1024 ** 3,
+			workers=2,
+		),
+	)
 	dataset = tmp_path / "cell_labels"
 	dataset.mkdir()
 	plan = types.SimpleNamespace(
@@ -115,7 +123,10 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 		"selected_stages": module.STAGES,
 		"aws_profile": "test-profile",
 		"workers": 2,
-		"memory": 123,
+		"downsample_memory": 123,
+		"shard_capacity": None,
+		"memory_capacity": 128 * 1024 ** 3,
+		"cpu_count": 32,
 		"release_queue_leases": True,
 		"segmentation_encoding": "compressed_segmentation",
 		"voxel_resolution": (700, 800, 900),
@@ -143,8 +154,13 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 	assert calls["downsample"][1]["layer_path"] == str(plan.precomputed)
 	assert calls["downsample"][1]["force"] is False
 	assert calls["downsample"][1]["release_leases"] is True
+	assert calls["downsample"][1]["initial_parallel"] == 2
+	assert calls["downsample"][1]["memory"] == 123
+	assert calls["downsample"][1]["capacity_override"] == 2 * 1024 ** 3
 	assert calls["shard"][1]["destination"] == str(plan.staged)
 	assert calls["shard"][1]["release_leases"] is True
+	assert calls["shard"][1]["capacity_override"] == 2 * 1024 ** 3
+	assert calls["shard"][1]["parallel"] == 2
 	assert calls["upload"][1]["aws_profile"] == "test-profile"
 	assert calls["mesh"][1]["aws_profile"] == "test-profile"
 

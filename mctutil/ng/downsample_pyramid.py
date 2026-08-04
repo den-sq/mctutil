@@ -8,6 +8,11 @@ from urllib.parse import unquote, urlparse
 import click
 
 from mctutil.ng.completeness import Mip0Completeness, check_mip0_completeness
+from mctutil.ng.resource_planning import (
+	log_resource_plan,
+	parse_size,
+	plan_resources,
+)
 from mctutil.shared.cli import XYZ
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
@@ -57,15 +62,13 @@ def default_queue_root(layer_path: str) -> Path:
 	return local_path / ".mctutil-queues"
 
 
-def inspect_volume(layer_path: str) -> tuple[str, str, int]:
+def inspect_volume(layer_path: str) -> dict:
 	CloudVolume, _task_creation = _require_dependencies()
 	volume = CloudVolume(normalize_layer_path(layer_path), parallel=False)
-	layer_type = volume.info.get("type", "image")
-	scales = volume.info.get("scales", [])
-	if not scales:
+	info = volume.info
+	if not info.get("scales", []):
 		raise ValueError("precomputed volume has no scales")
-	encoding = scales[0].get("encoding", "raw")
-	return layer_type, encoding, len(scales) - 1
+	return info
 
 
 def mip0_failure_message(completeness: Mip0Completeness) -> str:
@@ -216,7 +219,7 @@ def downsample_volume(
 		if pass_index < len(state["extensions"]):
 			extension = state["extensions"][pass_index]
 		else:
-			_layer_type, _source_encoding, source_mip = inspect_volume(layer_path)
+			source_mip = len(inspect_volume(layer_path)["scales"]) - 1
 			extension = {
 				"source_mip": source_mip,
 				"started": False,
@@ -252,7 +255,7 @@ def downsample_volume(
 			extension["complete"] = True
 			write_state(state_path, state)
 
-		_layer_type, _source_encoding, current_max_mip = inspect_volume(layer_path)
+		current_max_mip = len(inspect_volume(layer_path)["scales"]) - 1
 		if current_max_mip <= extension["source_mip"]:
 			log.write(
 				"Downsample",
@@ -289,6 +292,15 @@ def downsample_volume(
 @click.option("--extend-parallel", type=click.IntRange(min=1), default=16, show_default=True)
 @click.option("--memory", type=click.IntRange(min=1), default=10_000_000_000, show_default=True)
 @click.option(
+	"--shard-capacity",
+	"capacity_override",
+	metavar="SIZE",
+	help=(
+		"Override the automatic 2/4/8 GiB capacity ceiling used to size "
+		"post-MIP-0 worker concurrency."
+	),
+)
+@click.option(
 	"--encoding",
 	default="auto",
 	show_default=True,
@@ -317,6 +329,7 @@ def downsample_pyramid(
 	initial_parallel: int,
 	extend_parallel: int,
 	memory: int,
+	capacity_override: str | int | None,
 	encoding: str,
 	lease_seconds: int,
 	release_leases: bool,
@@ -325,26 +338,42 @@ def downsample_pyramid(
 ) -> None:
 	"""Build a volumetric MIP pyramid with durable task-level resume."""
 	try:
-		layer_type, source_encoding, max_mip = inspect_volume(layer_path)
+		info = inspect_volume(layer_path)
+		layer_type = info.get("type", "image")
+		scales = info["scales"]
+		source_encoding = scales[0].get("encoding", "raw")
 		if encoding == "auto":
 			encoding = "raw" if layer_type == "image" else source_encoding
 			if layer_type == "segmentation" and encoding == "raw":
 				encoding = "compressed_segmentation"
 		queue_dir = queue_dir or default_queue_root(layer_path)
-		for statement in (
-			f"Layer: {normalize_layer_path(layer_path)}",
+		if isinstance(capacity_override, str):
+			capacity_override = parse_size(capacity_override)
+		resources = plan_resources(
+			info,
+			(0, 3, 5),
+			max(initial_parallel, extend_parallel),
+			capacity_override=capacity_override,
+		)
+		initial_workers = min(
+			initial_parallel,
+			resources.cpu_limit,
+			resources.memory_limit,
+		)
+		extend_workers = min(
+			extend_parallel,
+			resources.cpu_limit,
+			resources.memory_limit,
+		)
+		log.write(
+			"Downsample",
 			(
-				f"Layer type: {layer_type}; encoding: {encoding}; "
-				f"current max mip: {max_mip}"
+				f"Plan: mip 0 at {initial_chunk}; up to {max_extend_passes} "
+				f"extension(s) at {extend_chunk}; queue={queue_dir.resolve()}."
 			),
-			f"Queue root: {queue_dir.resolve()}",
-			(
-				f"Plan: mip 0 at {initial_chunk}, then up to "
-				f"{max_extend_passes} extension pass(es) at {extend_chunk}; "
-				"factor=(2, 2, 2), compression=br"
-			),
-		):
-			log.write("Downsample", statement, log_level=LOG.INFO)
+			log_level=LOG.INFO,
+		)
+		log_resource_plan("Downsample", resources)
 		if not execute:
 			return
 		completeness = check_mip0_completeness(layer_path)
@@ -370,8 +399,8 @@ def downsample_pyramid(
 			initial_chunk,
 			extend_chunk,
 			max_extend_passes,
-			initial_parallel,
-			extend_parallel,
+			initial_workers,
+			extend_workers,
 			memory,
 			encoding,
 			lease_seconds,
