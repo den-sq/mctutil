@@ -16,6 +16,7 @@ import click
 
 from mctutil.ng.completeness import check_mip0_completeness
 from mctutil.ng.resource_planning import (
+	calculate_memory_reserve,
 	log_resource_plan,
 	parse_size,
 	plan_resources,
@@ -472,8 +473,11 @@ def stage_resource_prediction(
 		return None
 	mips = (0, 3, 5) if stage == "downsample" else None
 	resources = dataset_resources(plan, options, mips=mips)
+	capacity_multiplier = 1 if stage == "downsample" else 2
 	if resources is None:
 		return StagePrediction(
+			reserve=calculate_memory_reserve(options["memory_capacity"]),
+			capacity_multiplier=capacity_multiplier,
 			downsample_memory=(
 				options["downsample_memory"]
 				if stage == "downsample"
@@ -485,6 +489,8 @@ def stage_resource_prediction(
 		shards = tuple(shard for shard in shards if shard[0] != 0)
 	capacity = max((shard[3] for shard in shards), default=None)
 	return StagePrediction(
+		reserve=resources.memory_reserve,
+		capacity_multiplier=capacity_multiplier,
 		shard_capacity=capacity,
 		downsample_memory=(
 			options["downsample_memory"]
@@ -712,8 +718,8 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			initial_chunk=(64, 64, 64),
 			extend_chunk=(16, 16, 16),
 			max_extend_passes=3,
-			initial_parallel=resources.workers,
-			extend_parallel=resources.workers,
+			initial_parallel=resources.downsample_workers,
+			extend_parallel=resources.downsample_workers,
 			memory=options["downsample_memory"],
 			capacity_override=resources.shard_ceiling,
 			encoding=encoding,
@@ -735,7 +741,7 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			mid_chunk=(64, 64, 64),
 			high_chunk=(16, 16, 16),
 			capacity_override=resources.shard_ceiling,
-			parallel=resources.workers,
+			parallel=resources.shard_workers,
 			include_mip0=options["stage_include_mip0"],
 			encoding=encoding,
 			queue_dir=queue_root,
@@ -995,9 +1001,10 @@ def execute_publish(
 @click.option(
 	"--workers",
 	type=click.IntRange(min=1),
-	default=8,
-	show_default=True,
-	help="MIP-0 writers and maximum post-MIP-0 Igneous workers.",
+	help=(
+		"MIP-0 writers and maximum post-MIP-0 Igneous workers; defaults "
+		"to the available CPU count and cannot exceed it."
+	),
 )
 @click.option(
 	"--downsample-memory",
@@ -1065,7 +1072,7 @@ def publish(
 	start_at: str,
 	stop_after: str | None,
 	no_upload: bool,
-	workers: int,
+	workers: int | None,
 	downsample_memory: int,
 	shard_capacity: str | None,
 	release_queue_leases: bool,
@@ -1122,18 +1129,19 @@ def publish(
 			build_dataset_plan(dataset, needs_tiff)
 			for dataset in datasets
 		)
+		memory_capacity, cpu_count = system_resources()
+		workers = min(workers or cpu_count, cpu_count)
 		needs_post_mip_resources = bool(
 			{"downsample", "shard"} & set(selected_stages)
 		)
 		if needs_post_mip_resources:
-			memory_capacity, cpu_count = system_resources()
 			shard_capacity = (
 				parse_size(shard_capacity)
 				if shard_capacity is not None
 				else None
 			)
 		else:
-			memory_capacity, cpu_count = 0, 1
+			memory_capacity = 0
 		options = {
 			"s3_prefix": s3_prefix,
 			"selected_stages": selected_stages,

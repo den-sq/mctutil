@@ -71,7 +71,7 @@ def test_shard_dry_run_reports_per_mip_mapping(
 	assert "mips 5: 2 GiB at (16, 16, 16)" in result.output
 	assert "MIP 0=" in result.output
 	assert "shards=2 GiB ceiling" in result.output
-	assert "workers=8/8 requested" in result.output
+	assert "workers=downsample 8, shard 8/8 requested" in result.output
 	assert not destination.exists()
 
 

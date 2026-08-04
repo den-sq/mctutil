@@ -274,6 +274,8 @@ def test_stage_summary_includes_plan_and_downsample_target():
 		summary,
 		active_workers=4,
 		prediction=module.StagePrediction(
+			reserve=8 * GIB,
+			capacity_multiplier=1,
 			shard_capacity=2 * GIB,
 			downsample_memory=10_000_000_000,
 		),
@@ -283,7 +285,7 @@ def test_stage_summary_includes_plan_and_downsample_target():
 	assert "total peak=5.00 GiB (sampled peak)" in message
 	assert "effective workers=4" in message
 	assert "max shard capacity=2.00 GiB" in message
-	assert "16.00 GiB + 4 x 3 x 2.00 GiB = 40.00 GiB" in message
+	assert "8.00 GiB + 4 x 1 x 2.00 GiB = 16.00 GiB" in message
 	assert "Igneous downsample target=9.31 GiB" in message
 	assert "system-wide:" in message
 

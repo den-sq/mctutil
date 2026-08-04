@@ -358,12 +358,12 @@ def downsample_pyramid(
 		initial_workers = min(
 			initial_parallel,
 			resources.cpu_limit,
-			resources.memory_limit,
+			resources.downsample_memory_limit,
 		)
 		extend_workers = min(
 			extend_parallel,
 			resources.cpu_limit,
-			resources.memory_limit,
+			resources.downsample_memory_limit,
 		)
 		log.write(
 			"Downsample",

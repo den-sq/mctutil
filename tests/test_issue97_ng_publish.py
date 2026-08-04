@@ -104,7 +104,8 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 		"dataset_resources",
 		lambda *_args, **_kwargs: types.SimpleNamespace(
 			shard_ceiling=2 * 1024 ** 3,
-			workers=2,
+			downsample_workers=2,
+			shard_workers=2,
 		),
 	)
 	dataset = tmp_path / "cell_labels"
@@ -340,11 +341,16 @@ def test_start_at_upload_is_aws_only_and_resumable(
 	staged.mkdir()
 	(staged / "info").write_text('{"scales":[{}]}', encoding="utf-8")
 	monkeypatch.setattr(module, "module_available", lambda name: name == "boto3")
+	monkeypatch.setattr(
+		module,
+		"system_resources",
+		lambda: (32 * 1024 ** 3, 6),
+	)
 	calls = []
 	monkeypatch.setattr(
 		module,
 		"run_stage",
-		lambda stage, _plan, _options: calls.append(stage),
+		lambda stage, _plan, options: calls.append((stage, options["workers"])),
 	)
 
 	result = CliRunner().invoke(
@@ -359,7 +365,7 @@ def test_start_at_upload_is_aws_only_and_resumable(
 	assert result.exit_code == 0, result.output
 	assert "Selected stages: upload" in result.output
 	assert "Required extras: [aws]" in result.output
-	assert calls == ["upload"]
+	assert calls == [("upload", 6)]
 
 
 def test_publish_real_prep_precompute_and_resume(tmp_path, verbose_logging):
