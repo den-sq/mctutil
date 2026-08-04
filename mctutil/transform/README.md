@@ -16,6 +16,11 @@ Run `mctutil transform --help` to list commands and
 - **`reslice`** — Write XY, XZ, and YZ TIFF slices through a stack coordinate.
 - **`stack-split`** — Split a multi-page TIFF stack into one TIFF per Z slice.
 - **`stitch`** — Stitch samples vertically, scanning for overlap.
+- **`stitch-reconstructions`** — Join two reconstructed TIFF directories at
+  explicit half-open Z cuts (`A[:a_stop] + B[b_start:]`) without registration
+  or blending. Inputs are naturally ordered, output is transactionally written
+  as `slice_00000.tif`, and `--dtype` uses clip-then-cast conversion without
+  rescaling.
 - **`channelize`** — Write channelized (multi-channel) TIFF output.
 - **`denoise`** — Block-based denoising by intensity-difference threshold.
 - **`find-bounds`** — Scan a TIFF stack for global min/max intensity bounds.

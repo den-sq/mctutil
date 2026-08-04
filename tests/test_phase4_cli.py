@@ -17,7 +17,16 @@ def test_mctutil_root_help_lists_category_groups():
 def test_transform_group_help_lists_unified_commands():
 	result = CliRunner().invoke(main, ["transform", "--help"])
 	assert result.exit_code == 0, result.output
-	for name in ["normalize", "trim", "transpose", "flip", "reslice", "gunzip", "strip-gz-suffix"]:
+	for name in [
+		"normalize",
+		"trim",
+		"transpose",
+		"flip",
+		"reslice",
+		"stitch-reconstructions",
+		"gunzip",
+		"strip-gz-suffix",
+	]:
 		assert name in result.output
 
 

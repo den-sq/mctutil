@@ -100,8 +100,8 @@ Each category has its own README with the full command breakdown; run
 
 - [`transform`](mctutil/transform/README.md) — TIFF-stack transforms (trim,
   normalize, transpose, convert, downsample, find-bounds, denoise, stitch,
-  decompress-tiff / strip-gz-suffix / gunzip, hdf-convert / h5-convert /
-  raw-convert, stack-split, …)
+  stitch-reconstructions, decompress-tiff / strip-gz-suffix / gunzip,
+  hdf-convert / h5-convert / raw-convert, stack-split, …)
 - [`sino`](mctutil/sino/README.md) — sinogram conversion
   (`sino convert --mode full|preproc`)
 - [`ng`](mctutil/ng/README.md) — Neuroglancer JSON, layer, and annotation
