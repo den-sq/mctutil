@@ -33,9 +33,7 @@ _ISOLATED_CGROUP_MARKERS = (
 	"containerd",
 	"libpod",
 	"lxc",
-	"machine.slice",
 	"mctutil",
-	"slurm",
 )
 
 
@@ -204,6 +202,25 @@ def _system_context(proc_root: Path = Path("/proc")) -> SystemContext:
 	)
 
 
+def _isolated_cgroup_path(relative: str) -> bool:
+	"""Recognize workload scopes without accepting shared Slurm/machine roots."""
+	path_text = f"/{relative}".lower()
+	parts = tuple(part for part in path_text.split("/") if part)
+	container_or_owned_scope = any(
+		marker in path_text
+		for marker in _ISOLATED_CGROUP_MARKERS
+	)
+	machine_scope = "machine.slice" in parts and any(
+		part.startswith("machine-") and part.endswith(".scope")
+		for part in parts
+	)
+	slurm_job = "slurm" in path_text and any(
+		part.startswith(("job_", "job-"))
+		for part in parts
+	)
+	return container_or_owned_scope or machine_scope or slurm_job
+
+
 def _cgroup_directory(
 	pid: int,
 	proc_root: Path = Path("/proc"),
@@ -223,11 +240,7 @@ def _cgroup_directory(
 	directory = cgroup_root / relative
 	if not (directory / "memory.current").is_file():
 		return None
-	path_text = f"/{relative}".lower()
-	marked_isolated = any(
-		marker in path_text
-		for marker in _ISOLATED_CGROUP_MARKERS
-	)
+	marked_isolated = _isolated_cgroup_path(relative)
 	limit_text = None
 	try:
 		limit_text = (directory / "memory.max").read_text(

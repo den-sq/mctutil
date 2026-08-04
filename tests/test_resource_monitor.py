@@ -79,6 +79,39 @@ def test_cgroup_selection_requires_an_isolated_workload(tmp_path):
 	assert module._cgroup_directory(pid, proc_root, cgroup_root) == cgroup_root
 
 
+def test_cgroup_selection_rejects_shared_slurm_and_machine_slices(tmp_path):
+	proc_root = tmp_path / "proc"
+	cgroup_root = tmp_path / "cgroup"
+	pid = 123
+
+	for relative in (
+		"slurm",
+		"system.slice/slurmctld.service",
+		"machine.slice",
+	):
+		write(proc_root / str(pid) / "cgroup", f"0::/{relative}\n")
+		directory = cgroup_root / relative
+		write(directory / "memory.current", "100\n")
+		write(directory / "memory.max", "max\n")
+		assert module._cgroup_directory(pid, proc_root, cgroup_root) is None
+
+
+def test_cgroup_selection_accepts_specific_slurm_job_and_machine_scope(tmp_path):
+	proc_root = tmp_path / "proc"
+	cgroup_root = tmp_path / "cgroup"
+	pid = 123
+
+	for relative in (
+		"slurm/uid_1000/job_42/step_0",
+		"machine.slice/machine-worker.scope",
+	):
+		write(proc_root / str(pid) / "cgroup", f"0::/{relative}\n")
+		directory = cgroup_root / relative
+		write(directory / "memory.current", "100\n")
+		write(directory / "memory.max", "max\n")
+		assert module._cgroup_directory(pid, proc_root, cgroup_root) == directory
+
+
 def test_cgroup_sampler_reports_memory_categories_and_system_context(tmp_path):
 	proc_root = tmp_path / "proc"
 	cgroup = tmp_path / "cgroup"
