@@ -16,6 +16,7 @@ import traceback
 
 from mctutil.shared.igneous_output import igneous_output_session
 from mctutil.shared.log import log, LOG
+from mctutil.shared.resource_monitor import record_active_workers
 
 
 class QueueDrainError(RuntimeError):
@@ -430,6 +431,7 @@ def _drain_with_progress(
 ) -> QueueCompletionMonitor:
 	initial = min(total, int(queue.completed or 0))
 	active_parallel = min(parallel, max(1, total - initial))
+	record_active_workers(active_parallel)
 	worker_events = []
 	monitor = None
 	try:

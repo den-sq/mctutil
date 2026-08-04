@@ -255,6 +255,43 @@ def test_missing_dependencies_abort_before_state_write(
 	assert not (dataset / ".mctutil_ng_publish.json").exists()
 
 
+def test_publish_continues_when_resource_accounting_is_unavailable(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/ng/publish.py")
+	root = tmp_path / "root"
+	root.mkdir()
+	make_dataset(root)
+	calls = []
+
+	class UnavailableMonitor:
+		enabled = False
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *_args):
+			return False
+
+	monkeypatch.setattr(module, "module_available", lambda _name: True)
+	monkeypatch.setattr(module, "PublishResourceMonitor", UnavailableMonitor)
+	monkeypatch.setattr(
+		module,
+		"run_stage",
+		lambda stage, _plan, _options: calls.append(stage),
+	)
+
+	result = CliRunner().invoke(
+		module.publish,
+		[str(root), "--stop-after", "precompute"],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert calls == ["precompute"]
+
+
 def test_no_upload_records_omitted_separately_from_complete(
 	load_module,
 	tmp_path,

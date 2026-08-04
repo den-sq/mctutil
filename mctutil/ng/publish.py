@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -29,6 +30,10 @@ from mctutil.shared.persistent_queue import (
 	read_state,
 	stable_fingerprint,
 	write_state,
+)
+from mctutil.shared.resource_monitor import (
+	PublishResourceMonitor,
+	StagePrediction,
 )
 
 
@@ -457,6 +462,38 @@ def dataset_resources(
 	)
 
 
+def stage_resource_prediction(
+	stage: str,
+	plan: DatasetPlan,
+	options: dict,
+) -> StagePrediction | None:
+	"""Return the resource-plan terms that apply to an executing stage."""
+	if stage not in {"downsample", "shard"}:
+		return None
+	mips = (0, 3, 5) if stage == "downsample" else None
+	resources = dataset_resources(plan, options, mips=mips)
+	if resources is None:
+		return StagePrediction(
+			downsample_memory=(
+				options["downsample_memory"]
+				if stage == "downsample"
+				else None
+			),
+		)
+	shards = resources.shards
+	if stage == "shard" and not options["stage_include_mip0"]:
+		shards = tuple(shard for shard in shards if shard[0] != 0)
+	capacity = max((shard[3] for shard in shards), default=None)
+	return StagePrediction(
+		shard_capacity=capacity,
+		downsample_memory=(
+			options["downsample_memory"]
+			if stage == "downsample"
+			else None
+		),
+	)
+
+
 def shard_configuration(plan: DatasetPlan, options: dict) -> dict:
 	"""Return only output-affecting shard settings for resume state."""
 	resources = dataset_resources(plan, options)
@@ -807,6 +844,7 @@ def publish_datasets(
 	selected_stages: tuple[str, ...],
 	options: dict,
 	execute: bool,
+	resource_monitor: PublishResourceMonitor | None = None,
 ) -> None:
 	for plan in plans:
 		state = load_dataset_state(plan)
@@ -879,12 +917,27 @@ def publish_datasets(
 					state["updated_at"] = utc_now()
 					write_state(plan.state_path, state)
 				continue
-			log.write(
-				"Publish",
-				f"Running {stage} for {plan.dataset.name}.",
-				log_level=LOG.STATUS,
+			prediction = (
+				None
+				if resource_monitor is None
+				else stage_resource_prediction(stage, plan, options)
 			)
-			run_stage(stage, plan, options)
+			resource_context = (
+				nullcontext()
+				if resource_monitor is None
+				else resource_monitor.stage(
+					stage,
+					prediction,
+					dataset=plan.dataset.name,
+				)
+			)
+			with resource_context:
+				log.write(
+					"Publish",
+					f"Running {stage} for {plan.dataset.name}.",
+					log_level=LOG.STATUS,
+				)
+				run_stage(stage, plan, options)
 			state["stages"][stage] = {
 				"status": "complete",
 				"configuration": configuration,
@@ -897,6 +950,32 @@ def publish_datasets(
 			f"Completed selected stages for {plan.dataset.name}.",
 			log_level=LOG.STATUS,
 		)
+
+
+def execute_publish(
+	plans: tuple[DatasetPlan, ...],
+	selected_stages: tuple[str, ...],
+	options: dict,
+	execute: bool,
+) -> None:
+	"""Run publish with workload accounting only for actual execution."""
+	if not execute:
+		publish_datasets(plans, selected_stages, options, execute)
+		return
+
+	with PublishResourceMonitor() as resource_monitor:
+		if not resource_monitor.enabled:
+			publish_datasets(plans, selected_stages, options, execute)
+			return
+		with log.resource_columns(resource_monitor.columns):
+			resource_monitor.announce()
+			publish_datasets(
+				plans,
+				selected_stages,
+				options,
+				execute,
+				resource_monitor=resource_monitor,
+			)
 
 
 @click.command("publish")
@@ -1096,7 +1175,7 @@ def publish(
 				"missing dependencies; "
 				f"install with {install_command(extras)}"
 			)
-		publish_datasets(plans, selected_stages, options, execute)
+		execute_publish(plans, selected_stages, options, execute)
 	except click.ClickException:
 		raise
 	except Exception as exc:

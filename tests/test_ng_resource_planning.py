@@ -268,6 +268,27 @@ def test_publish_keeps_full_mip0_workers_and_caps_later_stages(
 	assert calls["shard"]["capacity_override"] == 8 * GIB
 
 
+def test_stage_prediction_uses_actual_shard_payload_and_separate_target(
+	load_module,
+	tmp_path,
+):
+	module = load_module("mctutil/ng/publish.py")
+	plan = publish_plan(tmp_path, logical_bytes=256 * GIB)
+	options = publish_options(module, shard_capacity=2 * GIB)
+
+	downsample = module.stage_resource_prediction("downsample", plan, options)
+	shard = module.stage_resource_prediction("shard", plan, options)
+
+	resources = module.dataset_resources(plan, options, mips=(0, 3, 5))
+	assert resources is not None
+	assert downsample.shard_capacity == max(
+		entry[3] for entry in resources.shards
+	)
+	assert downsample.downsample_memory == 10_000_000_000
+	assert shard.shard_capacity is not None
+	assert shard.downsample_memory is None
+
+
 def test_shard_resume_fingerprint_ignores_workers_but_tracks_capacity(
 	load_module,
 	tmp_path,

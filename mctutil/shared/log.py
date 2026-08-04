@@ -20,6 +20,7 @@ Module-level singleton: `log = Logger()`. Idiomatic import shape is
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from enum import IntFlag
 from functools import reduce
@@ -184,11 +185,13 @@ class ProgressHandle:
 class Logger:
 	"""Bitmask-filtered structured logger.
 
-	Each line has shape `TYPE|STEP|TIMESTAMP|MEM_USE|MEM_FREE|STATEMENT` and is
+	Each line has shape `TYPE|STEP|TIMESTAMP|MEMORY_1|MEMORY_2|STATEMENT` and is
 	dispatched via per-destination masks: `__log_screen` (a `{stdout, stderr}`
 	dict, each value a LOG mask) and `__logs` (a `{name: (Path, LOG)}` dict for
-	named file destinations). A level emits to a destination iff its bit is set
-	in that destination's mask.
+	named file destinations). The default columns retain parent VMS and system
+	available memory; a command can temporarily provide accurately named
+	workload columns. A level emits to a destination iff its bit is set in that
+	destination's mask.
 	"""
 
 	def __init__(self, log_screen=None, log_files=None):
@@ -202,6 +205,7 @@ class Logger:
 		# ``set_log_file()`` so we don't allocate a path at import time.
 		self.__logs = log_files if log_files is not None else {}
 		self.__pid = psutil.Process().pid
+		self.__resource_provider = None
 
 	def set_screen(self, stdout_mask=None, stderr_mask=None):
 		"""Replace per-stream LOG masks. ``None`` leaves a stream unchanged."""
@@ -235,9 +239,43 @@ class Logger:
 		if func not in self.__attached_funcs:
 			self.__attached_funcs.append(func)
 
+	@contextmanager
+	def resource_columns(self, provider):
+		"""Temporarily source the two memory columns from ``provider``.
+
+		The provider returns ``(current_label, current_bytes, peak_label,
+		peak_bytes)``. Commands that do not opt in retain the historical parent
+		VMS and system-available columns.
+		"""
+		previous = self.__resource_provider
+		self.__resource_provider = provider
+		try:
+			yield
+		finally:
+			self.__resource_provider = previous
+
+	def _resource_values(self):
+		if self.__resource_provider is not None:
+			try:
+				return self.__resource_provider()
+			except Exception:
+				# Resource accounting is diagnostic and must never stop work.
+				pass
+		mib = 1024 ** 2
+		return (
+			"MEM USAGE",
+			(psutil.Process().memory_info().vms // mib) * mib,
+			"MEM FREE",
+			(psutil.virtual_memory().available // mib) * mib,
+		)
+
 	def header(self, out=None):
 		"""Write a column-header line to all configured screens and files."""
-		header_message = f'{"TYPE":6}|{"STEP":20}|   TIMESTAMP   |MEM USAGE|MEM FREE | STATEMENT '
+		current_label, _current, peak_label, _peak = self._resource_values()
+		header_message = (
+			f'{"TYPE":6}|{"STEP":20}|   TIMESTAMP   '
+			f'|{current_label[:9]:9}|{peak_label[:9]:9}| STATEMENT '
+		)
 		self.__special_write(header_message, out)
 
 	def footer(self, out=None, error=None):
@@ -330,11 +368,12 @@ class Logger:
 
 	def __log_message(self, step, statement='', log_level=LOG.TIME):
 		styled_type = click.style(f'{log_level.name:6}', log_level.color)
+		_current_label, current, _peak_label, peak = self._resource_values()
 		return (f'{styled_type}'
 				f'|{step[:20]:20}'
 				f'|{str(datetime.now() - self.script_start).zfill(15)}'
-				f'|{psutil.Process().memory_info().vms // 1024 ** 2:09.2f}MB'
-				f'|{psutil.virtual_memory().available // 1024 ** 2:09.2f}MB'
+				f'|{current / 1024 ** 2:09.2f}MB'
+				f'|{peak / 1024 ** 2:09.2f}MB'
 				f'|"{statement}"')
 
 	def __special_write(self, message, out=None):

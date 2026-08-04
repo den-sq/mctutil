@@ -17,6 +17,7 @@ from mctutil.shared.aws import (
 )
 from mctutil.shared.log import log, LOG
 from mctutil.shared.mesh import build_mesh
+from mctutil.shared.resource_monitor import record_active_workers
 
 _sessions = {}
 SYNC_STATUSES = ("planned", "skipped", "uploaded")
@@ -367,6 +368,7 @@ def _execute_sync_groups(
 	if not groups:
 		return summary
 	max_workers = min(len(groups), jobs + 1)
+	record_active_workers(max_workers)
 	try:
 		with ThreadPoolExecutor(max_workers=max_workers) as executor:
 			pending = {
