@@ -9,11 +9,9 @@ import click
 
 from mctutil.ng.completeness import Mip0Completeness, check_mip0_completeness
 from mctutil.ng.resource_planning import (
-	format_binary_size,
-	logical_mip0_bytes,
-	parse_binary_size,
-	plan_shard_capacities,
-	plan_worker_limit,
+	log_resource_plan,
+	parse_size,
+	plan_resources,
 )
 from mctutil.shared.cli import XYZ
 from mctutil.shared.igneous_output import (
@@ -64,32 +62,13 @@ def default_queue_root(layer_path: str) -> Path:
 	return local_path / ".mctutil-queues"
 
 
-def parse_capacity(_context, _parameter, value: str | None) -> int | None:
-	if value is None:
-		return None
-	try:
-		return parse_binary_size(value)
-	except ValueError as exc:
-		raise click.BadParameter(str(exc)) from exc
-
-
-def inspect_volume_info(layer_path: str) -> dict:
+def inspect_volume(layer_path: str) -> dict:
 	CloudVolume, _task_creation = _require_dependencies()
 	volume = CloudVolume(normalize_layer_path(layer_path), parallel=False)
 	info = volume.info
 	if not info.get("scales", []):
 		raise ValueError("precomputed volume has no scales")
 	return info
-
-
-def inspect_volume(layer_path: str) -> tuple[str, str, int]:
-	info = inspect_volume_info(layer_path)
-	layer_type = info.get("type", "image")
-	scales = info["scales"]
-	if not scales:
-		raise ValueError("precomputed volume has no scales")
-	encoding = scales[0].get("encoding", "raw")
-	return layer_type, encoding, len(scales) - 1
 
 
 def mip0_failure_message(completeness: Mip0Completeness) -> str:
@@ -240,7 +219,7 @@ def downsample_volume(
 		if pass_index < len(state["extensions"]):
 			extension = state["extensions"][pass_index]
 		else:
-			_layer_type, _source_encoding, source_mip = inspect_volume(layer_path)
+			source_mip = len(inspect_volume(layer_path)["scales"]) - 1
 			extension = {
 				"source_mip": source_mip,
 				"started": False,
@@ -276,7 +255,7 @@ def downsample_volume(
 			extension["complete"] = True
 			write_state(state_path, state)
 
-		_layer_type, _source_encoding, current_max_mip = inspect_volume(layer_path)
+		current_max_mip = len(inspect_volume(layer_path)["scales"]) - 1
 		if current_max_mip <= extension["source_mip"]:
 			log.write(
 				"Downsample",
@@ -289,54 +268,6 @@ def downsample_volume(
 
 	state["complete"] = True
 	write_state(state_path, state)
-
-
-def describe_downsample_plan(
-	layer_path: str,
-	layer_type: str,
-	encoding: str,
-	max_mip: int,
-	queue_dir: Path,
-	initial_chunk: tuple[int, int, int],
-	extend_chunk: tuple[int, int, int],
-	max_extend_passes: int,
-	logical_bytes: int,
-	capacity_ceiling: int,
-	capacity_budget: int,
-	initial_workers,
-	extend_workers,
-) -> None:
-	for statement in (
-		f"Layer: {normalize_layer_path(layer_path)}",
-		(
-			f"Layer type: {layer_type}; encoding: {encoding}; "
-			f"current max mip: {max_mip}"
-		),
-		f"Queue root: {queue_dir.resolve()}",
-		(
-			f"Plan: mip 0 at {initial_chunk}, then up to "
-			f"{max_extend_passes} extension pass(es) at {extend_chunk}; "
-			"factor=(2, 2, 2), compression=br"
-		),
-		(
-			f"Logical MIP 0: {format_binary_size(logical_bytes)}; "
-			f"shard-capacity ceiling: {format_binary_size(capacity_ceiling)}; "
-			f"worker capacity budget: {format_binary_size(capacity_budget)}"
-		),
-		(
-			f"Available RAM: "
-			f"{format_binary_size(initial_workers.available_ram)}; "
-			f"reserve: {format_binary_size(initial_workers.reserve)}; "
-			f"worker ceilings initial={initial_workers.requested_limit}/"
-			f"{initial_workers.cpu_limit}/{initial_workers.memory_limit}, "
-			f"extension={extend_workers.requested_limit}/"
-			f"{extend_workers.cpu_limit}/{extend_workers.memory_limit}; "
-			f"selected={initial_workers.workers}/{extend_workers.workers}"
-		),
-	):
-		log.write("Downsample", statement, log_level=LOG.INFO)
-	for warning in {initial_workers.warning, extend_workers.warning} - {None}:
-		log.write("Downsample", f"Warning: {warning}", log_level=LOG.WARN)
 
 
 @click.command("downsample-pyramid")
@@ -363,7 +294,6 @@ def describe_downsample_plan(
 @click.option(
 	"--shard-capacity",
 	"capacity_override",
-	callback=parse_capacity,
 	metavar="SIZE",
 	help=(
 		"Override the automatic 2/4/8 GiB capacity ceiling used to size "
@@ -399,7 +329,7 @@ def downsample_pyramid(
 	initial_parallel: int,
 	extend_parallel: int,
 	memory: int,
-	capacity_override: int | None,
+	capacity_override: str | int | None,
 	encoding: str,
 	lease_seconds: int,
 	release_leases: bool,
@@ -408,41 +338,42 @@ def downsample_pyramid(
 ) -> None:
 	"""Build a volumetric MIP pyramid with durable task-level resume."""
 	try:
-		info = inspect_volume_info(layer_path)
+		info = inspect_volume(layer_path)
 		layer_type = info.get("type", "image")
 		scales = info["scales"]
 		source_encoding = scales[0].get("encoding", "raw")
-		max_mip = len(scales) - 1
 		if encoding == "auto":
 			encoding = "raw" if layer_type == "image" else source_encoding
 			if layer_type == "segmentation" and encoding == "raw":
 				encoding = "compressed_segmentation"
 		queue_dir = queue_dir or default_queue_root(layer_path)
-		logical_bytes = logical_mip0_bytes(info)
-		capacity_plan = plan_shard_capacities(
+		if isinstance(capacity_override, str):
+			capacity_override = parse_size(capacity_override)
+		resources = plan_resources(
 			info,
 			(0, 3, 5),
-			capacity_override,
+			max(initial_parallel, extend_parallel),
+			capacity_override=capacity_override,
 		)
-		capacity_ceiling = capacity_plan.capacity_ceiling
-		capacity_budget = capacity_plan.maximum_actual_capacity
-		initial_workers = plan_worker_limit(initial_parallel, capacity_budget)
-		extend_workers = plan_worker_limit(extend_parallel, capacity_budget)
-		describe_downsample_plan(
-			layer_path,
-			layer_type,
-			encoding,
-			max_mip,
-			queue_dir,
-			initial_chunk,
-			extend_chunk,
-			max_extend_passes,
-			logical_bytes,
-			capacity_ceiling,
-			capacity_budget,
-			initial_workers,
-			extend_workers,
+		initial_workers = min(
+			initial_parallel,
+			resources.cpu_limit,
+			resources.memory_limit,
 		)
+		extend_workers = min(
+			extend_parallel,
+			resources.cpu_limit,
+			resources.memory_limit,
+		)
+		log.write(
+			"Downsample",
+			(
+				f"Plan: mip 0 at {initial_chunk}; up to {max_extend_passes} "
+				f"extension(s) at {extend_chunk}; queue={queue_dir.resolve()}."
+			),
+			log_level=LOG.INFO,
+		)
+		log_resource_plan("Downsample", resources)
 		if not execute:
 			return
 		completeness = check_mip0_completeness(layer_path)
@@ -468,8 +399,8 @@ def downsample_pyramid(
 			initial_chunk,
 			extend_chunk,
 			max_extend_passes,
-			initial_workers.workers,
-			extend_workers.workers,
+			initial_workers,
+			extend_workers,
 			memory,
 			encoding,
 			lease_seconds,

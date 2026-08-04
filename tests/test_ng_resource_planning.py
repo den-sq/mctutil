@@ -14,7 +14,6 @@ TIB = 1024 ** 4
 
 
 def volume_info(logical_bytes: int, scale_count: int = 6) -> dict:
-	voxel_count = logical_bytes // 2
 	return {
 		"type": "image",
 		"data_type": "uint16",
@@ -22,12 +21,28 @@ def volume_info(logical_bytes: int, scale_count: int = 6) -> dict:
 		"scales": [
 			{
 				"key": str(mip),
-				"size": [voxel_count, 1, 1],
+				"size": [logical_bytes // 2, 1, 1],
 				"encoding": "raw",
 			}
 			for mip in range(scale_count)
 		],
 	}
+
+
+def resources(
+	logical_bytes: int,
+	capacity: int | None = None,
+	available_ram: int = 126_000_000_000,
+	cpu_limit: int = 64,
+):
+	return resource_planning.plan_resources(
+		volume_info(logical_bytes),
+		(0, 3, 5),
+		32,
+		capacity_override=capacity,
+		available_ram=available_ram,
+		cpu_limit=cpu_limit,
+	)
 
 
 @pytest.mark.parametrize(
@@ -43,7 +58,20 @@ def test_shard_capacity_tiers_include_their_upper_bound(
 	logical_bytes,
 	capacity,
 ):
-	assert resource_planning.select_shard_capacity(logical_bytes) == capacity
+	info = {
+		"data_type": "uint8",
+		"num_channels": 1,
+		"scales": [{"size": [logical_bytes, 1, 1]}],
+	}
+	plan = resource_planning.plan_resources(
+		info,
+		(0, 3, 5),
+		32,
+		available_ram=126_000_000_000,
+		cpu_limit=64,
+	)
+
+	assert plan.shard_ceiling == capacity
 
 
 @pytest.mark.parametrize(
@@ -58,17 +86,13 @@ def test_shard_targets_are_largest_power_of_two_chunk_payloads(
 	ceiling,
 	expected,
 ):
-	plan = resource_planning.plan_shard_capacities(
-		volume_info(1 * GIB),
-		(0, 3, 5),
-		capacity_override=ceiling,
-	)
+	plan = resources(GIB, capacity=ceiling)
 
-	assert tuple(scale.capacity for scale in plan.scales) == expected
-	for scale in plan.scales:
-		assert scale.chunks_per_shard & (scale.chunks_per_shard - 1) == 0
-		assert scale.capacity <= ceiling
-		assert 2 * scale.capacity > ceiling
+	assert tuple(shard[3] for shard in plan.shards) == expected
+	for _mip, _chunk, count, capacity in plan.shards:
+		assert count & (count - 1) == 0
+		assert capacity <= ceiling
+		assert 2 * capacity > ceiling
 
 
 def test_logical_size_accounts_for_dtype_and_channels():
@@ -77,8 +101,15 @@ def test_logical_size_accounts_for_dtype_and_channels():
 		"num_channels": 3,
 		"scales": [{"size": [10, 20, 30]}],
 	}
+	plan = resource_planning.plan_resources(
+		info,
+		(0,),
+		1,
+		available_ram=64 * GIB,
+		cpu_limit=1,
+	)
 
-	assert resource_planning.logical_mip0_bytes(info) == 10 * 20 * 30 * 4 * 3
+	assert plan.logical_bytes == 10 * 20 * 30 * 4 * 3
 
 
 @pytest.mark.parametrize(
@@ -90,75 +121,55 @@ def test_logical_size_accounts_for_dtype_and_channels():
 	),
 )
 def test_binary_size_override_accepts_bytes_and_units(value, expected):
-	assert resource_planning.parse_binary_size(value) == expected
+	assert resource_planning.parse_size(value) == expected
 
 
 @pytest.mark.parametrize(
 	("capacity", "workers"),
-	(
-		(2 * GIB, 16),
-		(4 * GIB, 8),
-		(8 * GIB, 4),
-	),
+	((2 * GIB, 16), (4 * GIB, 8), (8 * GIB, 4)),
 )
 def test_worker_limit_scales_conservatively_with_shard_capacity(
 	capacity,
 	workers,
 ):
-	plan = resource_planning.plan_worker_limit(
-		requested_limit=32,
-		capacity_budget=capacity,
-		available_ram=126_000_000_000,
-		cpu_limit=64,
-	)
-
-	assert plan.workers == workers
+	assert resources(GIB, capacity=capacity).workers == workers
 
 
 def test_worker_limit_honors_cpu_user_and_low_memory_bounds():
-	assert resource_planning.plan_worker_limit(
+	user_limited = resource_planning.plan_resources(
+		volume_info(GIB),
+		(0, 3, 5),
 		3,
-		2 * GIB,
 		available_ram=256 * GIB,
-		cpu_limit=64,
-	).workers == 3
-	assert resource_planning.plan_worker_limit(
-		32,
-		2 * GIB,
-		available_ram=256 * GIB,
-		cpu_limit=6,
-	).workers == 6
-
-	low_memory = resource_planning.plan_worker_limit(
-		32,
-		2 * GIB,
-		available_ram=16 * GIB,
 		cpu_limit=64,
 	)
+	cpu_limited = resources(GIB, available_ram=256 * GIB, cpu_limit=6)
+	low_memory = resources(GIB, available_ram=16 * GIB)
+
+	assert user_limited.workers == 3
+	assert cpu_limited.workers == 6
 	assert low_memory.workers == 1
 	assert low_memory.warning is not None
 
 
-def test_cgroup_available_memory_is_limit_minus_current(tmp_path):
+def test_system_resources_honors_cgroup_memory_and_cpu_affinity(
+	tmp_path,
+	monkeypatch,
+):
 	(tmp_path / "memory.max").write_text(str(64 * GIB), encoding="utf-8")
 	(tmp_path / "memory.current").write_text(str(16 * GIB), encoding="utf-8")
-
-	assert resource_planning.cgroup_available_ram(tmp_path) == 48 * GIB
-
-
-def test_effective_available_memory_uses_lower_cgroup_value(monkeypatch):
 	monkeypatch.setattr(
 		resource_planning.psutil,
 		"virtual_memory",
 		lambda: types.SimpleNamespace(available=128 * GIB),
 	)
 	monkeypatch.setattr(
-		resource_planning,
-		"cgroup_available_ram",
-		lambda: 48 * GIB,
+		resource_planning.os,
+		"sched_getaffinity",
+		lambda _pid: set(range(8)),
 	)
 
-	assert resource_planning.system_available_ram() == 48 * GIB
+	assert resource_planning.system_resources(tmp_path) == (48 * GIB, 8)
 
 
 def write_info(path: Path, logical_bytes: int) -> None:
@@ -169,7 +180,7 @@ def write_info(path: Path, logical_bytes: int) -> None:
 	)
 
 
-def publish_plan(module, tmp_path, logical_bytes=2 * TIB):
+def publish_plan(tmp_path, logical_bytes=2 * TIB):
 	dataset = tmp_path / "sample"
 	dataset.mkdir()
 	precomputed = tmp_path / "sample_precomputed"
@@ -220,7 +231,7 @@ def test_publish_keeps_full_mip0_workers_and_caps_later_stages(
 	monkeypatch,
 ):
 	module = load_module("mctutil/ng/publish.py")
-	plan = publish_plan(module, tmp_path)
+	plan = publish_plan(tmp_path)
 	options = publish_options(module)
 	calls = {}
 
@@ -262,7 +273,7 @@ def test_shard_resume_fingerprint_ignores_workers_but_tracks_capacity(
 	tmp_path,
 ):
 	module = load_module("mctutil/ng/publish.py")
-	plan = publish_plan(module, tmp_path, logical_bytes=256 * GIB)
+	plan = publish_plan(tmp_path, logical_bytes=256 * GIB)
 	options = publish_options(module)
 
 	baseline = module.stage_configuration("shard", plan, options)

@@ -8,17 +8,17 @@ from click.testing import CliRunner
 import numpy as np
 import pytest
 
+from mctutil.ng.resource_planning import plan_resources
 
-def fixed_worker_plan(requested, _capacity):
-	return types.SimpleNamespace(
+
+def fixed_resource_plan(info, mips, requested, **kwargs):
+	return plan_resources(
+		info,
+		mips,
+		requested,
+		capacity_override=kwargs.get("capacity_override"),
 		available_ram=128 * 1024 ** 3,
-		reserve=16 * 1024 ** 3,
-		capacity_budget=_capacity,
-		memory_limit=requested,
 		cpu_limit=requested,
-		requested_limit=requested,
-		workers=requested,
-		warning=None,
 	)
 
 
@@ -53,7 +53,7 @@ def test_downsample_dry_run_reports_two_pass_plan(
 	module = load_module("mctutil/ng/downsample_pyramid.py")
 	dependencies = (FakeVolume, types.SimpleNamespace())
 	monkeypatch.setattr(module, "_require_dependencies", lambda: dependencies)
-	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
+	monkeypatch.setattr(module, "plan_resources", fixed_resource_plan)
 	layer = tmp_path / "layer"
 	layer.mkdir()
 
@@ -65,7 +65,7 @@ def test_downsample_dry_run_reports_two_pass_plan(
 	assert result.exit_code == 0, result.output
 	assert "(64, 64, 64)" in result.output
 	assert "(16, 16, 16)" in result.output
-	assert "factor=(2, 2, 2)" in result.output
+	assert "Resources:" in result.output
 	assert not (layer / ".mctutil-queues").exists()
 
 
@@ -82,7 +82,7 @@ def test_downsample_uses_persistent_pass_state(load_module, tmp_path, monkeypatc
 	task_creation = types.SimpleNamespace(create_downsampling_tasks=create_tasks)
 	monkeypatch.setattr(module, "_require_dependencies", lambda: (FakeVolume, task_creation))
 	monkeypatch.setattr(module, "check_mip0_completeness", lambda _path: complete_mip0())
-	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
+	monkeypatch.setattr(module, "plan_resources", fixed_resource_plan)
 
 	def run_tasks(
 		queue_path,

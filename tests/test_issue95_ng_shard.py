@@ -8,17 +8,20 @@ from click.testing import CliRunner
 import numpy as np
 import pytest
 
+from mctutil.ng.resource_planning import plan_resources
 
-def fixed_worker_plan(requested, _capacity):
-	return types.SimpleNamespace(
+
+def fixed_resource_plan(info, mips, requested, **kwargs):
+	return plan_resources(
+		info,
+		mips,
+		requested,
+		capacity_override=kwargs.get("capacity_override"),
 		available_ram=128 * 1024 ** 3,
-		reserve=16 * 1024 ** 3,
-		capacity_budget=_capacity,
-		memory_limit=requested,
 		cpu_limit=requested,
-		requested_limit=requested,
-		workers=requested,
-		warning=None,
+		low_chunk=kwargs.get("low_chunk", (96, 96, 96)),
+		mid_chunk=kwargs.get("mid_chunk", (64, 64, 64)),
+		high_chunk=kwargs.get("high_chunk", (16, 16, 16)),
 	)
 
 
@@ -51,7 +54,7 @@ def test_shard_dry_run_reports_per_mip_mapping(
 		"_require_dependencies",
 		lambda: (FakeVolume, types.SimpleNamespace()),
 	)
-	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
+	monkeypatch.setattr(module, "plan_resources", fixed_resource_plan)
 	source = tmp_path / "source"
 	source.mkdir()
 	destination = tmp_path / "staged"
@@ -62,15 +65,13 @@ def test_shard_dry_run_reports_per_mip_mapping(
 	)
 
 	assert result.exit_code == 0, result.output
-	assert "Mip 0: chunk=(96, 96, 96)" in result.output
-	assert "Mip 3: chunk=(64, 64, 64)" in result.output
-	assert "Mip 5: chunk=(16, 16, 16)" in result.output
-	assert "Logical MIP 0:" in result.output
-	assert "shard-capacity ceiling: 2 GiB" in result.output
-	assert "capacity=1.6875 GiB" in result.output
-	assert "Available RAM:" in result.output
-	assert "Worker ceilings:" in result.output
-	assert "selected=8" in result.output
+	assert "Shard targets:" in result.output
+	assert "mips 0-2: 1.6875 GiB at (96, 96, 96)" in result.output
+	assert "mips 3-4: 2 GiB at (64, 64, 64)" in result.output
+	assert "mips 5: 2 GiB at (16, 16, 16)" in result.output
+	assert "MIP 0=" in result.output
+	assert "shards=2 GiB ceiling" in result.output
+	assert "workers=8/8 requested" in result.output
 	assert not destination.exists()
 
 
@@ -95,7 +96,7 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 		"_require_dependencies",
 		lambda: (FakeVolume, task_creation),
 	)
-	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
+	monkeypatch.setattr(module, "plan_resources", fixed_resource_plan)
 
 	def run_tasks(
 		queue_path,
@@ -278,20 +279,23 @@ def test_shard_executes_real_igneous_transfer(tmp_path, monkeypatch):
 	source_volume.commit_provenance()
 	data = np.arange(8 ** 3, dtype=np.uint8).reshape((8, 8, 8, 1))
 	source_volume[:] = data
-	capacity_plan = module.plan_shard_capacities(
+	resources = module.plan_resources(
 		source_volume.info,
 		(0,),
-		100_000_000,
-		(4, 4, 4),
-		(4, 4, 4),
-		(4, 4, 4),
+		1,
+		capacity_override=100_000_000,
+		available_ram=128 * 1024 ** 3,
+		cpu_limit=1,
+		low_chunk=(4, 4, 4),
+		mid_chunk=(4, 4, 4),
+		high_chunk=(4, 4, 4),
 	)
 
 	module.shard_volume(
 		str(source),
 		str(destination),
 		tmp_path / "queue",
-		capacity_plan,
+		resources,
 		"raw",
 		1,
 		60,
@@ -357,20 +361,23 @@ def test_shard_preserves_absolute_positions_for_noncontiguous_mips(
 			compress=False,
 		)
 		mip_volume[:] = data[::factor, ::factor, ::factor, :]
-	capacity_plan = module.plan_shard_capacities(
+	resources = module.plan_resources(
 		source_volume.info,
 		(1, 3),
-		100_000_000,
-		(4, 4, 4),
-		(2, 2, 2),
-		(2, 2, 2),
+		1,
+		capacity_override=100_000_000,
+		available_ram=128 * 1024 ** 3,
+		cpu_limit=1,
+		low_chunk=(4, 4, 4),
+		mid_chunk=(2, 2, 2),
+		high_chunk=(2, 2, 2),
 	)
 
 	module.shard_volume(
 		str(source),
 		str(destination),
 		tmp_path / "queue",
-		capacity_plan,
+		resources,
 		"raw",
 		1,
 		60,

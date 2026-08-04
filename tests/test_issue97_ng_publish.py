@@ -101,10 +101,10 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 	)
 	monkeypatch.setattr(
 		module,
-		"resource_plans",
-		lambda *_args, **_kwargs: (
-			types.SimpleNamespace(capacity_ceiling=2 * 1024 ** 3),
-			types.SimpleNamespace(workers=2),
+		"dataset_resources",
+		lambda *_args, **_kwargs: types.SimpleNamespace(
+			shard_ceiling=2 * 1024 ** 3,
+			workers=2,
 		),
 	)
 	dataset = tmp_path / "cell_labels"
