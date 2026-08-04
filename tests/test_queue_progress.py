@@ -170,6 +170,64 @@ def test_resumed_queue_progress_starts_at_durable_completion(
 	assert progress.position == 3
 
 
+@pytest.mark.parametrize(
+	("total", "completed", "requested", "expected"),
+	[
+		(1, 0, 20, 1),
+		(5, 3, 20, 2),
+		(25, 3, 20, 20),
+	],
+)
+def test_queue_workers_are_capped_by_unfinished_tasks(
+	monkeypatch,
+	tmp_path,
+	total,
+	completed,
+	requested,
+	expected,
+):
+	module = importlib.import_module("mctutil.shared.persistent_queue")
+	recorded = {}
+
+	class FakeQueue:
+		def __init__(self):
+			self.completed = completed
+
+		def is_empty(self):
+			return True
+
+	queue = FakeQueue()
+
+	def progress_factory(_label, **configuration):
+		progress = RecordingProgress(**configuration)
+		recorded["progress"] = progress
+		return progress
+
+	def drain(_queue_url, parallel, _lease_seconds, poll):
+		recorded["parallel"] = parallel
+		queue.completed = total
+		poll()
+		return []
+
+	monkeypatch.setattr(module.log, "progress", progress_factory)
+	monkeypatch.setattr(module, "drain_file_queue", drain)
+
+	module._drain_with_progress(
+		queue,
+		tmp_path / "queue",
+		total=total,
+		parallel=requested,
+		lease_seconds=60,
+		progress_label="Queue Tasks",
+	)
+
+	assert recorded["parallel"] == expected
+	assert (
+		f"Executing queue with {expected} worker(s)"
+		in recorded["progress"].configuration["start_message"]
+	)
+
+
 def test_duplicate_insert_completion_overrun_is_clamped_not_failed(
 	tmp_path,
 	capsys,
