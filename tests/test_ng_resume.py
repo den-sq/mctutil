@@ -151,7 +151,9 @@ def test_downsample_rejects_incomplete_mip0_unless_forced(
 		def __init__(self, *_args, **_kwargs):
 			self.info = {
 				"type": "image",
-				"scales": [{"encoding": "raw"}],
+				"data_type": "uint16",
+				"num_channels": 1,
+				"scales": [{"encoding": "raw", "size": [8, 8, 8]}],
 			}
 
 	incomplete = types.SimpleNamespace(
@@ -204,7 +206,9 @@ def test_downsample_reports_nonlocal_mip0_as_unverifiable(
 		def __init__(self, *_args, **_kwargs):
 			self.info = {
 				"type": "image",
-				"scales": [{"encoding": "raw"}],
+				"data_type": "uint16",
+				"num_channels": 1,
+				"scales": [{"encoding": "raw", "size": [8, 8, 8]}],
 			}
 
 	unverifiable = types.SimpleNamespace(

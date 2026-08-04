@@ -13,6 +13,14 @@ from mctutil.ng.downsample_pyramid import (
 	local_layer_path,
 	normalize_layer_path,
 )
+from mctutil.ng.resource_planning import (
+	format_binary_size,
+	parse_binary_size,
+	plan_shard_capacities,
+	plan_worker_limit,
+	ShardCapacityPlan,
+	WorkerPlan,
+)
 from mctutil.shared.cli import XYZ
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
@@ -53,6 +61,15 @@ def parse_mips(_context, _parameter, value: str | None) -> tuple[int, ...] | Non
 	return mips
 
 
+def parse_capacity(_context, _parameter, value: str | None) -> int | None:
+	if value is None:
+		return None
+	try:
+		return parse_binary_size(value)
+	except ValueError as exc:
+		raise click.BadParameter(str(exc)) from exc
+
+
 def inspect_source(source: str) -> tuple[str, str, dict]:
 	CloudVolume, _task_creation = _require_dependencies()
 	volume = CloudVolume(normalize_layer_path(source), parallel=False)
@@ -86,19 +103,6 @@ def detect_mips(source: str, info: dict) -> tuple[int, ...]:
 		if child.name.isdecimal():
 			detected.add(int(child.name))
 	return tuple(sorted(detected))
-
-
-def chunk_for_mip(
-	mip: int,
-	low_chunk: tuple[int, int, int],
-	mid_chunk: tuple[int, int, int],
-	high_chunk: tuple[int, int, int],
-) -> tuple[int, int, int]:
-	if mip <= 2:
-		return low_chunk
-	if mip <= 4:
-		return mid_chunk
-	return high_chunk
 
 
 def destination_scale_complete(destination: str, mip: int) -> bool:
@@ -175,50 +179,59 @@ def create_shard_tasks(
 def all_shard_tasks(
 	source: str,
 	destination: str,
-	mips: tuple[int, ...],
-	low_chunk: tuple[int, int, int],
-	mid_chunk: tuple[int, int, int],
-	high_chunk: tuple[int, int, int],
+	scale_plans,
 	encoding: str,
-	memory: int,
 ):
-	for mip in mips:
+	for scale in scale_plans:
 		yield from create_shard_tasks(
 			source,
 			destination,
-			mip,
-			chunk_for_mip(mip, low_chunk, mid_chunk, high_chunk),
+			scale.mip,
+			scale.chunk_size,
 			encoding,
-			memory,
+			scale.capacity,
 		)
+
+
+def shard_configuration(
+	source: str,
+	destination: str,
+	capacity_plan: ShardCapacityPlan,
+	encoding: str,
+) -> dict:
+	"""Return output-affecting settings; executor concurrency is excluded."""
+	return {
+		"stage": "shard",
+		"source": normalize_layer_path(source),
+		"destination": normalize_layer_path(destination),
+		"mips": tuple(scale.mip for scale in capacity_plan.scales),
+		"capacity_ceiling": capacity_plan.capacity_ceiling,
+		"scale_plans": [
+			{
+				"mip": scale.mip,
+				"chunk_size": scale.chunk_size,
+				"chunks_per_shard": scale.chunks_per_shard,
+				"capacity": scale.capacity,
+			}
+			for scale in capacity_plan.scales
+		],
+		"encoding": encoding,
+		"compression": SHARD_COMPRESSION,
+	}
 
 
 def shard_volume(
 	source: str,
 	destination: str,
 	queue_dir: Path,
-	mips: tuple[int, ...],
-	low_chunk: tuple[int, int, int],
-	mid_chunk: tuple[int, int, int],
-	high_chunk: tuple[int, int, int],
+	capacity_plan: ShardCapacityPlan,
 	encoding: str,
-	memory: int,
 	parallel: int,
 	lease_seconds: int,
 	release_leases: bool = True,
 ) -> None:
-	configuration = {
-		"stage": "shard",
-		"source": normalize_layer_path(source),
-		"destination": normalize_layer_path(destination),
-		"mips": mips,
-		"low_chunk": low_chunk,
-		"mid_chunk": mid_chunk,
-		"high_chunk": high_chunk,
-		"encoding": encoding,
-		"compression": SHARD_COMPRESSION,
-		"memory": memory,
-	}
+	mips = tuple(scale.mip for scale in capacity_plan.scales)
+	configuration = shard_configuration(source, destination, capacity_plan, encoding)
 	fingerprint = stable_fingerprint(configuration)
 	stage_root = queue_dir / "shard" / fingerprint
 	state_path = stage_root / "pipeline.json"
@@ -281,12 +294,12 @@ def shard_volume(
 		lambda: all_shard_tasks(
 			source,
 			destination,
-			pending,
-			low_chunk,
-			mid_chunk,
-			high_chunk,
+			tuple(
+				scale
+				for scale in capacity_plan.scales
+				if scale.mip in pending
+			),
 			encoding,
-			memory,
 		),
 		parallel,
 		lease_seconds,
@@ -305,32 +318,48 @@ def describe_shard_plan(
 	layer_type: str,
 	encoding: str,
 	queue_dir: Path,
-	parallel: int,
-	memory: int,
-	mips: tuple[int, ...],
-	low_chunk: tuple[int, int, int],
-	mid_chunk: tuple[int, int, int],
-	high_chunk: tuple[int, int, int],
+	capacity_plan: ShardCapacityPlan,
+	worker_plan: WorkerPlan,
 ) -> None:
 	for statement in (
 		f"Source: {normalize_layer_path(source)}",
 		f"Destination: {normalize_layer_path(destination)}",
 		f"Layer type: {layer_type}; encoding: {encoding}",
 		f"Queue root: {queue_dir.resolve()}",
-		f"Parallel workers: {parallel}; memory target: {memory}",
+		(
+			f"Logical MIP 0: "
+			f"{format_binary_size(capacity_plan.logical_mip0_bytes)}; "
+			f"shard-capacity ceiling: "
+			f"{format_binary_size(capacity_plan.capacity_ceiling)}"
+		),
+		(
+			f"Available RAM: {format_binary_size(worker_plan.available_ram)}; "
+			f"reserve: {format_binary_size(worker_plan.reserve)}; "
+			f"headroom: 3x "
+			f"{format_binary_size(worker_plan.capacity_budget)} capacity budget"
+		),
+		(
+			f"Worker ceilings: requested={worker_plan.requested_limit}, "
+			f"cpu={worker_plan.cpu_limit}, memory={worker_plan.memory_limit}; "
+			f"selected={worker_plan.workers}"
+		),
 	):
 		log.write("Shard", statement, log_level=LOG.INFO)
-	for mip in mips:
-		chunk = chunk_for_mip(mip, low_chunk, mid_chunk, high_chunk)
+	if worker_plan.warning is not None:
+		log.write("Shard", f"Warning: {worker_plan.warning}", log_level=LOG.WARN)
+	for scale in capacity_plan.scales:
 		status = (
 			"complete"
-			if destination_scale_complete(destination, mip)
+			if destination_scale_complete(destination, scale.mip)
 			else "pending"
 		)
 		log.write(
 			"Shard",
-			f"Mip {mip}: chunk={chunk}, fill_missing=True, "
-			f"compression={SHARD_COMPRESSION}, status={status}",
+			f"Mip {scale.mip}: chunk={scale.chunk_size}, "
+			f"chunks/shard={scale.chunks_per_shard}, "
+			f"capacity={format_binary_size(scale.capacity)}, "
+			f"fill_missing=True, compression={SHARD_COMPRESSION}, "
+			f"status={status}",
 			log_level=LOG.INFO,
 		)
 
@@ -364,8 +393,23 @@ def describe_shard_plan(
 	show_default=True,
 	help="Shard chunk size for mips 5 and above.",
 )
-@click.option("--memory", type=click.IntRange(min=1), default=10_000_000_000, show_default=True)
-@click.option("--parallel", type=click.IntRange(min=1), default=8, show_default=True)
+@click.option(
+	"--shard-capacity",
+	"capacity_override",
+	callback=parse_capacity,
+	metavar="SIZE",
+	help=(
+		"Override the automatic 2/4/8 GiB uncompressed capacity ceiling; "
+		"accepts bytes or binary units such as 4GiB."
+	),
+)
+@click.option(
+	"--parallel",
+	type=click.IntRange(min=1),
+	default=8,
+	show_default=True,
+	help="Maximum workers; available RAM and CPU count may lower it.",
+)
 @click.option("--include-mip0/--exclude-mip0", default=True, show_default=True)
 @click.option(
 	"--encoding",
@@ -390,7 +434,7 @@ def shard(
 	low_chunk: tuple[int, int, int],
 	mid_chunk: tuple[int, int, int],
 	high_chunk: tuple[int, int, int],
-	memory: int,
+	capacity_override: int | None,
 	parallel: int,
 	include_mip0: bool,
 	encoding: str,
@@ -412,6 +456,18 @@ def shard(
 		if not mips:
 			raise ValueError("no mip levels selected for sharded staging")
 		queue_dir = queue_dir or default_queue_root(destination)
+		capacity_plan = plan_shard_capacities(
+			info,
+			mips,
+			capacity_override,
+			low_chunk,
+			mid_chunk,
+			high_chunk,
+		)
+		worker_plan = plan_worker_limit(
+			parallel,
+			capacity_plan.maximum_actual_capacity,
+		)
 
 		describe_shard_plan(
 			source,
@@ -419,12 +475,8 @@ def shard(
 			layer_type,
 			encoding,
 			queue_dir,
-			parallel,
-			memory,
-			mips,
-			low_chunk,
-			mid_chunk,
-			high_chunk,
+			capacity_plan,
+			worker_plan,
 		)
 		if not execute:
 			return
@@ -432,13 +484,9 @@ def shard(
 			source,
 			destination,
 			queue_dir,
-			mips,
-			low_chunk,
-			mid_chunk,
-			high_chunk,
+			capacity_plan,
 			encoding,
-			memory,
-			parallel,
+			worker_plan.workers,
 			lease_seconds,
 			release_leases,
 		)

@@ -14,6 +14,16 @@ from urllib.parse import urlparse
 import click
 
 from mctutil.ng.completeness import check_mip0_completeness
+from mctutil.ng.resource_planning import (
+	format_binary_size,
+	parse_binary_size,
+	plan_shard_capacities,
+	plan_worker_limit,
+	ShardCapacityPlan,
+	system_available_ram,
+	system_cpu_count,
+	WorkerPlan,
+)
 from mctutil.shared.aws import configure_aws_profile
 from mctutil.shared.cli import XYZ
 from mctutil.shared.igneous_output import igneous_output_command
@@ -58,6 +68,15 @@ class DatasetPlan:
 
 def utc_now() -> str:
 	return datetime.now(timezone.utc).isoformat()
+
+
+def parse_capacity(_context, _parameter, value: str | None) -> int | None:
+	if value is None:
+		return None
+	try:
+		return parse_binary_size(value)
+	except ValueError as exc:
+		raise click.BadParameter(str(exc)) from exc
 
 
 def module_available(module_name: str) -> bool:
@@ -430,6 +449,119 @@ def resolved_precompute_input(plan: DatasetPlan, options: dict) -> Path | None:
 	return plan.precompute_input
 
 
+def planned_mip0_info(plan: DatasetPlan, options: dict) -> dict | None:
+	"""Inspect existing metadata or derive the pending MIP-0 metadata."""
+	info = _read_info(plan.precomputed)
+	if info is not None:
+		return info
+	input_path = resolved_precompute_input(plan, options)
+	if input_path is None:
+		return None
+	try:
+		module = importlib.import_module("mctutil.ng.precompute")
+		if input_path.exists():
+			input_spec = module.discover_input(input_path)
+		elif plan.prep_input is not None and plan.prep_input.exists():
+			with module.tifffile.TiffFile(plan.prep_input) as source:
+				series = source.series[0]
+				shape = tuple(int(length) for length in series.shape)
+				if len(shape) != 3:
+					return None
+				input_spec = module.InputSpec(
+					mode="planned",
+					source=str(plan.prep_input),
+					shape=shape,
+					dtype=module.np.dtype(series.dtype),
+				)
+		else:
+			return None
+		volume_plan = module.build_plan(
+			input_path,
+			input_spec,
+			plan.layer_type,
+			options["segmentation_encoding"],
+			None,
+			None,
+			options["voxel_resolution"],
+			options["voxel_offset"],
+			(8, 8, 8),
+		)
+		z_count, y_size, x_size = input_spec.shape
+		return {
+			"type": volume_plan.layer_type,
+			"data_type": volume_plan.dtype.name,
+			"num_channels": 1,
+			"scales": [
+				{
+					"size": [x_size, y_size, z_count],
+					"encoding": volume_plan.encoding,
+				}
+			],
+		}
+	except Exception:
+		# Planning must remain non-blocking when a dry-run uses placeholder
+		# inputs or optional TIFF inspection is unavailable. Execution obtains
+		# the authoritative metadata after MIP 0 is written.
+		return None
+
+
+def resource_plans(
+	plan: DatasetPlan,
+	options: dict,
+	allow_planned_info: bool = True,
+) -> tuple[ShardCapacityPlan, WorkerPlan] | None:
+	"""Resolve per-dataset capacity and post-MIP-0 worker plans."""
+	info = _read_info(plan.precomputed)
+	info_is_planned = info is None and allow_planned_info
+	if info_is_planned:
+		info = planned_mip0_info(plan, options)
+	if info is None:
+		return None
+	if info_is_planned:
+		# A fresh dry-run cannot know the final number of MIPs, so show each
+		# retained chunk-size group once.
+		mips = (0, 3, 5)
+	else:
+		mips = tuple(range(len(info["scales"])))
+	capacity_plan = plan_shard_capacities(
+		info,
+		mips,
+		options["shard_capacity"],
+	)
+	worker_plan = plan_worker_limit(
+		options["workers"],
+		capacity_plan.maximum_actual_capacity,
+		available_ram=options["available_ram"],
+		cpu_limit=options["cpu_count"],
+	)
+	return capacity_plan, worker_plan
+
+
+def shard_configuration(plan: DatasetPlan, options: dict) -> dict:
+	"""Return only output-affecting shard settings for resume state."""
+	plans = resource_plans(plan, options, allow_planned_info=False)
+	if plans is None:
+		return {
+			"capacity": options["shard_capacity"] or "auto-after-mip0",
+		}
+	capacity_plan, _worker_plan = plans
+	scales = capacity_plan.scales
+	if not options["stage_include_mip0"]:
+		scales = tuple(scale for scale in scales if scale.mip != 0)
+	return {
+		"capacity_ceiling": capacity_plan.capacity_ceiling,
+		"scale_plans": [
+			{
+				"mip": scale.mip,
+				"chunk_size": scale.chunk_size,
+				"chunks_per_shard": scale.chunks_per_shard,
+				"capacity": scale.capacity,
+			}
+			for scale in scales
+		],
+	}
+
+
 def stage_configuration(
 	stage: str,
 	plan: DatasetPlan,
@@ -455,7 +587,7 @@ def stage_configuration(
 	elif stage == "downsample":
 		configuration.update(
 			layer=str(plan.precomputed),
-			memory=options["memory"],
+			memory=options["downsample_memory"],
 			initial_chunk=(64, 64, 64),
 			extend_chunk=(16, 16, 16),
 		)
@@ -464,7 +596,7 @@ def stage_configuration(
 			source=str(plan.precomputed),
 			destination=str(plan.staged),
 			include_mip0=options["stage_include_mip0"],
-			memory=options["memory"],
+			**shard_configuration(plan, options),
 		)
 	elif stage == "upload":
 		configuration.update(
@@ -614,6 +746,10 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			execute=True,
 		)
 	elif stage == "downsample":
+		plans = resource_plans(plan, options, allow_planned_info=False)
+		if plans is None:
+			raise ValueError(f"MIP-0 resource metadata is missing: {plan.precomputed}")
+		capacity_plan, worker_plan = plans
 		module = importlib.import_module("mctutil.ng.downsample_pyramid")
 		module.downsample_pyramid.callback(
 			layer_path=str(plan.precomputed),
@@ -621,9 +757,10 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			initial_chunk=(64, 64, 64),
 			extend_chunk=(16, 16, 16),
 			max_extend_passes=3,
-			initial_parallel=16,
-			extend_parallel=16,
-			memory=options["memory"],
+			initial_parallel=worker_plan.workers,
+			extend_parallel=worker_plan.workers,
+			memory=options["downsample_memory"],
+			capacity_override=capacity_plan.capacity_ceiling,
 			encoding=encoding,
 			lease_seconds=3600,
 			release_leases=options["release_queue_leases"],
@@ -631,6 +768,10 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			execute=True,
 		)
 	elif stage == "shard":
+		plans = resource_plans(plan, options, allow_planned_info=False)
+		if plans is None:
+			raise ValueError(f"shard resource metadata is missing: {plan.precomputed}")
+		capacity_plan, worker_plan = plans
 		module = importlib.import_module("mctutil.ng.shard")
 		module.shard.callback(
 			source=str(plan.precomputed),
@@ -639,8 +780,8 @@ def run_stage(stage: str, plan: DatasetPlan, options: dict) -> None:
 			low_chunk=(96, 96, 96),
 			mid_chunk=(64, 64, 64),
 			high_chunk=(16, 16, 16),
-			memory=options["memory"],
-			parallel=8,
+			capacity_override=capacity_plan.capacity_ceiling,
+			parallel=worker_plan.workers,
 			include_mip0=options["stage_include_mip0"],
 			encoding=encoding,
 			queue_dir=queue_root,
@@ -744,6 +885,58 @@ def print_publish_plan(
 	)
 
 
+def print_resource_plan(plan: DatasetPlan, options: dict) -> None:
+	"""Log post-MIP-0 capacity and concurrency decisions for one dataset."""
+	plans = resource_plans(plan, options)
+	if plans is None:
+		log.write(
+			"Publish Plan",
+			"Post-MIP-0 resources: deferred until MIP-0 metadata exists",
+			log_level=LOG.INFO,
+		)
+		return
+
+	capacity_plan, worker_plan = plans
+	log.write(
+		"Publish Plan",
+		(
+			f"Logical MIP 0: "
+			f"{format_binary_size(capacity_plan.logical_mip0_bytes)}; "
+			f"shard ceiling: "
+			f"{format_binary_size(capacity_plan.capacity_ceiling)}"
+		),
+		log_level=LOG.INFO,
+	)
+	for scale in capacity_plan.scales:
+		log.write(
+			"Publish Plan",
+			(
+				f"Shard mip {scale.mip}: chunk={scale.chunk_size}, "
+				f"chunks/shard={scale.chunks_per_shard}, "
+				f"capacity={format_binary_size(scale.capacity)}"
+			),
+			log_level=LOG.INFO,
+		)
+	log.write(
+		"Publish Plan",
+		(
+			f"Post-MIP-0 workers: requested={worker_plan.requested_limit}, "
+			f"cpu={worker_plan.cpu_limit}, memory={worker_plan.memory_limit}, "
+			f"selected={worker_plan.workers}; available RAM="
+			f"{format_binary_size(worker_plan.available_ram)}, reserve="
+			f"{format_binary_size(worker_plan.reserve)}, capacity budget="
+			f"{format_binary_size(worker_plan.capacity_budget)}"
+		),
+		log_level=LOG.INFO,
+	)
+	if worker_plan.warning is not None:
+		log.write(
+			"Publish Plan",
+			f"Warning: {worker_plan.warning}",
+			log_level=LOG.WARN,
+		)
+
+
 def publish_datasets(
 	plans: tuple[DatasetPlan, ...],
 	selected_stages: tuple[str, ...],
@@ -762,6 +955,8 @@ def publish_datasets(
 			f"State: {plan.state_path}",
 			log_level=LOG.DEBUG,
 		)
+		if {"downsample", "shard"} & set(selected_stages):
+			print_resource_plan(plan, options)
 		for stage in STAGES:
 			if stage not in selected_stages:
 				log.write(
@@ -848,8 +1043,31 @@ def publish_datasets(
 	help="Last selected stage; starting at upload defaults to upload only.",
 )
 @click.option("--no-upload", is_flag=True, help="Explicitly omit upload from the range.")
-@click.option("--workers", type=click.IntRange(min=1), default=8, show_default=True)
-@click.option("--memory", type=click.IntRange(min=1), default=10_000_000_000, show_default=True)
+@click.option(
+	"--workers",
+	type=click.IntRange(min=1),
+	default=8,
+	show_default=True,
+	help="MIP-0 writers and maximum post-MIP-0 Igneous workers.",
+)
+@click.option(
+	"--downsample-memory",
+	"--memory",
+	"downsample_memory",
+	type=click.IntRange(min=1),
+	default=10_000_000_000,
+	show_default=True,
+	help="Igneous downsampling memory target in bytes.",
+)
+@click.option(
+	"--shard-capacity",
+	callback=parse_capacity,
+	metavar="SIZE",
+	help=(
+		"Override the automatic 2/4/8 GiB uncompressed shard-capacity "
+		"ceiling; accepts bytes or a value such as 4GiB."
+	),
+)
 @click.option(
 	"--release-queue-leases/--preserve-queue-leases",
 	default=True,
@@ -900,7 +1118,8 @@ def publish(
 	stop_after: str | None,
 	no_upload: bool,
 	workers: int,
-	memory: int,
+	downsample_memory: int,
+	shard_capacity: int | None,
 	release_queue_leases: bool,
 	upload_jobs: int,
 	mesh_parallel: int,
@@ -955,6 +1174,11 @@ def publish(
 			build_dataset_plan(dataset, needs_tiff)
 			for dataset in datasets
 		)
+		needs_post_mip_resources = bool(
+			{"downsample", "shard"} & set(selected_stages)
+		)
+		available_ram = system_available_ram() if needs_post_mip_resources else 0
+		cpu_count = system_cpu_count() if needs_post_mip_resources else 1
 		options = {
 			"s3_prefix": s3_prefix,
 			"selected_stages": selected_stages,
@@ -962,7 +1186,10 @@ def publish(
 			"no_upload": no_upload,
 			"aws_profile": aws_profile,
 			"workers": workers,
-			"memory": memory,
+			"downsample_memory": downsample_memory,
+			"shard_capacity": shard_capacity,
+			"available_ram": available_ram,
+			"cpu_count": cpu_count,
 			"release_queue_leases": release_queue_leases,
 			"upload_jobs": upload_jobs,
 			"mesh_parallel": mesh_parallel,

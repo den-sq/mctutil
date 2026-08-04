@@ -9,6 +9,19 @@ import numpy as np
 import pytest
 
 
+def fixed_worker_plan(requested, _capacity):
+	return types.SimpleNamespace(
+		available_ram=128 * 1024 ** 3,
+		reserve=16 * 1024 ** 3,
+		capacity_budget=_capacity,
+		memory_limit=requested,
+		cpu_limit=requested,
+		requested_limit=requested,
+		workers=requested,
+		warning=None,
+	)
+
+
 def complete_mip0():
 	return types.SimpleNamespace(
 		complete=True,
@@ -22,8 +35,10 @@ class FakeVolume:
 	def __init__(self, *_args, **_kwargs):
 		self.info = {
 			"type": "image",
+			"data_type": "uint16",
+			"num_channels": 1,
 			"scales": [
-				{"encoding": "raw"}
+				{"encoding": "raw", "size": [64, 64, 64]}
 				for _index in range(self.max_mip + 1)
 			],
 		}
@@ -38,6 +53,7 @@ def test_downsample_dry_run_reports_two_pass_plan(
 	module = load_module("mctutil/ng/downsample_pyramid.py")
 	dependencies = (FakeVolume, types.SimpleNamespace())
 	monkeypatch.setattr(module, "_require_dependencies", lambda: dependencies)
+	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
 	layer = tmp_path / "layer"
 	layer.mkdir()
 
@@ -66,6 +82,7 @@ def test_downsample_uses_persistent_pass_state(load_module, tmp_path, monkeypatc
 	task_creation = types.SimpleNamespace(create_downsampling_tasks=create_tasks)
 	monkeypatch.setattr(module, "_require_dependencies", lambda: (FakeVolume, task_creation))
 	monkeypatch.setattr(module, "check_mip0_completeness", lambda _path: complete_mip0())
+	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
 
 	def run_tasks(
 		queue_path,

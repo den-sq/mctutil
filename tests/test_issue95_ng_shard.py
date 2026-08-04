@@ -9,17 +9,32 @@ import numpy as np
 import pytest
 
 
+def fixed_worker_plan(requested, _capacity):
+	return types.SimpleNamespace(
+		available_ram=128 * 1024 ** 3,
+		reserve=16 * 1024 ** 3,
+		capacity_budget=_capacity,
+		memory_limit=requested,
+		cpu_limit=requested,
+		requested_limit=requested,
+		workers=requested,
+		warning=None,
+	)
+
+
 class FakeVolume:
 	def __init__(self, *_args, **_kwargs):
 		self.info = {
 			"type": "image",
+			"data_type": "uint16",
+			"num_channels": 1,
 			"scales": [
-				{"key": "700_700_700", "encoding": "raw"},
-				{"key": "1400_1400_1400", "encoding": "raw"},
-				{"key": "2800_2800_2800", "encoding": "raw"},
-				{"key": "5600_5600_5600", "encoding": "raw"},
-				{"key": "11200_11200_11200", "encoding": "raw"},
-				{"key": "22400_22400_22400", "encoding": "raw"},
+				{
+					"key": f"{700 * 2 ** mip}_{700 * 2 ** mip}_{700 * 2 ** mip}",
+					"encoding": "raw",
+					"size": [64, 64, 64],
+				}
+				for mip in range(6)
 			],
 		}
 
@@ -36,6 +51,7 @@ def test_shard_dry_run_reports_per_mip_mapping(
 		"_require_dependencies",
 		lambda: (FakeVolume, types.SimpleNamespace()),
 	)
+	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
 	source = tmp_path / "source"
 	source.mkdir()
 	destination = tmp_path / "staged"
@@ -49,7 +65,12 @@ def test_shard_dry_run_reports_per_mip_mapping(
 	assert "Mip 0: chunk=(96, 96, 96)" in result.output
 	assert "Mip 3: chunk=(64, 64, 64)" in result.output
 	assert "Mip 5: chunk=(16, 16, 16)" in result.output
-	assert "Parallel workers: 8" in result.output
+	assert "Logical MIP 0:" in result.output
+	assert "shard-capacity ceiling: 2 GiB" in result.output
+	assert "capacity=1.6875 GiB" in result.output
+	assert "Available RAM:" in result.output
+	assert "Worker ceilings:" in result.output
+	assert "selected=8" in result.output
 	assert not destination.exists()
 
 
@@ -74,6 +95,7 @@ def test_shard_excludes_mip0_and_uses_one_durable_queue(
 		"_require_dependencies",
 		lambda: (FakeVolume, task_creation),
 	)
+	monkeypatch.setattr(module, "plan_worker_limit", fixed_worker_plan)
 
 	def run_tasks(
 		queue_path,
@@ -256,17 +278,21 @@ def test_shard_executes_real_igneous_transfer(tmp_path, monkeypatch):
 	source_volume.commit_provenance()
 	data = np.arange(8 ** 3, dtype=np.uint8).reshape((8, 8, 8, 1))
 	source_volume[:] = data
+	capacity_plan = module.plan_shard_capacities(
+		source_volume.info,
+		(0,),
+		100_000_000,
+		(4, 4, 4),
+		(4, 4, 4),
+		(4, 4, 4),
+	)
 
 	module.shard_volume(
 		str(source),
 		str(destination),
 		tmp_path / "queue",
-		(0,),
-		(4, 4, 4),
-		(4, 4, 4),
-		(4, 4, 4),
+		capacity_plan,
 		"raw",
-		100_000_000,
 		1,
 		60,
 	)
@@ -331,17 +357,21 @@ def test_shard_preserves_absolute_positions_for_noncontiguous_mips(
 			compress=False,
 		)
 		mip_volume[:] = data[::factor, ::factor, ::factor, :]
+	capacity_plan = module.plan_shard_capacities(
+		source_volume.info,
+		(1, 3),
+		100_000_000,
+		(4, 4, 4),
+		(2, 2, 2),
+		(2, 2, 2),
+	)
 
 	module.shard_volume(
 		str(source),
 		str(destination),
 		tmp_path / "queue",
-		(1, 3),
-		(4, 4, 4),
-		(2, 2, 2),
-		(2, 2, 2),
+		capacity_plan,
 		"raw",
-		100_000_000,
 		1,
 		60,
 	)

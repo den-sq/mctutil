@@ -8,6 +8,13 @@ from urllib.parse import unquote, urlparse
 import click
 
 from mctutil.ng.completeness import Mip0Completeness, check_mip0_completeness
+from mctutil.ng.resource_planning import (
+	format_binary_size,
+	logical_mip0_bytes,
+	parse_binary_size,
+	plan_shard_capacities,
+	plan_worker_limit,
+)
 from mctutil.shared.cli import XYZ
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
@@ -57,11 +64,28 @@ def default_queue_root(layer_path: str) -> Path:
 	return local_path / ".mctutil-queues"
 
 
-def inspect_volume(layer_path: str) -> tuple[str, str, int]:
+def parse_capacity(_context, _parameter, value: str | None) -> int | None:
+	if value is None:
+		return None
+	try:
+		return parse_binary_size(value)
+	except ValueError as exc:
+		raise click.BadParameter(str(exc)) from exc
+
+
+def inspect_volume_info(layer_path: str) -> dict:
 	CloudVolume, _task_creation = _require_dependencies()
 	volume = CloudVolume(normalize_layer_path(layer_path), parallel=False)
-	layer_type = volume.info.get("type", "image")
-	scales = volume.info.get("scales", [])
+	info = volume.info
+	if not info.get("scales", []):
+		raise ValueError("precomputed volume has no scales")
+	return info
+
+
+def inspect_volume(layer_path: str) -> tuple[str, str, int]:
+	info = inspect_volume_info(layer_path)
+	layer_type = info.get("type", "image")
+	scales = info["scales"]
 	if not scales:
 		raise ValueError("precomputed volume has no scales")
 	encoding = scales[0].get("encoding", "raw")
@@ -267,6 +291,54 @@ def downsample_volume(
 	write_state(state_path, state)
 
 
+def describe_downsample_plan(
+	layer_path: str,
+	layer_type: str,
+	encoding: str,
+	max_mip: int,
+	queue_dir: Path,
+	initial_chunk: tuple[int, int, int],
+	extend_chunk: tuple[int, int, int],
+	max_extend_passes: int,
+	logical_bytes: int,
+	capacity_ceiling: int,
+	capacity_budget: int,
+	initial_workers,
+	extend_workers,
+) -> None:
+	for statement in (
+		f"Layer: {normalize_layer_path(layer_path)}",
+		(
+			f"Layer type: {layer_type}; encoding: {encoding}; "
+			f"current max mip: {max_mip}"
+		),
+		f"Queue root: {queue_dir.resolve()}",
+		(
+			f"Plan: mip 0 at {initial_chunk}, then up to "
+			f"{max_extend_passes} extension pass(es) at {extend_chunk}; "
+			"factor=(2, 2, 2), compression=br"
+		),
+		(
+			f"Logical MIP 0: {format_binary_size(logical_bytes)}; "
+			f"shard-capacity ceiling: {format_binary_size(capacity_ceiling)}; "
+			f"worker capacity budget: {format_binary_size(capacity_budget)}"
+		),
+		(
+			f"Available RAM: "
+			f"{format_binary_size(initial_workers.available_ram)}; "
+			f"reserve: {format_binary_size(initial_workers.reserve)}; "
+			f"worker ceilings initial={initial_workers.requested_limit}/"
+			f"{initial_workers.cpu_limit}/{initial_workers.memory_limit}, "
+			f"extension={extend_workers.requested_limit}/"
+			f"{extend_workers.cpu_limit}/{extend_workers.memory_limit}; "
+			f"selected={initial_workers.workers}/{extend_workers.workers}"
+		),
+	):
+		log.write("Downsample", statement, log_level=LOG.INFO)
+	for warning in {initial_workers.warning, extend_workers.warning} - {None}:
+		log.write("Downsample", f"Warning: {warning}", log_level=LOG.WARN)
+
+
 @click.command("downsample-pyramid")
 @click.argument("layer_path")
 @click.option("--queue", "queue_dir", type=click.Path(path_type=Path))
@@ -288,6 +360,16 @@ def downsample_volume(
 @click.option("--initial-parallel", type=click.IntRange(min=1), default=16, show_default=True)
 @click.option("--extend-parallel", type=click.IntRange(min=1), default=16, show_default=True)
 @click.option("--memory", type=click.IntRange(min=1), default=10_000_000_000, show_default=True)
+@click.option(
+	"--shard-capacity",
+	"capacity_override",
+	callback=parse_capacity,
+	metavar="SIZE",
+	help=(
+		"Override the automatic 2/4/8 GiB capacity ceiling used to size "
+		"post-MIP-0 worker concurrency."
+	),
+)
 @click.option(
 	"--encoding",
 	default="auto",
@@ -317,6 +399,7 @@ def downsample_pyramid(
 	initial_parallel: int,
 	extend_parallel: int,
 	memory: int,
+	capacity_override: int | None,
 	encoding: str,
 	lease_seconds: int,
 	release_leases: bool,
@@ -325,26 +408,41 @@ def downsample_pyramid(
 ) -> None:
 	"""Build a volumetric MIP pyramid with durable task-level resume."""
 	try:
-		layer_type, source_encoding, max_mip = inspect_volume(layer_path)
+		info = inspect_volume_info(layer_path)
+		layer_type = info.get("type", "image")
+		scales = info["scales"]
+		source_encoding = scales[0].get("encoding", "raw")
+		max_mip = len(scales) - 1
 		if encoding == "auto":
 			encoding = "raw" if layer_type == "image" else source_encoding
 			if layer_type == "segmentation" and encoding == "raw":
 				encoding = "compressed_segmentation"
 		queue_dir = queue_dir or default_queue_root(layer_path)
-		for statement in (
-			f"Layer: {normalize_layer_path(layer_path)}",
-			(
-				f"Layer type: {layer_type}; encoding: {encoding}; "
-				f"current max mip: {max_mip}"
-			),
-			f"Queue root: {queue_dir.resolve()}",
-			(
-				f"Plan: mip 0 at {initial_chunk}, then up to "
-				f"{max_extend_passes} extension pass(es) at {extend_chunk}; "
-				"factor=(2, 2, 2), compression=br"
-			),
-		):
-			log.write("Downsample", statement, log_level=LOG.INFO)
+		logical_bytes = logical_mip0_bytes(info)
+		capacity_plan = plan_shard_capacities(
+			info,
+			(0, 3, 5),
+			capacity_override,
+		)
+		capacity_ceiling = capacity_plan.capacity_ceiling
+		capacity_budget = capacity_plan.maximum_actual_capacity
+		initial_workers = plan_worker_limit(initial_parallel, capacity_budget)
+		extend_workers = plan_worker_limit(extend_parallel, capacity_budget)
+		describe_downsample_plan(
+			layer_path,
+			layer_type,
+			encoding,
+			max_mip,
+			queue_dir,
+			initial_chunk,
+			extend_chunk,
+			max_extend_passes,
+			logical_bytes,
+			capacity_ceiling,
+			capacity_budget,
+			initial_workers,
+			extend_workers,
+		)
 		if not execute:
 			return
 		completeness = check_mip0_completeness(layer_path)
@@ -370,8 +468,8 @@ def downsample_pyramid(
 			initial_chunk,
 			extend_chunk,
 			max_extend_passes,
-			initial_parallel,
-			extend_parallel,
+			initial_workers.workers,
+			extend_workers.workers,
 			memory,
 			encoding,
 			lease_seconds,
