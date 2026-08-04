@@ -32,7 +32,7 @@ def volume_info(logical_bytes: int, scale_count: int = 6) -> dict:
 def resources(
 	logical_bytes: int,
 	capacity: int | None = None,
-	available_ram: int = 126_000_000_000,
+	memory_capacity: int = 126_000_000_000,
 	cpu_limit: int = 64,
 ):
 	return resource_planning.plan_resources(
@@ -40,7 +40,7 @@ def resources(
 		(0, 3, 5),
 		32,
 		capacity_override=capacity,
-		available_ram=available_ram,
+		memory_capacity=memory_capacity,
 		cpu_limit=cpu_limit,
 	)
 
@@ -67,7 +67,7 @@ def test_shard_capacity_tiers_include_their_upper_bound(
 		info,
 		(0, 3, 5),
 		32,
-		available_ram=126_000_000_000,
+		memory_capacity=126_000_000_000,
 		cpu_limit=64,
 	)
 
@@ -105,7 +105,7 @@ def test_logical_size_accounts_for_dtype_and_channels():
 		info,
 		(0,),
 		1,
-		available_ram=64 * GIB,
+		memory_capacity=64 * GIB,
 		cpu_limit=1,
 	)
 
@@ -140,11 +140,11 @@ def test_worker_limit_honors_cpu_user_and_low_memory_bounds():
 		volume_info(GIB),
 		(0, 3, 5),
 		3,
-		available_ram=256 * GIB,
+		memory_capacity=256 * GIB,
 		cpu_limit=64,
 	)
-	cpu_limited = resources(GIB, available_ram=256 * GIB, cpu_limit=6)
-	low_memory = resources(GIB, available_ram=16 * GIB)
+	cpu_limited = resources(GIB, memory_capacity=256 * GIB, cpu_limit=6)
+	low_memory = resources(GIB, memory_capacity=16 * GIB)
 
 	assert user_limited.workers == 3
 	assert cpu_limited.workers == 6
@@ -152,16 +152,16 @@ def test_worker_limit_honors_cpu_user_and_low_memory_bounds():
 	assert low_memory.warning is not None
 
 
-def test_system_resources_honors_cgroup_memory_and_cpu_affinity(
+def test_system_resources_uses_capacity_not_current_usage(
 	tmp_path,
 	monkeypatch,
 ):
 	(tmp_path / "memory.max").write_text(str(64 * GIB), encoding="utf-8")
-	(tmp_path / "memory.current").write_text(str(16 * GIB), encoding="utf-8")
+	(tmp_path / "memory.current").write_text(str(63 * GIB), encoding="utf-8")
 	monkeypatch.setattr(
 		resource_planning.psutil,
 		"virtual_memory",
-		lambda: types.SimpleNamespace(available=128 * GIB),
+		lambda: types.SimpleNamespace(total=128 * GIB, available=1 * GIB),
 	)
 	monkeypatch.setattr(
 		resource_planning.os,
@@ -169,7 +169,7 @@ def test_system_resources_honors_cgroup_memory_and_cpu_affinity(
 		lambda _pid: set(range(8)),
 	)
 
-	assert resource_planning.system_resources(tmp_path) == (48 * GIB, 8)
+	assert resource_planning.system_resources(tmp_path) == (64 * GIB, 8)
 
 
 def write_info(path: Path, logical_bytes: int) -> None:
@@ -203,7 +203,7 @@ def publish_options(module, **updates):
 		"workers": 32,
 		"downsample_memory": 10_000_000_000,
 		"shard_capacity": None,
-		"available_ram": 126_000_000_000,
+		"memory_capacity": 126_000_000_000,
 		"cpu_count": 64,
 		"release_queue_leases": True,
 		"segmentation_encoding": "compressed_segmentation",
@@ -283,7 +283,7 @@ def test_shard_resume_fingerprint_ignores_workers_but_tracks_capacity(
 		{
 			**options,
 			"workers": 2,
-			"available_ram": 32 * GIB,
+			"memory_capacity": 32 * GIB,
 			"cpu_count": 2,
 		},
 	)

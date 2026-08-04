@@ -452,7 +452,7 @@ def dataset_resources(
 		mips,
 		options["workers"],
 		capacity_override=options["shard_capacity"],
-		available_ram=options["available_ram"],
+		memory_capacity=options["memory_capacity"],
 		cpu_limit=options["cpu_count"],
 	)
 
@@ -1047,14 +1047,14 @@ def publish(
 			{"downsample", "shard"} & set(selected_stages)
 		)
 		if needs_post_mip_resources:
-			available_ram, cpu_count = system_resources()
+			memory_capacity, cpu_count = system_resources()
 			shard_capacity = (
 				parse_size(shard_capacity)
 				if shard_capacity is not None
 				else None
 			)
 		else:
-			available_ram, cpu_count = 0, 1
+			memory_capacity, cpu_count = 0, 1
 		options = {
 			"s3_prefix": s3_prefix,
 			"selected_stages": selected_stages,
@@ -1064,7 +1064,7 @@ def publish(
 			"workers": workers,
 			"downsample_memory": downsample_memory,
 			"shard_capacity": shard_capacity,
-			"available_ram": available_ram,
+			"memory_capacity": memory_capacity,
 			"cpu_count": cpu_count,
 			"release_queue_leases": release_queue_leases,
 			"upload_jobs": upload_jobs,

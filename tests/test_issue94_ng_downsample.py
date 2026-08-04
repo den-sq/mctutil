@@ -17,7 +17,7 @@ def fixed_resource_plan(info, mips, requested, **kwargs):
 		mips,
 		requested,
 		capacity_override=kwargs.get("capacity_override"),
-		available_ram=128 * 1024 ** 3,
+		memory_capacity=128 * 1024 ** 3,
 		cpu_limit=requested,
 	)
 

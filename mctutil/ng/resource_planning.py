@@ -44,7 +44,7 @@ class ResourcePlan:
 	shard_ceiling: int
 	# (mip, chunk size, chunks per shard, actual raw capacity)
 	shards: tuple[tuple[int, tuple[int, int, int], int, int], ...]
-	available_ram: int
+	memory_capacity: int
 	requested_workers: int
 	cpu_limit: int
 	memory_limit: int
@@ -92,24 +92,20 @@ def _read_cgroup_value(path: Path) -> int | None:
 def system_resources(
 	cgroup_root: Path = Path("/sys/fs/cgroup"),
 ) -> tuple[int, int]:
-	"""Return effective available RAM and CPU count for this process."""
-	available = [int(psutil.virtual_memory().available)]
-	for limit_path, usage_path in (
-		(cgroup_root / "memory.max", cgroup_root / "memory.current"),
-		(
-			cgroup_root / "memory" / "memory.limit_in_bytes",
-			cgroup_root / "memory" / "memory.usage_in_bytes",
-		),
+	"""Return stable effective memory capacity and CPU count."""
+	capacities = [int(psutil.virtual_memory().total)]
+	for limit_path in (
+		cgroup_root / "memory.max",
+		cgroup_root / "memory" / "memory.limit_in_bytes",
 	):
 		limit = _read_cgroup_value(limit_path)
-		usage = _read_cgroup_value(usage_path)
-		if limit is not None and usage is not None:
-			available.append(max(0, limit - usage))
+		if limit is not None:
+			capacities.append(limit)
 	try:
 		cpus = len(os.sched_getaffinity(0))
 	except (AttributeError, OSError):
 		cpus = os.cpu_count() or 1
-	return min(available), max(1, cpus)
+	return min(capacities), max(1, cpus)
 
 
 def _shard_plan(
@@ -163,7 +159,7 @@ def plan_resources(
 	mips: tuple[int, ...],
 	requested_workers: int,
 	capacity_override: int | None = None,
-	available_ram: int | None = None,
+	memory_capacity: int | None = None,
 	cpu_limit: int | None = None,
 	low_chunk: tuple[int, int, int] = LOW_CHUNK,
 	mid_chunk: tuple[int, int, int] = MID_CHUNK,
@@ -179,28 +175,28 @@ def plan_resources(
 		high_chunk,
 	)
 
-	if available_ram is None or cpu_limit is None:
+	if memory_capacity is None or cpu_limit is None:
 		system_ram, system_cpus = system_resources()
-		available_ram = system_ram if available_ram is None else available_ram
+		memory_capacity = system_ram if memory_capacity is None else memory_capacity
 		cpu_limit = system_cpus if cpu_limit is None else cpu_limit
-	available_ram = max(0, int(available_ram))
+	memory_capacity = max(0, int(memory_capacity))
 	cpu_limit = max(1, int(cpu_limit))
 	capacity_budget = max(shard[3] for shard in shards)
 	warning = None
-	if available_ram <= MEMORY_RESERVE:
+	if memory_capacity <= MEMORY_RESERVE:
 		memory_limit = 1
-		warning = "available RAM does not exceed the 16 GiB reserve; using one worker"
+		warning = "memory capacity does not exceed the 16 GiB reserve; using one worker"
 	else:
 		memory_limit = max(
 			1,
-			(available_ram - MEMORY_RESERVE) // (3 * capacity_budget),
+			(memory_capacity - MEMORY_RESERVE) // (3 * capacity_budget),
 		)
 	workers = max(1, min(requested_workers, cpu_limit, memory_limit))
 	return ResourcePlan(
 		logical_bytes=logical_bytes,
 		shard_ceiling=shard_ceiling,
 		shards=tuple(shards),
-		available_ram=available_ram,
+		memory_capacity=memory_capacity,
 		requested_workers=requested_workers,
 		cpu_limit=cpu_limit,
 		memory_limit=memory_limit,
@@ -229,7 +225,7 @@ def log_resource_plan(
 			f"shards={format_size(plan.shard_ceiling)} ceiling; "
 			f"workers={plan.workers}/{plan.requested_workers} requested "
 			f"(CPU {plan.cpu_limit}, RAM limit {plan.memory_limit} from "
-			f"{format_size(plan.available_ram)} available minus 16 GiB reserve)."
+			f"{format_size(plan.memory_capacity)} capacity minus 16 GiB reserve)."
 		),
 		log_level=LOG.INFO,
 	)

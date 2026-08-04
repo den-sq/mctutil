@@ -344,7 +344,7 @@ def shard_volume(
 	type=click.IntRange(min=1),
 	default=8,
 	show_default=True,
-	help="Maximum workers; available RAM and CPU count may lower it.",
+	help="Maximum workers; effective memory capacity and CPU count may lower it.",
 )
 @click.option("--include-mip0/--exclude-mip0", default=True, show_default=True)
 @click.option(

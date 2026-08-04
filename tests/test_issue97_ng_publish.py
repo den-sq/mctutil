@@ -125,7 +125,7 @@ def test_run_stage_dispatches_sibling_commands_by_keyword(
 		"workers": 2,
 		"downsample_memory": 123,
 		"shard_capacity": None,
-		"available_ram": 128 * 1024 ** 3,
+		"memory_capacity": 128 * 1024 ** 3,
 		"cpu_count": 32,
 		"release_queue_leases": True,
 		"segmentation_encoding": "compressed_segmentation",
