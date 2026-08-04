@@ -429,6 +429,7 @@ def _drain_with_progress(
 	progress_label: str,
 ) -> QueueCompletionMonitor:
 	initial = min(total, int(queue.completed or 0))
+	active_parallel = min(parallel, max(1, total - initial))
 	worker_events = []
 	monitor = None
 	try:
@@ -437,7 +438,7 @@ def _drain_with_progress(
 			length=total,
 			initial=initial,
 			start_message=(
-				f"Executing queue with {parallel} worker(s): "
+				f"Executing queue with {active_parallel} worker(s): "
 				f"completed={initial}; total={total}."
 			),
 			final_message=lambda handle: (
@@ -449,7 +450,7 @@ def _drain_with_progress(
 			try:
 				worker_events = drain_file_queue(
 					file_queue_url(queue_path),
-					parallel,
+					active_parallel,
 					lease_seconds,
 					poll=monitor.poll,
 				)
