@@ -15,6 +15,7 @@ import time
 import traceback
 
 from mctutil.shared.igneous_output import igneous_output_session
+from mctutil.shared.deps import require
 from mctutil.shared.log import log, LOG
 from mctutil.shared.resource_monitor import record_active_workers
 
@@ -63,14 +64,12 @@ def file_queue_url(path: Path) -> str:
 
 
 def _require_taskqueue():
-	try:
-		from taskqueue import QueueEmptyError, TaskQueue
-	except ImportError as exc:
-		raise RuntimeError(
-			"persistent task execution requires task-queue; "
-			"install with pip install -e '.[mesh]'"
-		) from exc
-	return QueueEmptyError, TaskQueue
+	taskqueue = require(
+		"taskqueue",
+		"mesh",
+		purpose="persistent task execution requires task-queue",
+	)
+	return taskqueue.QueueEmptyError, taskqueue.TaskQueue
 
 
 def _renew_lease(queue, task, lease_seconds: int, stopped: threading.Event) -> None:

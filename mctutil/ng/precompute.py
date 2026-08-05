@@ -15,6 +15,7 @@ import tifffile
 
 from mctutil.shared.cli import XYZ
 from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
+from mctutil.shared.deps import require
 from mctutil.shared.log import log, LOG
 from mctutil.shared.resource_monitor import record_active_workers
 from mctutil.ng.completeness import check_mip0_completeness
@@ -64,13 +65,11 @@ class WorkerBatchResult:
 
 
 def _require_cloudvolume():
-	try:
-		from cloudvolume import CloudVolume
-	except ImportError as exc:
-		raise RuntimeError(
-			"ng precompute requires CloudVolume; install with pip install -e '.[ng]'"
-		) from exc
-	return CloudVolume
+	return require(
+		"cloudvolume",
+		"ng",
+		purpose="ng precompute requires CloudVolume",
+	).CloudVolume
 
 
 def natural_sort_key(path: Path) -> tuple:

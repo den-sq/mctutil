@@ -10,6 +10,7 @@ import re
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
@@ -22,23 +23,21 @@ IMAGE_KEY = {"white": 1, "dark": 2}
 
 
 def _require_h5py():
-	try:
-		import h5py
-	except ImportError as exc:
-		raise click.ClickException(
-			"h5py is required for ALS 8.3.2 reference extraction; install mctutil[als832]."
-		) from exc
-	return h5py
+	return require(
+		"h5py",
+		"als832",
+		purpose="h5py is required for ALS 8.3.2 reference extraction",
+		error_type=click.ClickException,
+	)
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for ALS 8.3.2 reference extraction; install mctutil[als832]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"als832",
+		purpose="tifffile is required for ALS 8.3.2 reference extraction",
+		error_type=click.ClickException,
+	)
 
 
 def natural_key(value):

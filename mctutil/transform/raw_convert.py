@@ -8,6 +8,7 @@ from typing import Any
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
@@ -26,13 +27,12 @@ OUTPUT_MODE_CHOICES = ("stack", "folder")
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for TIFF output; install mctutil[transform]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"transform",
+		purpose="tifffile is required for TIFF output",
+		error_type=click.ClickException,
+	)
 
 
 def make_dtype(dtype, byte_order: str) -> np.dtype:

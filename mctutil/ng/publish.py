@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import importlib
-import importlib.util
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -25,6 +24,7 @@ from mctutil.ng.resource_planning import (
 )
 from mctutil.shared.aws import configure_aws_profile
 from mctutil.shared.cli import XYZ
+from mctutil.shared.deps import EXTRA_MODULES, install_command, module_available
 from mctutil.shared.igneous_output import igneous_output_command
 from mctutil.shared.log import log, LOG
 from mctutil.shared.persistent_queue import (
@@ -47,11 +47,6 @@ STAGE_EXTRAS = {
 	"upload": ("aws",),
 	"mesh": ("mesh",),
 }
-EXTRA_MODULES = {
-	"ng": ("cloudvolume", "cloudfiles", "zarr"),
-	"mesh": ("cloudvolume", "igneous.task_creation", "taskqueue"),
-	"aws": ("boto3",),
-}
 DERIVED_SUFFIXES = ("_precomputed", "_precomputed_sharded_local")
 
 
@@ -71,13 +66,6 @@ class DatasetPlan:
 
 def utc_now() -> str:
 	return datetime.now(timezone.utc).isoformat()
-
-
-def module_available(module_name: str) -> bool:
-	try:
-		return importlib.util.find_spec(module_name) is not None
-	except (ImportError, ModuleNotFoundError, ValueError):
-		return False
 
 
 def resolve_stage_range(
@@ -175,10 +163,6 @@ def missing_dependencies(
 			for module in EXTRA_MODULES[extra]
 		)
 	}
-
-
-def install_command(extras: tuple[str, ...]) -> str:
-	return f"pip install -e '.[{','.join(extras)}]'"
 
 
 def guess_layer_type(dataset: Path) -> str:

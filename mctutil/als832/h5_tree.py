@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
@@ -17,13 +18,12 @@ SELECTED_VALUE_MAX = 10000
 
 
 def _require_h5py():
-	try:
-		import h5py
-	except ImportError as exc:
-		raise click.ClickException(
-			"h5py is required for ALS 8.3.2 HDF5 inspection; install mctutil[als832]."
-		) from exc
-	return h5py
+	return require(
+		"h5py",
+		"als832",
+		purpose="h5py is required for ALS 8.3.2 HDF5 inspection",
+		error_type=click.ClickException,
+	)
 
 
 def fmt_val(value):

@@ -14,6 +14,7 @@ from mctutil.ng.resource_planning import (
 	plan_resources,
 )
 from mctutil.shared.cli import XYZ
+from mctutil.shared.deps import require
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
 	igneous_output_command,
@@ -28,15 +29,12 @@ from mctutil.shared.persistent_queue import (
 
 
 def _require_dependencies():
-	try:
-		import igneous.task_creation as task_creation
-		from cloudvolume import CloudVolume
-	except ImportError as exc:
-		raise RuntimeError(
-			"ng downsample-pyramid requires igneous-pipeline and task-queue; "
-			"install with pip install -e '.[ng,mesh]'"
-		) from exc
-	return CloudVolume, task_creation
+	cloudvolume, task_creation = require(
+		("cloudvolume", "igneous.task_creation"),
+		("ng", "mesh"),
+		purpose="ng downsample-pyramid requires igneous-pipeline and task-queue",
+	)
+	return cloudvolume.CloudVolume, task_creation
 
 
 def normalize_layer_path(layer_path: str) -> str:

@@ -6,17 +6,17 @@ from pathlib import Path
 
 import click
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for TIFF splitting; install mctutil[transform]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"transform",
+		purpose="tifffile is required for TIFF splitting",
+		error_type=click.ClickException,
+	)
 
 
 def extract_tiff_stack(input_path: Path, output_dir: Path, prefix: str | None = None) -> None:

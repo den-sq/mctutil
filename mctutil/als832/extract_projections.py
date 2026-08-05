@@ -8,6 +8,7 @@ import re
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
@@ -15,23 +16,21 @@ H5_PATTERNS = ("*.h5", "*.hdf5", "*.he5")
 
 
 def _require_h5py():
-	try:
-		import h5py
-	except ImportError as exc:
-		raise click.ClickException(
-			"h5py is required for ALS 8.3.2 extraction; install mctutil[als832]."
-		) from exc
-	return h5py
+	return require(
+		"h5py",
+		"als832",
+		purpose="h5py is required for ALS 8.3.2 extraction",
+		error_type=click.ClickException,
+	)
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for ALS 8.3.2 extraction; install mctutil[als832]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"als832",
+		purpose="tifffile is required for ALS 8.3.2 extraction",
+		error_type=click.ClickException,
+	)
 
 
 def natural_key(value):

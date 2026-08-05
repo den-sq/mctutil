@@ -11,6 +11,7 @@ import webbrowser
 
 import click
 
+from mctutil.shared.deps import require
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
@@ -59,14 +60,11 @@ def echo_exposure_warning(bind: str, advertise_host: str) -> None:
 
 
 def _require_range_handler():
-	try:
-		from RangeHTTPServer import RangeRequestHandler
-	except ImportError as exc:
-		raise RuntimeError(
-			"the range server requires RangeHTTPServer; "
-			"install with pip install -e '.[serve]'"
-		) from exc
-	return RangeRequestHandler
+	return require(
+		"RangeHTTPServer",
+		"serve",
+		purpose="the range server requires RangeHTTPServer",
+	).RangeRequestHandler
 
 
 def cors_range_handler(layer_root: Path, quiet: bool):
@@ -111,15 +109,16 @@ def create_flask_server(
 	port: int,
 	quiet: bool,
 ):
-	try:
-		from flask import Flask, send_from_directory
-		from flask_cors import CORS
-		from werkzeug.serving import make_server
-	except ImportError as exc:
-		raise RuntimeError(
-			"the Flask server requires flask and flask-cors; "
-			"install with pip install -e '.[serve]'"
-		) from exc
+	flask, flask_cors = require(
+		("flask", "flask_cors"),
+		"serve",
+		purpose="the Flask server requires flask and flask-cors",
+	)
+	from werkzeug.serving import make_server
+
+	Flask = flask.Flask
+	send_from_directory = flask.send_from_directory
+	CORS = flask_cors.CORS
 
 	app = Flask("mctutil-serve-ng", static_folder=None)
 	CORS(app)
@@ -175,13 +174,11 @@ def create_viewer(
 	viewer_port: int,
 	advertise_host: str,
 ) -> str:
-	try:
-		import neuroglancer
-	except ImportError as exc:
-		raise RuntimeError(
-			"the viewer requires neuroglancer; "
-			"install with pip install -e '.[serve]'"
-		) from exc
+	neuroglancer = require(
+		"neuroglancer",
+		"serve",
+		purpose="the viewer requires neuroglancer",
+	)
 
 	neuroglancer.set_server_bind_address(
 		bind_address=bind,
@@ -200,12 +197,11 @@ def create_viewer(
 
 
 def save_qr_code(url: str, path: Path) -> None:
-	try:
-		import qrcode
-	except ImportError as exc:
-		raise RuntimeError(
-			"QR creation requires qrcode; install with pip install -e '.[serve]'"
-		) from exc
+	qrcode = require(
+		"qrcode",
+		"serve",
+		purpose="QR creation requires qrcode",
+	)
 	path.parent.mkdir(parents=True, exist_ok=True)
 	qrcode.make(url).save(path)
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
@@ -15,23 +16,21 @@ DTYPE_CHOICES = ("uint8", "uint16", "uint32", "float32", "float64")
 
 
 def _require_h5py():
-	try:
-		import h5py
-	except ImportError as exc:
-		raise click.ClickException(
-			"h5py is required for HDF5 → TIFF extraction; install mctutil[transform]."
-		) from exc
-	return h5py
+	return require(
+		"h5py",
+		"transform",
+		purpose="h5py is required for HDF5 → TIFF extraction",
+		error_type=click.ClickException,
+	)
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for TIFF output; install mctutil[transform]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"transform",
+		purpose="tifffile is required for TIFF output",
+		error_type=click.ClickException,
+	)
 
 
 def safe_name(name: str) -> str:
