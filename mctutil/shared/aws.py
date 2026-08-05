@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 import click
 
+from mctutil.shared.deps import require
+
 
 DEFAULT_AWS_PROFILE = "chenglab"
 # Reject lone token variables too: they signal a partial or stale raw-key
@@ -107,13 +109,13 @@ def configure_aws_profile(
 
 def create_boto3_session(profile: str):
 	"""Construct a named Boto3 session with concise profile errors."""
-	try:
-		import boto3
-		from botocore.exceptions import BotoCoreError
-	except ImportError as exc:
-		raise click.ClickException(
-			"AWS support requires boto3; install with pip install -e '.[aws]'"
-		) from exc
+	boto3 = require(
+		"boto3",
+		"aws",
+		purpose="AWS support requires boto3",
+		error_type=click.ClickException,
+	)
+	from botocore.exceptions import BotoCoreError
 
 	try:
 		session = boto3.Session(profile_name=profile)

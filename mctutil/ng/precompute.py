@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import CancelledError, ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from multiprocessing import shared_memory
 from pathlib import Path
 import re
 import sys
@@ -15,6 +16,11 @@ import tifffile
 
 from mctutil.shared.cli import XYZ
 from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
+from mctutil.shared.deps import require
+from mctutil.shared.io_helpers import (
+	distribute_read as distribute_offset_reads,
+	offset_reads,
+)
 from mctutil.shared.log import log, LOG
 from mctutil.shared.resource_monitor import record_active_workers
 from mctutil.ng.completeness import check_mip0_completeness
@@ -27,7 +33,7 @@ SEGMENTATION_NAME_HINTS = ("segmentation", "labels")
 
 _WORKER_VOLUME = None
 _WORKER_SOURCE = None
-_WORKER_MEMMAP = False
+_WORKER_SHARED_MEMORY = None
 _WORKER_DTYPE = None
 _WORKER_OFFSET_Z = 0
 
@@ -40,6 +46,8 @@ class InputSpec:
 	source: str | tuple[str, ...]
 	shape: tuple[int, int, int]
 	dtype: np.dtype
+	raw_offset: int | None = None
+	plane_stride: int | None = None
 
 
 @dataclass(frozen=True)
@@ -64,13 +72,11 @@ class WorkerBatchResult:
 
 
 def _require_cloudvolume():
-	try:
-		from cloudvolume import CloudVolume
-	except ImportError as exc:
-		raise RuntimeError(
-			"ng precompute requires CloudVolume; install with pip install -e '.[ng]'"
-		) from exc
-	return CloudVolume
+	return require(
+		"cloudvolume",
+		"ng",
+		purpose="ng precompute requires CloudVolume",
+	).CloudVolume
 
 
 def natural_sort_key(path: Path) -> tuple:
@@ -94,11 +100,17 @@ def discover_input(path: Path) -> InputSpec:
 		try:
 			if mapped.ndim != 3:
 				raise ValueError(f"expected a 3-D memmappable TIFF, got shape {mapped.shape}")
+			if not mapped.flags.c_contiguous:
+				raise ValueError(
+					f"single TIFF input is not C-contiguous; run transform memmap-prep first: {path}"
+				)
 			return InputSpec(
 				mode="memmap",
 				source=str(path),
 				shape=tuple(int(length) for length in mapped.shape),
 				dtype=np.dtype(mapped.dtype),
+				raw_offset=int(mapped.offset),
+				plane_stride=int(mapped.strides[0]),
 			)
 		finally:
 			del mapped
@@ -315,10 +327,12 @@ def _init_worker(
 	cloudpath: str,
 	dtype_name: str,
 	source,
-	memmap_source: bool,
+	shared_source: bool,
+	shared_shape: tuple[int, int, int] | None,
+	source_dtype_name: str,
 	offset_z: int,
 ) -> None:
-	global _WORKER_VOLUME, _WORKER_SOURCE, _WORKER_MEMMAP, _WORKER_DTYPE, _WORKER_OFFSET_Z
+	global _WORKER_VOLUME, _WORKER_SOURCE, _WORKER_SHARED_MEMORY, _WORKER_DTYPE, _WORKER_OFFSET_Z
 	CloudVolume = _require_cloudvolume()
 	patch_cloudfiles_monitoring()
 	_WORKER_VOLUME = CloudVolume(
@@ -329,15 +343,27 @@ def _init_worker(
 		compress=False,
 	)
 	_WORKER_DTYPE = np.dtype(dtype_name)
-	_WORKER_MEMMAP = memmap_source
 	_WORKER_OFFSET_Z = offset_z
-	_WORKER_SOURCE = tifffile.memmap(source) if memmap_source else source
-
-
-def _write_slice(z_index: int) -> int:
-	if _WORKER_MEMMAP:
-		image = _WORKER_SOURCE[z_index, :, :]
+	if _WORKER_SHARED_MEMORY is not None:
+		_WORKER_SHARED_MEMORY.close()
+	if shared_source:
+		_WORKER_SHARED_MEMORY = shared_memory.SharedMemory(name=source)
+		_WORKER_SOURCE = np.ndarray(
+			shared_shape,
+			dtype=np.dtype(source_dtype_name),
+			buffer=_WORKER_SHARED_MEMORY.buf,
+		)
 	else:
+		_WORKER_SHARED_MEMORY = None
+		_WORKER_SOURCE = source
+
+
+def _write_slice(work_item: int | tuple[int, int]) -> int:
+	if isinstance(work_item, tuple):
+		z_index, slot_index = work_item
+		image = _WORKER_SOURCE[slot_index, :, :]
+	else:
+		z_index = work_item
 		image = tifffile.imread(_WORKER_SOURCE[z_index])
 	if image.ndim != 2:
 		raise ValueError(f"Z={z_index} is not a 2-D image: {image.shape}")
@@ -358,7 +384,7 @@ def _harvest_completed_futures(futures, completed: set[int]) -> None:
 			continue
 
 
-def _execute_slices(
+def _execute_slices(  # noqa: C901
 	cloudpath: str,
 	input_spec: InputSpec,
 	plan: VolumePlan,
@@ -366,36 +392,90 @@ def _execute_slices(
 	workers: int,
 	progress=None,
 ) -> WorkerBatchResult:
+	if not z_indices:
+		return WorkerBatchResult(frozenset(), None)
+
 	pool_options = {}
 	if sys.version_info >= (3, 11):
 		pool_options["max_tasks_per_child"] = 500
 
-	pool = ProcessPoolExecutor(
-		max_workers=workers,
-		initializer=_init_worker,
-		initargs=(
-			cloudpath,
-			plan.dtype.name,
-			input_spec.source,
-			input_spec.mode == "memmap",
-			plan.voxel_offset[2],
-		),
-		**pool_options,
-	)
+	shared_source = input_spec.mode == "memmap"
+	staging_memory = None
+	shared_shape = None
+	worker_source = input_spec.source
+	if shared_source:
+		if input_spec.raw_offset is None or input_spec.plane_stride is None:
+			raise ValueError("memmap input is missing its raw byte layout")
+		_, y_size, x_size = input_spec.shape
+		slot_count = min(workers, len(z_indices))
+		shared_shape = (slot_count, y_size, x_size)
+		plane_size = y_size * x_size * input_spec.dtype.itemsize
+		staging_memory = shared_memory.SharedMemory(
+			create=True,
+			size=slot_count * plane_size,
+		)
+		worker_source = staging_memory.name
+
+	pool = None
 	futures = []
 	completed = set()
 	failure = None
 	try:
-		for z_index in z_indices:
-			futures.append(pool.submit(_write_slice, z_index))
-		for future in as_completed(futures):
-			completed.add(future.result())
-			if progress is not None:
-				progress.update(1)
+		pool = ProcessPoolExecutor(
+			max_workers=workers,
+			initializer=_init_worker,
+			initargs=(
+				cloudpath,
+				plan.dtype.name,
+				worker_source,
+				shared_source,
+				shared_shape,
+				input_spec.dtype.name,
+				plan.voxel_offset[2],
+			),
+			**pool_options,
+		)
+
+		if shared_source:
+			for batch_start in range(0, len(z_indices), shared_shape[0]):
+				batch = z_indices[batch_start:batch_start + shared_shape[0]]
+				reads = []
+				for slot_index, z_index in enumerate(batch):
+					reads.extend(offset_reads(
+						input_spec.source,
+						source_offset=input_spec.raw_offset + z_index * input_spec.plane_stride,
+						target_offset=slot_index * plane_size,
+						size=plane_size,
+					))
+				distribute_offset_reads(
+					staging_memory,
+					reads,
+					thread_max=min(workers, len(batch)),
+				)
+				batch_futures = [
+					pool.submit(_write_slice, (z_index, slot_index))
+					for slot_index, z_index in enumerate(batch)
+				]
+				futures.extend(batch_futures)
+				for future in as_completed(batch_futures):
+					completed.add(future.result())
+					if progress is not None:
+						progress.update(1)
+		else:
+			for z_index in z_indices:
+				futures.append(pool.submit(_write_slice, z_index))
+			for future in as_completed(futures):
+				completed.add(future.result())
+				if progress is not None:
+					progress.update(1)
 	except BrokenProcessPool as exc:
 		failure = exc
 	finally:
-		pool.shutdown(wait=True, cancel_futures=failure is not None)
+		if pool is not None:
+			pool.shutdown(wait=True, cancel_futures=failure is not None)
+		if staging_memory is not None:
+			staging_memory.close()
+			staging_memory.unlink()
 
 	if failure is not None:
 		known_completed = set(completed)

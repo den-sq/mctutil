@@ -10,7 +10,7 @@ main = LazyGroup(
 		"convert": "mctutil.transform.convert:convert",
 		"df-write-tiff": "mctutil.transform.df_write_tiff:df_write_tiff",
 		"dicom-conv": "mctutil.transform.dicom_conv:dicom_conv",
-		"downsample": "mctutil.transform.downsample:downsample",
+		"downsample": "mctutil.transform.convert:downsample",
 		"find-bounds": "mctutil.transform.find_bounds:find_bounds",
 		"fix-name": "mctutil.transform.fix_name:fix_names",
 		"flip": "mctutil.transform.flip:flip_stack",

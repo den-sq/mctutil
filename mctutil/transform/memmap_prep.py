@@ -10,6 +10,7 @@ import click
 import numpy as np
 import tifffile
 
+from mctutil.shared.deps import require
 
 OUTPUT_DTYPES = ("original", "uint16", "uint32", "uint64")
 NORMALIZE_MODES = ("none", "minmax", "percentile", "manual")
@@ -211,13 +212,11 @@ def _normalization_range(
 @contextmanager
 def open_tiff_zarr(tif):
 	"""Open tifffile's streaming store with its source-compatible Zarr API."""
-	try:
-		import zarr
-	except ImportError as exc:
-		raise RuntimeError(
-			"memmap preparation requires zarr; "
-			"install with pip install -e '.[transform]'"
-		) from exc
+	zarr = require(
+		"zarr",
+		"transform",
+		purpose="memmap preparation requires zarr",
+	)
 
 	store = tif.aszarr()
 	try:

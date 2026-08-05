@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import inspect
-import json
 from pathlib import Path
 
 import click
 
-from mctutil.ng.downsample_pyramid import (
+from mctutil.shared.cloudpaths import (
 	default_queue_root,
 	local_layer_path,
 	normalize_layer_path,
+	select_layer_encoding,
 )
 from mctutil.ng.resource_planning import (
 	log_resource_plan,
@@ -20,6 +20,7 @@ from mctutil.ng.resource_planning import (
 	ResourcePlan,
 )
 from mctutil.shared.cli import XYZ
+from mctutil.shared.deps import require
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
 	igneous_output_command,
@@ -31,20 +32,20 @@ from mctutil.shared.persistent_queue import (
 	stable_fingerprint,
 	write_state,
 )
+from mctutil.shared.sharded_tree import (
+	sharded_scale_complete as destination_scale_complete,
+)
 
 SHARD_COMPRESSION = "gzip"
 
 
 def _require_dependencies():
-	try:
-		import igneous.task_creation as task_creation
-		from cloudvolume import CloudVolume
-	except ImportError as exc:
-		raise RuntimeError(
-			"ng shard requires igneous-pipeline and task-queue; "
-			"install with pip install -e '.[ng,mesh]'"
-		) from exc
-	return CloudVolume, task_creation
+	cloudvolume, task_creation = require(
+		("cloudvolume", "igneous.task_creation"),
+		("ng", "mesh"),
+		purpose="ng shard requires igneous-pipeline and task-queue",
+	)
+	return cloudvolume.CloudVolume, task_creation
 
 
 def parse_mips(_context, _parameter, value: str | None) -> tuple[int, ...] | None:
@@ -92,25 +93,6 @@ def detect_mips(source: str, info: dict) -> tuple[int, ...]:
 		if child.name.isdecimal():
 			detected.add(int(child.name))
 	return tuple(sorted(detected))
-
-
-def destination_scale_complete(destination: str, mip: int) -> bool:
-	"""Conservatively recognize a locally staged scale with shard data."""
-	destination_path = local_layer_path(destination)
-	if destination_path is None:
-		return False
-	info_path = destination_path / "info"
-	if not info_path.is_file():
-		return False
-	try:
-		info = json.loads(info_path.read_text(encoding="utf-8"))
-		scale = info["scales"][mip]
-	except (IndexError, KeyError, json.JSONDecodeError):
-		return False
-	if not scale.get("sharding") or not scale.get("key"):
-		return False
-	scale_path = destination_path / scale["key"]
-	return scale_path.is_dir() and any(scale_path.glob("*.shard"))
 
 
 def create_shard_tasks(
@@ -382,10 +364,11 @@ def shard(
 	"""Stage a precomputed pyramid into sharded Neuroglancer scales."""
 	try:
 		layer_type, source_encoding, info = inspect_source(source)
-		if encoding == "auto":
-			encoding = "raw" if layer_type == "image" else source_encoding
-			if layer_type == "segmentation" and encoding == "raw":
-				encoding = "compressed_segmentation"
+		encoding = select_layer_encoding(
+			encoding,
+			layer_type,
+			source_encoding,
+		)
 		mips = mips or detect_mips(source, info)
 		if not include_mip0:
 			mips = tuple(mip for mip in mips if mip != 0)

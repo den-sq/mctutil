@@ -1,17 +1,120 @@
 from collections import namedtuple
+from dataclasses import dataclass
 from enum import Enum
 from multiprocessing import Pool, shared_memory
 from os import PathLike
-from typing import Callable, Mapping
+from typing import Iterable
 
 import numpy as np
 from numpy.typing import ArrayLike
 from psutil import cpu_count
 
-from mctutil.shared.log import log, LOG
 from mctutil.shared.mem import SharedNP
 
 FlatPair = namedtuple("FlatPair", ["Index", "Offset"])
+
+
+@dataclass(frozen=True)
+class RawOffsetRead:
+	"""One raw byte span copied from a file into shared memory."""
+
+	source: PathLike
+	source_offset: int
+	target_offset: int
+	size: int
+
+	def __post_init__(self):
+		for name in ("source_offset", "target_offset", "size"):
+			value = getattr(self, name)
+			if value < 0:
+				raise ValueError(f"{name} must be non-negative, got {value}")
+
+
+def offset_reads(
+	source: PathLike,
+	*,
+	source_offset: int,
+	target_offset: int,
+	size: int,
+	count: int = 1,
+	source_stride: int | None = None,
+	target_stride: int | None = None,
+) -> tuple[RawOffsetRead, ...]:
+	"""Build layout-agnostic strided raw-byte reads."""
+	if count < 0:
+		raise ValueError(f"count must be non-negative, got {count}")
+	source_stride = size if source_stride is None else source_stride
+	target_stride = size if target_stride is None else target_stride
+	return tuple(
+		RawOffsetRead(
+			source=source,
+			source_offset=source_offset + index * source_stride,
+			target_offset=target_offset + index * target_stride,
+			size=size,
+		)
+		for index in range(count)
+	)
+
+
+def readinto_offset(source_handle, target_buffer, read: RawOffsetRead) -> None:
+	"""Copy one exact raw file span into an arbitrary shared-memory span."""
+	target_stop = read.target_offset + read.size
+	if target_stop > len(target_buffer):
+		raise ValueError(
+			f"raw read target exceeds shared memory: stop={target_stop}, "
+			f"available={len(target_buffer)}"
+		)
+	source_handle.seek(read.source_offset)
+	target = target_buffer[read.target_offset:target_stop]
+	try:
+		read_count = source_handle.readinto(target)
+	finally:
+		target.release()
+	if read_count != read.size:
+		raise EOFError(
+			f"short raw read from {read.source}: expected {read.size} bytes at "
+			f"offset {read.source_offset}, got {read_count}"
+		)
+
+
+def _readinto_shared(target: str, source: PathLike, reads: tuple[RawOffsetRead, ...]) -> None:
+	"""Attach to shared memory and perform one source file's raw reads."""
+	memory = shared_memory.SharedMemory(name=target)
+	try:
+		with open(source, "rb", buffering=0) as source_handle:
+			for read in reads:
+				readinto_offset(source_handle, memory.buf, read)
+	finally:
+		memory.close()
+
+
+def distribute_read(
+	target_mem: SharedNP | shared_memory.SharedMemory | str,
+	reads: Iterable[RawOffsetRead],
+	thread_max: int | None = None,
+) -> None:
+	"""Distribute layout-agnostic raw-offset reads into shared memory."""
+	grouped: dict[PathLike, list[RawOffsetRead]] = {}
+	for read in reads:
+		grouped.setdefault(read.source, []).append(read)
+	if not grouped:
+		return
+
+	target_name = target_mem if isinstance(target_mem, str) else target_mem.name
+	if thread_max is not None and thread_max < 1:
+		raise ValueError(f"thread_max must be positive, got {thread_max}")
+	requested_workers = thread_max or cpu_count() or 1
+	worker_count = min(requested_workers, len(grouped))
+	jobs = [
+		(target_name, source, tuple(source_reads))
+		for source, source_reads in grouped.items()
+	]
+	if worker_count == 1:
+		for job in jobs:
+			_readinto_shared(*job)
+		return
+	with Pool(worker_count) as pool:
+		pool.starmap(_readinto_shared, jobs)
 
 
 class FLAT(Enum):
@@ -52,44 +155,14 @@ def memmap_helper(target, image, i_dtype, offsets, size):
 
 
 def byteread_helper(target: SharedNP, image: PathLike, _i_dtype: np.dtype, offsets: ArrayLike, size: int):
-	"""Sinogram order-capable reader using direct buffer reads."""
-	sm = shared_memory.SharedMemory(name=target)
-	with open(image, "rb") as handle:
-		handle.seek(offsets[0]["source"])
-		for offset in offsets:
-			handle.readinto(sm.buf[offset["target"]:offset["target"] + size])
-	sm.close()
-
-
-def distribute_read(target_mem: SharedNP, pj: Mapping, window, int_window,
-					image_order: ArrayLike, thread_max: int = cpu_count(),
-					read_func: Callable = byteread_helper, sino_order: bool = True):
-	"""Distribute direct reads across workers."""
-	h_step = pj["x"] * pj["bytesize"]
-	sino_block_size = target_mem.shape.Theta * h_step
-	proj_block_size = len(int_window) * h_step
-	base_offset = target_mem[int_window].buffer_address.start
-
-	def generate_offset_pairs_sino(i):
-		return [{"source": pj["offset"] + (window.start + j) * h_step,
-				"target": int(base_offset + j * sino_block_size + i * h_step)}
-					for j in range(len(int_window))]
-
-	def generate_offset_pairs_proj(i):
-		return [{"source": pj["offset"] + window.start * h_step, "target": int(base_offset + i * proj_block_size)}]
-
-	if sino_order:
-		log.write("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
-			+ f" to {base_offset + len(int_window) * sino_block_size}", log_level=LOG.INFO)
-		pairs_func = generate_offset_pairs_sino
-		size = h_step
-	else:
-		log.write("Files Into Memory", f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
-			+ f" to {base_offset + len(int_window) * proj_block_size} out of {target_mem[int_window].buffer_address}",
-			log_level=LOG.INFO)
-		pairs_func = generate_offset_pairs_proj
-		size = proj_block_size
-
-	with Pool(thread_max) as pool:
-		pool.starmap(read_func,
-			[(target_mem.name, image, pj["dtype"], pairs_func(i), size) for i, image in image_order])
+	"""Compatibility wrapper for callers using the legacy offset dictionaries."""
+	reads = tuple(
+		RawOffsetRead(
+			source=image,
+			source_offset=int(offset["source"]),
+			target_offset=int(offset["target"]),
+			size=size,
+		)
+		for offset in offsets
+	)
+	_readinto_shared(target, image, reads)

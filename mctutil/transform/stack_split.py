@@ -6,17 +6,18 @@ from pathlib import Path
 
 import click
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
+from mctutil.shared.tiff_stack_writer import SliceNaming, write_tiff_stack
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for TIFF splitting; install mctutil[transform]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"transform",
+		purpose="tifffile is required for TIFF splitting",
+		error_type=click.ClickException,
+	)
 
 
 def extract_tiff_stack(input_path: Path, output_dir: Path, prefix: str | None = None) -> None:
@@ -28,7 +29,6 @@ def extract_tiff_stack(input_path: Path, output_dir: Path, prefix: str | None = 
 	"""
 	tifffile = _require_tifffile()
 
-	output_dir.mkdir(parents=True, exist_ok=True)
 	if prefix is None:
 		prefix = input_path.stem
 
@@ -51,8 +51,7 @@ def extract_tiff_stack(input_path: Path, output_dir: Path, prefix: str | None = 
 
 		digits = max(4, len(str(num_pages)))
 
-		for z, page in enumerate(tif.pages):
-			arr = page.asarray()
+		def validate_frame(arr, z):
 			# Guard against inconsistent pages, which tifffile allows in principle
 			# but our per-slice-per-file split cannot represent.
 			if arr.shape[:2] != (height, width):
@@ -60,15 +59,23 @@ def extract_tiff_stack(input_path: Path, output_dir: Path, prefix: str | None = 
 					f"Page {z} has shape {arr.shape}, expected ({height}, {width})"
 				)
 
-			out_path = output_dir / f"{prefix}_z{z:0{digits}d}.tif"
-			tifffile.imwrite(out_path, arr)
-
-			if z % 100 == 0 or z == num_pages - 1:
+		write_tiff_stack(
+			lambda z: tif.pages[z].asarray(),
+			num_pages,
+			output_dir,
+			mode="slices",
+			naming=SliceNaming(prefix=prefix, digits=digits),
+			validate_frame=validate_frame,
+			on_progress=lambda position, total, _index, path: (
 				log.write(
 					"Stack Progress",
-					f"slice {z + 1}/{num_pages}: {out_path.name}",
+					f"slice {position + 1}/{total}: {path.name}",
 					log_level=LOG.INFO,
 				)
+				if position % 100 == 0 or position == total - 1
+				else None
+			),
+		)
 
 	log.write("Stack Done", str(output_dir), log_level=LOG.STATUS)
 

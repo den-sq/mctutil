@@ -70,30 +70,39 @@ from pathlib import Path
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 try:
 	from scipy.ndimage import gaussian_filter, map_coordinates, zoom
 except ImportError:
 	def _missing_scipy(*_args, **_kwargs):
-		raise RuntimeError("scipy is required for flat beam tracking; install mctutil[flats].")
+		require(
+			"scipy",
+			"flats",
+			purpose="scipy is required for flat beam tracking",
+		)
 
 	gaussian_filter = map_coordinates = zoom = _missing_scipy
 
 
 def _require_scipy():
 	if getattr(gaussian_filter, "__name__", "") == "_missing_scipy":
-		raise click.ClickException("scipy is required for flat beam tracking; install mctutil[flats].")
+		require(
+			"scipy",
+			"flats",
+			purpose="scipy is required for flat beam tracking",
+			error_type=click.ClickException,
+		)
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for flat beam tracking; install mctutil[flats]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"flats",
+		purpose="tifffile is required for flat beam tracking",
+		error_type=click.ClickException,
+	)
 
 
 # --------------------------------------------------------------------------- #
@@ -134,10 +143,11 @@ _IMMERKAER = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], float)
 def estimate_noise_floor(img, patch=64):
 	"""Robust white-noise std (ADU). Immerkaer response per patch; the smoothest
 	patches (low percentile) give the noise floor, immune to real structure."""
-	try:
-		from scipy.signal import convolve2d
-	except ImportError as exc:
-		raise RuntimeError("scipy is required for flat beam tracking; install mctutil[flats].") from exc
+	convolve2d = require(
+		"scipy.signal",
+		"flats",
+		purpose="scipy is required for flat beam tracking",
+	).convolve2d
 	a = _clean(img)
 	H, W = a.shape
 	vals = []

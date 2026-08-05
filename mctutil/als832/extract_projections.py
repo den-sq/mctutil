@@ -8,30 +8,21 @@ import re
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
+from mctutil.shared.tiff_stack_writer import SliceNaming, write_tiff_stack
 
 
 H5_PATTERNS = ("*.h5", "*.hdf5", "*.he5")
 
 
 def _require_h5py():
-	try:
-		import h5py
-	except ImportError as exc:
-		raise click.ClickException(
-			"h5py is required for ALS 8.3.2 extraction; install mctutil[als832]."
-		) from exc
-	return h5py
-
-
-def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for ALS 8.3.2 extraction; install mctutil[als832]."
-		) from exc
-	return tifffile
+	return require(
+		"h5py",
+		"als832",
+		purpose="h5py is required for ALS 8.3.2 extraction",
+		error_type=click.ClickException,
+	)
 
 
 def natural_key(value):
@@ -107,31 +98,53 @@ def process_file(path, out_root, step=1, projection_range=None, multipage=False,
 			),
 			log_level=LOG.STATUS,
 		)
-		if dry_run:
-			return len(indices)
-
-		tifffile = _require_tifffile()
 		width = max(4, len(str(n_frames - 1)))
 		tick = max(1, len(indices) // 20)
 
+		def progress(position, total, _index, _target):
+			if position % tick == 0 or position == total - 1:
+				log.write(
+					"Progress",
+					f"{path.name}: {position + 1}/{total}",
+					log_level=LOG.INFO,
+				)
+
 		if multipage:
 			folder = out_root
-			folder.mkdir(parents=True, exist_ok=True)
 			target = folder / f"{path.stem}_projections.tif"
-			with tifffile.TiffWriter(str(target), bigtiff=True) as writer:
-				for written_index, frame_index in enumerate(indices):
-					writer.write(np.asarray(dataset[frame_index]), contiguous=True)
-					if written_index % tick == 0 or written_index == len(indices) - 1:
-						log.write("Progress", f"{path.name}: {written_index + 1}/{len(indices)}", log_level=LOG.INFO)
-			log.write("File Written", str(target))
+			write_tiff_stack(
+				lambda frame_index: np.asarray(dataset[frame_index]),
+				len(indices),
+				target,
+				mode="stack",
+				indices=indices,
+				bigtiff=True,
+				contiguous=True,
+				dry_run=dry_run,
+				extra="als832",
+				on_progress=progress,
+			)
+			if not dry_run:
+				log.write("File Written", str(target))
 		else:
 			folder = out_root / path.stem
-			folder.mkdir(parents=True, exist_ok=True)
-			for written_index, frame_index in enumerate(indices):
-				tifffile.imwrite(str(folder / f"{path.stem}_{frame_index:0{width}d}.tif"), np.asarray(dataset[frame_index]))
-				if written_index % tick == 0 or written_index == len(indices) - 1:
-					log.write("Progress", f"{path.name}: {written_index + 1}/{len(indices)}", log_level=LOG.INFO)
-			log.write("Directory Written", str(folder))
+			write_tiff_stack(
+				lambda frame_index: np.asarray(dataset[frame_index]),
+				len(indices),
+				folder,
+				mode="slices",
+				indices=indices,
+				naming=SliceNaming(
+					prefix=path.stem,
+					digits=width,
+					separator="_",
+				),
+				dry_run=dry_run,
+				extra="als832",
+				on_progress=progress,
+			)
+			if not dry_run:
+				log.write("Directory Written", str(folder))
 
 		return len(indices)
 

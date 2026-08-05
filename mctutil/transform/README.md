@@ -9,8 +9,12 @@ Run `mctutil transform --help` to list commands and
 
 - **`trim`** — Crop an image stack (per-axis absolute or percentage trims).
 - **`normalize`** — Normalize an image stack over a percentile value range.
-- **`convert`** — Convert an image stack's dtype, optionally splitting into horizontal sections.
-- **`downsample`** — Downsample an image stack, with output-dtype control.
+- **`convert`** — Convert an image stack's dtype, optionally splitting into
+  horizontal sections. Use `--preserve-names --uncompressed` for the former
+  dtype-only `downsample` behavior.
+- **`downsample`** — Deprecated alias for filename-preserving dtype conversion;
+  despite its name it performs no spatial downsampling. Existing scripts remain
+  supported during the migration window. Spatial binning is tracked in #132.
 - **`transpose`** — Transpose a reconstruction stack (`--mode shared|naive`), tracking angular vertical shift.
 - **`flip`** — Flip a TIFF stack along the depth, row, or column axis.
 - **`reslice`** — Write XY, XZ, and YZ TIFF slices through a stack coordinate.

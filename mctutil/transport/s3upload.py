@@ -2,7 +2,6 @@ from pathlib import Path
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
-import json
 from queue import Empty as ProgressQueueEmpty, Queue
 from threading import Lock
 from botocore.exceptions import ClientError
@@ -18,6 +17,7 @@ from mctutil.shared.aws import (
 from mctutil.shared.log import log, LOG
 from mctutil.shared.mesh import build_mesh
 from mctutil.shared.resource_monitor import record_active_workers
+from mctutil.shared.sharded_tree import read_sharded_scales
 
 _sessions = {}
 SYNC_STATUSES = ("planned", "skipped", "uploaded")
@@ -176,38 +176,6 @@ def _join_key(*parts) -> str:
 		for part in parts
 		if str(part).strip("/")
 	)
-
-
-def read_sharded_scales(
-	source_folder: Path,
-	include_mip0: bool = True,
-) -> list[tuple[int, str, Path]]:
-	"""Return declared scale directories after validating sharding metadata."""
-	info_path = source_folder / "info"
-	if not info_path.is_file():
-		raise ValueError(f"sharded tree is missing info: {info_path}")
-	try:
-		info = json.loads(info_path.read_text(encoding="utf-8"))
-	except json.JSONDecodeError as exc:
-		raise ValueError(f"invalid precomputed info: {info_path}") from exc
-
-	declared_scales = info.get("scales", [])
-	if not declared_scales:
-		raise ValueError("sharded tree has no scales")
-	scales = []
-	for mip, scale in enumerate(declared_scales):
-		if mip == 0 and not include_mip0:
-			continue
-		key = scale.get("key")
-		if not key:
-			raise ValueError(f"scale {mip} has no key")
-		if not scale.get("sharding"):
-			raise ValueError(f"scale {mip} is not sharded")
-		scale_path = source_folder / key
-		if not scale_path.is_dir():
-			raise ValueError(f"scale {mip} directory is missing: {scale_path}")
-		scales.append((mip, str(key), scale_path))
-	return scales
 
 
 def format_bytes(value: int) -> str:

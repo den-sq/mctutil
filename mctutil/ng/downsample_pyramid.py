@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 import click
 
@@ -14,6 +13,12 @@ from mctutil.ng.resource_planning import (
 	plan_resources,
 )
 from mctutil.shared.cli import XYZ
+from mctutil.shared.cloudpaths import (
+	default_queue_root,
+	normalize_layer_path,
+	select_layer_encoding,
+)
+from mctutil.shared.deps import require
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
 	igneous_output_command,
@@ -28,38 +33,12 @@ from mctutil.shared.persistent_queue import (
 
 
 def _require_dependencies():
-	try:
-		import igneous.task_creation as task_creation
-		from cloudvolume import CloudVolume
-	except ImportError as exc:
-		raise RuntimeError(
-			"ng downsample-pyramid requires igneous-pipeline and task-queue; "
-			"install with pip install -e '.[ng,mesh]'"
-		) from exc
-	return CloudVolume, task_creation
-
-
-def normalize_layer_path(layer_path: str) -> str:
-	if "://" in layer_path:
-		return layer_path
-	return Path(layer_path).resolve().as_uri()
-
-
-def local_layer_path(layer_path: str) -> Path | None:
-	value = layer_path.removeprefix("precomputed://")
-	if "://" not in value:
-		return Path(value).resolve()
-	parsed = urlparse(value)
-	if parsed.scheme != "file":
-		return None
-	return Path(unquote(parsed.path)).resolve()
-
-
-def default_queue_root(layer_path: str) -> Path:
-	local_path = local_layer_path(layer_path)
-	if local_path is None:
-		raise ValueError("--queue is required for non-local layer paths")
-	return local_path / ".mctutil-queues"
+	cloudvolume, task_creation = require(
+		("cloudvolume", "igneous.task_creation"),
+		("ng", "mesh"),
+		purpose="ng downsample-pyramid requires igneous-pipeline and task-queue",
+	)
+	return cloudvolume.CloudVolume, task_creation
 
 
 def inspect_volume(layer_path: str) -> dict:
@@ -342,10 +321,11 @@ def downsample_pyramid(
 		layer_type = info.get("type", "image")
 		scales = info["scales"]
 		source_encoding = scales[0].get("encoding", "raw")
-		if encoding == "auto":
-			encoding = "raw" if layer_type == "image" else source_encoding
-			if layer_type == "segmentation" and encoding == "raw":
-				encoding = "compressed_segmentation"
+		encoding = select_layer_encoding(
+			encoding,
+			layer_type,
+			source_encoding,
+		)
 		queue_dir = queue_dir or default_queue_root(layer_path)
 		if isinstance(capacity_override, str):
 			capacity_override = parse_size(capacity_override)

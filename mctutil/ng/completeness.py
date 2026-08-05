@@ -7,9 +7,10 @@ import json
 import math
 import os
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 import numpy as np
+
+from mctutil.shared.cloudpaths import local_layer_path
 
 
 VARIABLE_SIZE_ENCODINGS = {"compressed_segmentation", "compresso"}
@@ -47,17 +48,6 @@ class Mip0Spec:
 	chunk_size: tuple[int, ...]
 	num_channels: int
 	dtype: np.dtype
-
-
-def local_layer_path(layer_path: str | Path) -> Path | None:
-	"""Resolve plain and file:// precomputed paths without importing CloudVolume."""
-	value = str(layer_path).removeprefix("precomputed://")
-	if "://" not in value:
-		return Path(value).resolve()
-	parsed = urlparse(value)
-	if parsed.scheme != "file":
-		return None
-	return Path(unquote(parsed.path)).resolve()
 
 
 def _failure(

@@ -10,6 +10,7 @@ from mctutil.shared.aws import (
 	preflight_s3_info,
 	s3_location,
 )
+from mctutil.shared.deps import require
 from mctutil.shared.igneous_output import (
 	capture_igneous_call,
 	igneous_output_command,
@@ -20,16 +21,13 @@ from mctutil.shared.resource_monitor import record_active_workers
 
 
 def _require_mesh_dependencies():
-	try:
-		import igneous.task_creation as task_creation
-		from taskqueue import LocalTaskQueue
-	except ImportError as exc:
-		raise click.ClickException(
-			"Mesh support requires igneous-pipeline and task-queue; "
-			"install with pip install -e '.[mesh]'"
-		) from exc
-
-	return LocalTaskQueue, task_creation
+	taskqueue, task_creation = require(
+		("taskqueue", "igneous.task_creation"),
+		"mesh",
+		purpose="Mesh support requires igneous-pipeline and task-queue",
+		error_type=click.ClickException,
+	)
+	return taskqueue.LocalTaskQueue, task_creation
 
 
 @igneous_output_command

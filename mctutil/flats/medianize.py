@@ -7,17 +7,17 @@ from pathlib import Path
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
 
 
 def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for flat medianization; install mctutil[flats]."
-		) from exc
-	return tifffile
+	return require(
+		"tifffile",
+		"flats",
+		purpose="tifffile is required for flat medianization",
+		error_type=click.ClickException,
+	)
 
 
 def flat_key(path):

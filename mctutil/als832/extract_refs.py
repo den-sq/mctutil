@@ -10,7 +10,9 @@ import re
 import click
 import numpy as np
 
+from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
+from mctutil.shared.tiff_stack_writer import SliceNaming, write_tiff_stack
 
 
 H5_PATTERNS = ("*.h5", "*.hdf5", "*.he5")
@@ -22,23 +24,12 @@ IMAGE_KEY = {"white": 1, "dark": 2}
 
 
 def _require_h5py():
-	try:
-		import h5py
-	except ImportError as exc:
-		raise click.ClickException(
-			"h5py is required for ALS 8.3.2 reference extraction; install mctutil[als832]."
-		) from exc
-	return h5py
-
-
-def _require_tifffile():
-	try:
-		import tifffile
-	except ImportError as exc:
-		raise click.ClickException(
-			"tifffile is required for ALS 8.3.2 reference extraction; install mctutil[als832]."
-		) from exc
-	return tifffile
+	return require(
+		"h5py",
+		"als832",
+		purpose="h5py is required for ALS 8.3.2 reference extraction",
+		error_type=click.ClickException,
+	)
 
 
 def natural_key(value):
@@ -257,22 +248,42 @@ def extract_stack(path, out_root, manifest_rows, stack_info, timestamps, meta, d
 	n_frames = dataset.shape[0]
 	dest = out_root / subfolder
 	need_write = write_frames and not dry_run
-	tifffile = _require_tifffile() if need_write else None
-	if need_write:
-		dest.mkdir(parents=True, exist_ok=True)
 
 	frame_timestamps = timestamps.get(label)
 	width = max(3, len(str(n_frames - 1)))
+	naming = SliceNaming(
+		prefix=f"{path.stem}__{label}",
+		digits=width,
+		separator="_",
+	)
+	stats_by_index = {}
+	planned_paths = ()
+	if write_frames:
+		planned_paths = write_tiff_stack(
+			lambda index: np.asarray(dataset[index]),
+			n_frames,
+			dest,
+			mode="slices",
+			naming=naming,
+			dry_run=dry_run,
+			extra="als832",
+			on_frame=lambda frame, index, _target: stats_by_index.__setitem__(
+				index,
+				_frame_stats(frame),
+			),
+		)
 	for index in range(n_frames):
-		filename = f"{path.stem}__{label}_{index:0{width}d}.tif"
+		filename = naming.filename(index)
 		relative_path = f"{subfolder}/{filename}"
 		if need_write:
-			frame = np.asarray(dataset[index])
-			tifffile.imwrite(str(dest / filename), frame)
-			stats = _frame_stats(frame)
+			stats = stats_by_index[index]
 		else:
 			if dry_run and write_frames:
-				log.write("Dry Run", f"Would write {dest / filename}", log_level=LOG.INFO)
+				log.write(
+					"Dry Run",
+					f"Would write {planned_paths[index]}",
+					log_level=LOG.INFO,
+				)
 			stats = ("", "", "")
 		timestamp = frame_timestamps[index] if frame_timestamps else ""
 		output = relative_path if write_frames else ""
