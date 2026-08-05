@@ -1,28 +1,7 @@
-from pathlib import Path
+"""Compatibility surface for the deprecated ``transform downsample`` alias."""
 
-import click
-import numpy as np
-import tifffile as tf
-
-
-from mctutil.shared import cli
-from mctutil.shared.log import log
-from mctutil.shared.np_convert import np_convert
-
-
-@click.command
-@click.option('-d', '--data-dir', type=click.Path(exists=True), help='Input path for original dataset.')
-@click.option('-o', '--output-dir', type=click.Path(), help='Output path for transformed dataset.')
-@click.option('-t', "--out-dtype", type=cli.NUMPYTYPE, default=np.uint8, help="Datatype of Output.")
-def downsample(data_dir, output_dir, out_dtype):
-	log.start()
-	out_dir = Path(output_dir)
-	out_dir.mkdir(parents=True, exist_ok=True)
-	dtype = out_dtype.nptype
-	for path in Path(data_dir).iterdir():
-		in_img = tf.imread(path)
-		tf.imwrite(Path(out_dir, path.name), np_convert(dtype, in_img), dtype=dtype)
-		log.write("File Written", path.name)
+from mctutil.shared import cli  # noqa: F401
+from mctutil.transform.convert import downsample
 
 
 if __name__ == "__main__":
