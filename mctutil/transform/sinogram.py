@@ -13,7 +13,11 @@ import tifffile as tf
 
 from mctutil.shared.log import log, LOG
 from mctutil.shared import cli
-from mctutil.shared.io_helpers import FLAT, distribute_read
+from mctutil.shared.io_helpers import (
+	FLAT,
+	distribute_read as distribute_offset_reads,
+	offset_reads,
+)
 from mctutil.shared.mem import SharedNP, ProjOrder, SinoOrder
 
 
@@ -100,6 +104,57 @@ def sh_imread(sino_mem, i, path):
 def validate_mode(mode: str, flat_dir: Path | None):
 	if mode == "full" and flat_dir is None:
 		raise click.UsageError("--flat-dir is required when --mode=full.")
+
+
+def distribute_read(
+	target_mem: SharedNP,
+	pj,
+	window,
+	int_window,
+	image_order,
+	thread_max: int = cpu_count(),
+	sino_order: bool = True,
+):
+	"""Map TIFF byte spans into the projection or sinogram buffer layout."""
+	h_step = pj["x"] * pj["bytesize"]
+	sino_block_size = target_mem.shape.Theta * h_step
+	proj_block_size = len(int_window) * h_step
+	base_offset = int(target_mem[int_window].buffer_address.start)
+	reads = []
+
+	if sino_order:
+		log.write(
+			"Files Into Memory",
+			f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
+			+ f" to {base_offset + len(int_window) * sino_block_size}",
+			log_level=LOG.INFO,
+		)
+		for projection_index, image in image_order:
+			reads.extend(offset_reads(
+				image,
+				source_offset=pj["offset"] + window.start * h_step,
+				target_offset=base_offset + projection_index * h_step,
+				size=h_step,
+				count=len(int_window),
+				target_stride=sino_block_size,
+			))
+	else:
+		log.write(
+			"Files Into Memory",
+			f"Writing (in {target_mem.name} | {target_mem.shape}) {base_offset}"
+			+ f" to {base_offset + len(int_window) * proj_block_size} out of "
+			+ f"{target_mem[int_window].buffer_address}",
+			log_level=LOG.INFO,
+		)
+		for projection_index, image in image_order:
+			reads.extend(offset_reads(
+				image,
+				source_offset=pj["offset"] + window.start * h_step,
+				target_offset=base_offset + projection_index * proj_block_size,
+				size=proj_block_size,
+			))
+
+	distribute_offset_reads(target_mem, reads, thread_max=thread_max)
 
 
 def run_full(input_dir: Path, output_dir: Path, flat_dir: Path, process_count: int, sectioning: int,
