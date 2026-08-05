@@ -25,6 +25,9 @@ dependencies:
   - tifffile>=2024.8.30,<2025.5.21
   - tomopy>=1.15,<2
   - pip:
+      # Pip resolves this subsection independently from conda. Repeat the ABI
+      # bound so igneous cannot upgrade NumPy through opencv-python-headless.
+      - numpy>=1.24,<2
       - cloud-files>=6.1.1,<7
       - cloud-volume>=12.13,<13
       - dicom2jpg
