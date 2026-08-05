@@ -61,6 +61,27 @@ writing is counterproductive. It verifies completion with one local scale-folder
 enumeration. `ng downsample-pyramid` refuses an incomplete MIP 0 unless
 `--force` is supplied.
 
+On Linux, `ng publish --systemd-scope` optionally re-executes an actual publish
+inside a uniquely named transient user-systemd scope. This gives resource
+logging exact cgroup-v2 totals for the publish parent and every descendant.
+Existing isolated Slurm/container scopes are used as-is. If cgroup v2, the user
+manager, or delegated memory accounting is unavailable, publish emits one
+warning and continues with recursive process-tree accounting; scope setup never
+blocks the pipeline. Dry runs are not relaunched.
+
+For an interactive Linux/WSL smoke test, run with verbose logging and inspect
+the announced unit from another terminal while a worker stage is active:
+
+```console
+mctutil --verbose ng publish ROOT --systemd-scope --stop-after precompute
+systemctl --user status mctutil-publish-....scope
+systemd-cgls --user-unit=mctutil-publish-....scope
+```
+
+The publish process and its workers should appear under the same scope while
+progress remains attached to the invoking terminal. The unit is collected when
+the command succeeds, fails, or is interrupted.
+
 Downsampling and sharding resume from their durable Igneous FileQueues. A
 resumed queue releases existing leases before draining so tasks from a killed
 run are immediately available. Use `--preserve-leases` on the leaf commands, or

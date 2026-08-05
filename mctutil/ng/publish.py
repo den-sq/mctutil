@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import click
 
 from mctutil.ng.completeness import check_mip0_completeness
+from mctutil.ng.publish_scope import relaunch_publish_in_scope
 from mctutil.ng.resource_planning import (
 	calculate_memory_reserve,
 	log_resource_plan,
@@ -1034,9 +1035,18 @@ def execute_publish(
 @click.option("--stage-include-mip0/--stage-exclude-mip0", default=True, show_default=True)
 @click.option("--upload-include-mip0/--upload-exclude-mip0", default=True, show_default=True)
 @click.option("--overwrite-prep", is_flag=True)
+@click.option(
+	"--systemd-scope/--no-systemd-scope",
+	default=False,
+	show_default=True,
+	help=(
+		"Optionally relaunch execution in a transient user-systemd scope for "
+		"exact cgroup-v2 accounting."
+	),
+)
 @click.option("--execute/--dry-run", default=True, show_default=True)
 @igneous_output_command
-def publish(
+def publish(  # noqa: C901
 	root: Path,
 	s3_prefix: str | None,
 	aws_profile: str | None,
@@ -1058,9 +1068,13 @@ def publish(
 	stage_include_mip0: bool,
 	upload_include_mip0: bool,
 	overwrite_prep: bool,
+	systemd_scope: bool,
 	execute: bool,
 ) -> None:
 	"""Publish each child dataset as a resumable sharded Neuroglancer layer."""
+	scope_exit = relaunch_publish_in_scope(systemd_scope and execute)
+	if scope_exit is not None:
+		raise click.exceptions.Exit(scope_exit)
 	try:
 		selected_stages, effective = resolve_controls(
 			start_at,
