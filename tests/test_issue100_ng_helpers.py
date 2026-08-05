@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import threading
+import tomllib
 import types
 from urllib.request import Request, urlopen
 
@@ -439,19 +440,29 @@ def test_flask_server_supports_cors_and_byte_ranges(
 
 
 def test_server_dependencies_are_owned_by_serve_extra():
-	pyproject = Path("pyproject.toml").read_text(encoding="utf-8").lower()
-	ng_extra = pyproject.split("ng = [", 1)[1].split("\n]\n", 1)[0]
-	serve_extra = pyproject.split("serve = [", 1)[1].split("\n]\n", 1)[0]
+	with Path("pyproject.toml").open("rb") as source:
+		extras = tomllib.load(source)["project"]["optional-dependencies"]
+	ng_extra = extras["ng"]
+	serve_extra = extras["serve"]
 	for dependency in (
-		'"flask"',
-		'"flask-cors"',
-		'"neuroglancer"',
-		'"qrcode[pil]"',
-		'"rangehttpserver"',
+		"flask",
+		"flask-cors",
+		"neuroglancer",
+		"qrcode[pil]",
+		"rangehttpserver",
 	):
-		assert dependency in serve_extra
-		assert dependency not in ng_extra
-	assert '"cloud-volume"' in ng_extra
+		assert any(
+			requirement.startswith(f"{dependency}>=")
+			for requirement in serve_extra
+		)
+		assert not any(
+			requirement.startswith(f"{dependency}>=")
+			for requirement in ng_extra
+		)
+	assert any(
+		requirement.startswith("cloud-volume>=")
+		for requirement in ng_extra
+	)
 
 
 def test_server_is_routed_through_serve_category():
