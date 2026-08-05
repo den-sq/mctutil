@@ -4,22 +4,20 @@ from pathlib import Path
 
 import click
 import numpy as np
-import tifffile as tf
 
-from mctutil.shared.log import LOG, log
-
-
-TIFF_SUFFIXES = {".tif", ".tiff"}
-
-
-def tiff_paths(input_dir):
-	return sorted(path for path in Path(input_dir).iterdir() if path.suffix.lower() in TIFF_SUFFIXES)
+from mctutil.shared.log import log
+from mctutil.shared.stack_apply import (
+	apply_image_stack,
+	plan_stack_map,
+	require_tiff_paths,
+)
 
 
 def validate_inputs(input_dir, flip_axis):
-	paths = tiff_paths(input_dir)
-	if not paths:
-		raise click.ClickException(f"No TIFF files found in {input_dir}.")
+	try:
+		paths = require_tiff_paths(input_dir)
+	except ValueError as exc:
+		raise click.ClickException(str(exc)) from exc
 	if flip_axis not in {0, 1, 2}:
 		raise click.BadParameter("Use 0 for stack order, 1 for image rows, or 2 for image columns.", param_hint="--flip-axis")
 	return paths
@@ -46,20 +44,22 @@ def flip_stack(flip_axis, dry_run, inputdir, outputdir):
 	"""Flip a TIFF stack along depth, row, or column axis."""
 	log.start()
 	paths = validate_inputs(inputdir, flip_axis)
-	output_paths = [outputdir / path.name for path in paths]
-	source_paths = list(reversed(paths)) if flip_axis == 0 else paths
+	source_paths = tuple(reversed(paths)) if flip_axis == 0 else paths
+	items = plan_stack_map(
+		source_paths,
+		outputdir,
+		target_names=(path.name for path in paths),
+	)
 
 	log.write("Flip Setup", f"{len(paths)} frame(s); axis={flip_axis}; output={outputdir}")
+	apply_image_stack(
+		items,
+		flipped_image,
+		operation_args=(flip_axis,),
+		dry_run=dry_run,
+	)
 	if dry_run:
-		for source, target in zip(source_paths, output_paths):
-			log.write("Dry Run", f"Would write {target} from {source}", log_level=LOG.INFO)
 		return
-
-	outputdir.mkdir(parents=True, exist_ok=True)
-	for source, target in zip(source_paths, output_paths):
-		image = tf.imread(source)
-		tf.imwrite(target, flipped_image(image, flip_axis))
-		log.write("File Written", str(target), log_level=LOG.INFO)
 	log.write("Images Written", f"{len(paths)} frame(s)")
 
 

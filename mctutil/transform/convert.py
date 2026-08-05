@@ -9,6 +9,18 @@ import tifffile as tf
 from mctutil.shared.log import log, LOG
 from mctutil.shared.np_convert import np_convert
 from mctutil.shared import cli
+from mctutil.shared.stack_apply import (
+	apply_image_stack,
+	plan_stack_map,
+	run_parallel,
+	tiff_paths,
+)
+from mctutil.shared.tiff_stack_writer import write_tiff_stack
+
+
+def converted_image(image, dtype):
+	"""Pure dtype conversion used by filename-preserving stack maps."""
+	return np_convert(dtype, image)
 
 
 def write_split(source: Path, output_folder: Path, sections: int, dtype: type, compression: bool):
@@ -22,27 +34,18 @@ def write_split(source: Path, output_folder: Path, sections: int, dtype: type, c
 			split_size = source_data.shape[1] // sections
 			for i in range(0, sections):
 				target_path = output_folder.joinpath(source.with_suffix("").name + f"_s{k}_l{j}_p{i + 1}.tiff")
-				tf.imwrite(target_path,
-							np_convert(dtype, source_data[:, i * split_size: (i + 1) * split_size]),
-							compression=tf.COMPRESSION.LZW if compression else None)
+				output = converted_image(
+					source_data[:, i * split_size: (i + 1) * split_size],
+					dtype,
+				)
+				write_tiff_stack(
+					lambda _index, image=output: image,
+					1,
+					target_path,
+					mode="image",
+					compression=tf.COMPRESSION.LZW if compression else None,
+				)
 				log.write("Writing", f"Wrote {target_path}")
-
-
-def write_converted(
-	source: Path,
-	target: Path,
-	dtype: type,
-	compression: bool,
-) -> None:
-	"""Write one dtype-converted TIFF while preserving its filename."""
-	image = tf.imread(source)
-	tf.imwrite(
-		target,
-		np_convert(dtype, image),
-		dtype=dtype,
-		compression=tf.COMPRESSION.LZW if compression else None,
-	)
-	log.write("File Written", source.name)
 
 
 def convert_stack(
@@ -54,6 +57,7 @@ def convert_stack(
 	compression: bool = True,
 	preserve_names: bool = False,
 	workers: int = 24,
+	dry_run: bool = False,
 ) -> None:
 	"""Run the common parallel dtype-conversion implementation."""
 	if preserve_names and horizontal_sections != 1:
@@ -62,31 +66,44 @@ def convert_stack(
 		)
 	input_folder = Path(input_folder)
 	output_folder = Path(output_folder)
+	sources = tiff_paths(input_folder)
+	if preserve_names:
+		items = plan_stack_map(sources, output_folder)
+		apply_image_stack(
+			items,
+			converted_image,
+			operation_args=(dtype,),
+			compression=tf.COMPRESSION.LZW if compression else None,
+			workers=workers,
+			dry_run=dry_run,
+			pool_factory=Pool,
+		)
+		return
+
+	if dry_run:
+		for source in sources:
+			log.write(
+				"Dry Run",
+				f"Would convert {source} into {horizontal_sections} section(s) in {output_folder}",
+				log_level=LOG.INFO,
+			)
+		return
 	output_folder.mkdir(exist_ok=True, parents=True)
-	sources = tuple(input_folder.iterdir())
-	with Pool(workers) as pool:
-		if preserve_names:
-			pool.starmap(
-				write_converted,
-				(
-					(source, output_folder / source.name, dtype, compression)
-					for source in sources
-				),
+	run_parallel(
+		write_split,
+		(
+			(
+				source,
+				output_folder,
+				horizontal_sections,
+				dtype,
+				compression,
 			)
-		else:
-			pool.starmap(
-				write_split,
-				(
-					(
-						source,
-						output_folder,
-						horizontal_sections,
-						dtype,
-						compression,
-					)
-					for source in sources
-				),
-			)
+			for source in sources
+		),
+		workers,
+		pool_factory=Pool,
+	)
 
 
 @click.command()
@@ -100,6 +117,7 @@ def convert_stack(
 	help="Write one dtype-converted output per input using the original filename.",
 )
 @click.option("-j", "--workers", type=click.IntRange(min=1), default=24, show_default=True)
+@click.option("--dry-run", is_flag=True, help="Plan output files without writing them.")
 @click.argument("input_folder", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_folder", type=click.Path(path_type=Path))
 def convert(
@@ -108,6 +126,7 @@ def convert(
 	uncompressed,
 	preserve_names,
 	workers,
+	dry_run,
 	input_folder,
 	output_folder,
 ):
@@ -120,6 +139,7 @@ def convert(
 		compression=not uncompressed,
 		preserve_names=preserve_names,
 		workers=workers,
+		dry_run=dry_run,
 	)
 
 
