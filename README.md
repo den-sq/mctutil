@@ -26,6 +26,8 @@ python -m pip install --no-deps -e .
 
 Notes:
 - `environment.yml` is the authoritative dependency set for this repository.
+- Core pip metadata carries the NumPy 1.x runtime contract; supported installs
+  use `numpy>=1.24,<2` with TomoPy 1.x.
 - Conda-forge is the supported source for `tomopy`; plain `pip install tomopy`
   does not work.
 - A few packages are still pulled through the `pip:` section because they are
@@ -38,6 +40,9 @@ Notes:
   a replacement: conda-only packages stay in the conda env (`tomopy` for the
   sinogram/recon stack), and `[dragonfly]` is intentionally empty because
   ORS Dragonfly is Windows-only and not published on PyPI.
+- The Tifffile/Zarr compatibility line is intentionally bounded to Tifffile
+  before its Zarr-3/Python-3.11 cutover and to Zarr 2 (2.18 or newer). See
+  [DEPENDENCIES.md](DEPENDENCIES.md) for the update policy and smoke checks.
 - Python indentation uses tabs in this repository.
 - No autoformatter is configured at this time.
 - Linting is enforced with `flake8`, the pre-commit hooks in

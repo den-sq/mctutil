@@ -40,5 +40,7 @@ jobs:
       - name: Smoke tests
         shell: bash -el {0}
         run: |
+          python -m pip check
+          python scripts/check_optional_dependencies.py --all
           pytest tests/
           mctutil --help

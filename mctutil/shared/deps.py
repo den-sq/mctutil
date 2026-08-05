@@ -12,7 +12,13 @@ EXTRA_MODULES: dict[str, tuple[str, ...]] = {
 	"als832": ("h5py", "tifffile"),
 	"flats": ("scipy", "tifffile"),
 	"transform": ("h5py", "tifffile", "zarr"),
-	"ng": ("cloudvolume", "cloudfiles", "zarr"),
+	"ng": (
+		"cloudvolume",
+		"cloudfiles",
+		"neuroglancer_scripts",
+		"tifffile",
+		"zarr",
+	),
 	"serve": (
 		"flask",
 		"flask_cors",
@@ -20,7 +26,7 @@ EXTRA_MODULES: dict[str, tuple[str, ...]] = {
 		"qrcode",
 		"RangeHTTPServer",
 	),
-	"sino": ("skimage",),
+	"sino": ("skimage", "tifffile"),
 	"mesh": ("cloudvolume", "igneous.task_creation", "taskqueue"),
 	"aws": ("boto3",),
 	"dragonfly": (),

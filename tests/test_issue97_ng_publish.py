@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+import tomllib
 import types
 
 from click.testing import CliRunner
@@ -52,10 +53,15 @@ def test_mesh_preflight_checks_cloudvolume(load_module, monkeypatch):
 
 
 def test_mesh_extra_directly_declares_cloudvolume():
-	pyproject = Path("pyproject.toml").read_text(encoding="utf-8").lower()
-	mesh_extra = pyproject.split("mesh = [", 1)[1].split("\n]\n", 1)[0]
+	with Path("pyproject.toml").open("rb") as source:
+		mesh_extra = tomllib.load(source)["project"]["optional-dependencies"][
+			"mesh"
+		]
 
-	assert '"cloud-volume"' in mesh_extra
+	assert any(
+		requirement.startswith("cloud-volume>=")
+		for requirement in mesh_extra
+	)
 
 
 def test_run_stage_dispatches_sibling_commands_by_keyword(
