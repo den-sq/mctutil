@@ -10,6 +10,10 @@ import numpy as np
 
 from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
+from mctutil.shared.tiff_stack_writer import (
+	compression_for,
+	write_tiff_stack,
+)
 
 
 DTYPE_CHOICES = ("uint8", "uint16", "uint32", "float32", "float64")
@@ -20,15 +24,6 @@ def _require_h5py():
 		"h5py",
 		"transform",
 		purpose="h5py is required for HDF5 → TIFF extraction",
-		error_type=click.ClickException,
-	)
-
-
-def _require_tifffile():
-	return require(
-		"tifffile",
-		"transform",
-		purpose="tifffile is required for TIFF output",
 		error_type=click.ClickException,
 	)
 
@@ -71,43 +66,67 @@ def _maybe_cast(arr, dtype):
 
 def _write_2d(dataset, out_path: Path, dtype, compression) -> None:
 	"""Write a 2-D dataset as one BigTIFF image."""
-	tifffile = _require_tifffile()
-	arr = _maybe_cast(dataset[()], dtype)
-	tifffile.imwrite(out_path, arr, compression=compression, bigtiff=True)
+	write_tiff_stack(
+		lambda _index: _maybe_cast(dataset[()], dtype),
+		1,
+		out_path,
+		mode="image",
+		compression=compression,
+		bigtiff=True,
+	)
 	log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
 
 
 def _write_3d(dataset, out_path: Path, dtype, compression) -> None:
 	"""Write a 3-D dataset as one BigTIFF stack, streamed slice-by-slice."""
-	tifffile = _require_tifffile()
 	depth = dataset.shape[0]
-	with tifffile.TiffWriter(out_path, bigtiff=True) as tif:
-		for z in range(depth):
-			tif.write(_maybe_cast(dataset[z, :, :], dtype), compression=compression, contiguous=False)
-			if z % 100 == 0:
-				log.write("H5 Progress", f"slice {z + 1}/{depth}", log_level=LOG.INFO)
+	write_tiff_stack(
+		lambda z: _maybe_cast(dataset[z, :, :], dtype),
+		depth,
+		out_path,
+		mode="stack",
+		compression=compression,
+		bigtiff=True,
+		contiguous=False,
+		on_progress=lambda position, total, _index, _path: (
+			log.write(
+				"H5 Progress",
+				f"slice {position + 1}/{total}",
+				log_level=LOG.INFO,
+			)
+			if position % 100 == 0
+			else None
+		),
+	)
 	log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
 
 
 def _write_ndim(dataset, base: str, output_dir: Path, dtype, compression) -> None:
 	"""Write a 4-D+ dataset as one BigTIFF stack per first-axis index."""
-	tifffile = _require_tifffile()
 	outer, inner = dataset.shape[0], dataset.shape[1]
 	for i in range(outer):
 		out_path = output_dir / f"{base}_{i:04d}_stack.tif"
-		with tifffile.TiffWriter(out_path, bigtiff=True) as tif:
-			for z in range(inner):
-				tif.write(
-					_maybe_cast(dataset[i, z, :, :], dtype),
-					compression=compression,
-					contiguous=False,
+		write_tiff_stack(
+			lambda z, outer_index=i: _maybe_cast(
+				dataset[outer_index, z, :, :],
+				dtype,
+			),
+			inner,
+			out_path,
+			mode="stack",
+			compression=compression,
+			bigtiff=True,
+			contiguous=False,
+			on_progress=lambda position, _total, _index, _path: (
+				log.write(
+					"H5 Progress",
+					f"stack {i + 1}/{outer}, slice {position + 1}/{inner}",
+					log_level=LOG.INFO,
 				)
-				if z % 100 == 0:
-					log.write(
-						"H5 Progress",
-						f"stack {i + 1}/{outer}, slice {z + 1}/{inner}",
-						log_level=LOG.INFO,
-					)
+				if position % 100 == 0
+				else None
+			),
+		)
 		log.write("H5 Wrote", str(out_path), log_level=LOG.STATUS)
 
 
@@ -132,7 +151,7 @@ def write_dataset_as_tiffs(
 		:param compress: If true, write with zlib compression.
 	"""
 	base = safe_name(h5_path)
-	compression = "zlib" if compress else None
+	compression = compression_for(compress)
 
 	log.write("H5 Dataset", f"{h5_path} shape={dataset.shape} dtype={dataset.dtype}", log_level=LOG.STATUS)
 

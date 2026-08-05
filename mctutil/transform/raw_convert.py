@@ -8,8 +8,12 @@ from typing import Any
 import click
 import numpy as np
 
-from mctutil.shared.deps import require
 from mctutil.shared.log import LOG, log
+from mctutil.shared.tiff_stack_writer import (
+	compression_for,
+	SliceNaming,
+	write_tiff_stack,
+)
 
 
 DTYPES: dict[str, Any] = {
@@ -24,15 +28,6 @@ DTYPES: dict[str, Any] = {
 }
 BYTE_ORDER_CHOICES = ("native", "little", "big")
 OUTPUT_MODE_CHOICES = ("stack", "folder")
-
-
-def _require_tifffile():
-	return require(
-		"tifffile",
-		"transform",
-		purpose="tifffile is required for TIFF output",
-		error_type=click.ClickException,
-	)
 
 
 def make_dtype(dtype, byte_order: str) -> np.dtype:
@@ -108,17 +103,26 @@ def open_raw_volume(
 
 def write_single_tiff_stack(volume, output_path: Path, compression: str | None = None) -> None:
 	"""Write the volume as one BigTIFF stack, streamed slice-by-slice."""
-	tifffile = _require_tifffile()
-	output_path.parent.mkdir(parents=True, exist_ok=True)
-
 	depth = volume.shape[0]
 	log.write("Raw Stack", str(output_path), log_level=LOG.STATUS)
-
-	with tifffile.TiffWriter(output_path, bigtiff=True) as tif:
-		for z in range(depth):
-			tif.write(volume[z], compression=compression, contiguous=False)
-			if z % 100 == 0 or z == depth - 1:
-				log.write("Raw Progress", f"slice {z + 1}/{depth}", log_level=LOG.INFO)
+	write_tiff_stack(
+		lambda z: volume[z],
+		depth,
+		output_path,
+		mode="stack",
+		compression=compression,
+		bigtiff=True,
+		contiguous=False,
+		on_progress=lambda position, total, _index, _path: (
+			log.write(
+				"Raw Progress",
+				f"slice {position + 1}/{total}",
+				log_level=LOG.INFO,
+			)
+			if position % 100 == 0 or position == total - 1
+			else None
+		),
+	)
 
 	log.write("Raw Done", str(output_path), log_level=LOG.STATUS)
 
@@ -130,18 +134,26 @@ def write_tiff_slice_folder(
 	compression: str | None = None,
 ) -> None:
 	"""Write the volume as one TIFF file per Z slice under ``output_dir``."""
-	tifffile = _require_tifffile()
-	output_dir.mkdir(parents=True, exist_ok=True)
-
 	depth = volume.shape[0]
 	digits = max(4, len(str(depth)))
 	log.write("Raw Folder", str(output_dir), log_level=LOG.STATUS)
-
-	for z in range(depth):
-		out_path = output_dir / f"{prefix}_z{z:0{digits}d}.tif"
-		tifffile.imwrite(out_path, volume[z], compression=compression)
-		if z % 100 == 0 or z == depth - 1:
-			log.write("Raw Progress", f"slice {z + 1}/{depth}: {out_path.name}", log_level=LOG.INFO)
+	write_tiff_stack(
+		lambda z: volume[z],
+		depth,
+		output_dir,
+		mode="slices",
+		naming=SliceNaming(prefix=prefix, digits=digits),
+		compression=compression,
+		on_progress=lambda position, total, _index, path: (
+			log.write(
+				"Raw Progress",
+				f"slice {position + 1}/{total}: {path.name}",
+				log_level=LOG.INFO,
+			)
+			if position % 100 == 0 or position == total - 1
+			else None
+		),
+	)
 
 	log.write("Raw Done", str(output_dir), log_level=LOG.STATUS)
 
@@ -231,7 +243,7 @@ def raw_convert(
 		header_bytes=header_bytes,
 	)
 
-	compression = "zlib" if compress else None
+	compression = compression_for(compress)
 	resolved_prefix = prefix or input_raw.stem
 
 	if output_mode == "stack":
