@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import click
 import numpy as np
 
 from mctutil.shared.cli import XYZ
+from mctutil.shared.cloudpaths import normalize_cloudpath
 from mctutil.shared.cloudfiles_monitoring import patch_cloudfiles_monitoring
 from mctutil.shared.deps import require
-
-
-def normalize_cloudpath(layer_path: str) -> str:
-	value = layer_path.removeprefix("precomputed://")
-	if "://" in value:
-		return value
-	return Path(value).resolve().as_uri()
 
 
 def _require_cloudvolume():

@@ -36,6 +36,7 @@ from mctutil.shared.resource_monitor import (
 	PublishResourceMonitor,
 	StagePrediction,
 )
+from mctutil.shared.sharded_tree import sharded_tree_complete
 
 
 STAGES = ("prep", "precompute", "downsample", "shard", "upload", "mesh")
@@ -396,21 +397,7 @@ def stage_artifact_valid(stage: str, plan: DatasetPlan) -> bool:
 		return bool(info and len(info.get("scales", [])) > 1)
 	if stage == "shard":
 		info = _read_info(plan.staged)
-		if not info or not info.get("scales"):
-			return False
-		sharded_scales = [
-			scale
-			for scale in info["scales"]
-			if scale.get("sharding")
-		]
-		return bool(
-			sharded_scales
-			and all(
-				(plan.staged / scale["key"]).is_dir()
-				and any((plan.staged / scale["key"]).glob("*.shard"))
-				for scale in sharded_scales
-			)
-		)
+		return bool(info and sharded_tree_complete(plan.staged, info))
 	return True
 
 
