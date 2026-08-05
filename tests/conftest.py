@@ -76,10 +76,6 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 
 	brotli = types.ModuleType("brotli")
 
-	cv2 = types.ModuleType("cv2")
-	tomopy = types.ModuleType("tomopy")
-	tomopy.circ_mask = lambda *args, **kwargs: None
-
 	igneous = types.ModuleType("igneous")
 	igneous_task_creation = types.ModuleType("igneous.task_creation")
 	igneous_task_creation.create_meshing_tasks = lambda *_args, **_kwargs: []
@@ -181,7 +177,6 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 		"cloudvolume": cloudvolume,
 		"config": config,
 		"config.pythonConsoleAutoImport": python_console,
-		"cv2": cv2,
 		"dicom2jpg": dicom2jpg,
 		"google": google,
 		"google.auth": google_auth,
@@ -207,7 +202,6 @@ def _stub_modules() -> dict[str, types.ModuleType]:
 		"skimage": skimage,
 		"skimage.restoration": skimage_restoration,
 		"taskqueue": taskqueue,
-		"tomopy": tomopy,
 	}
 
 

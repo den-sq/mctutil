@@ -9,13 +9,32 @@ from mctutil.shared import cli
 from mctutil.shared.log import log, LOG  # noqa: F401
 
 
+def cropped_image(image, vertical_trim, horizontal_trim):
+	"""Return an XY crop while preserving any leading stack dimensions."""
+	vertical_slice = (
+		vertical_trim
+		if isinstance(vertical_trim, slice)
+		else cli.crop_val(vertical_trim, image.shape[-2])
+	)
+	horizontal_slice = (
+		horizontal_trim
+		if isinstance(horizontal_trim, slice)
+		else cli.crop_val(horizontal_trim, image.shape[-1])
+	)
+	return image[
+		...,
+		vertical_slice,
+		horizontal_slice,
+	]
+
+
 def write_crop(input, output, crop, compress, execute=True):
 	img = tf.imread(input)
 	if execute:
 		if compress:
-			tf.imwrite(output, img[crop], compression=8)
+			tf.imwrite(output, cropped_image(img, *crop), compression=8)
 		else:
-			tf.imwrite(output, img[crop])
+			tf.imwrite(output, cropped_image(img, *crop))
 		log.write("File Written", f"{output.name}: ({img.shape}>{crop})")
 	else:
 		log.write("Dry Run", f"Would write {output.name}: ({img.shape}>{crop})")
