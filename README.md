@@ -58,6 +58,7 @@ mctutil --help
 mctutil transform --help
 mctutil transform trim --help
 mctutil transform normalize --help
+mctutil transform pipeline --help
 mctutil sino convert --help
 mctutil ng point-add --help
 mctutil serve ng --help
@@ -104,7 +105,7 @@ Each category has its own README with the full command breakdown; run
 `mctutil <category> --help` for the live task list:
 
 - [`transform`](mctutil/transform/README.md) — TIFF-stack transforms (trim,
-  normalize, transpose, convert, downsample, find-bounds, denoise, stitch,
+  normalize, single-pass pipeline, transpose, convert, downsample, find-bounds, denoise, stitch,
   stitch-reconstructions, decompress-tiff / strip-gz-suffix / gunzip,
   hdf-convert / h5-convert / raw-convert, stack-split, …)
 - [`sino`](mctutil/sino/README.md) — sinogram conversion

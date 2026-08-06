@@ -9,12 +9,19 @@ Run `mctutil transform --help` to list commands and
 
 - **`trim`** — Crop an image stack (per-axis absolute or percentage trims).
 - **`normalize`** — Normalize an image stack over a percentile value range.
+- **`pipeline`** — Read a TIFF stack once into shared memory and apply the
+  ordered `normalize → trim → MIP → circular mask → dtype conversion → spatial
+  binning → compression/write` chain. Normalization, MIP, masking, binning, and
+  nonzero trims are optional; output conversion defaults to `uint8`.
+  `--mips-axis z|y|x` selects the rolling-projection dimension and
+  `--bin-power N` averages `2**N`-wide XY blocks.
 - **`convert`** — Convert an image stack's dtype, optionally splitting into
   horizontal sections. Use `--preserve-names --uncompressed` for the former
   dtype-only `downsample` behavior.
 - **`downsample`** — Deprecated alias for filename-preserving dtype conversion;
   despite its name it performs no spatial downsampling. Existing scripts remain
-  supported during the migration window. Spatial binning is tracked in #132.
+  supported during the migration window. Use `pipeline --bin-power` for real
+  spatial downsampling (implemented by #132).
 - **`transpose`** — Transpose a reconstruction stack (`--mode shared|naive`), tracking angular vertical shift.
 - **`flip`** — Flip a TIFF stack along the depth, row, or column axis.
 - **`reslice`** — Write XY, XZ, and YZ TIFF slices through a stack coordinate.
@@ -40,3 +47,8 @@ Run `mctutil transform --help` to list commands and
 - **`df-write-tiff`** — Export TIFFs from ORS/Dragonfly objects by class+title or id (Dragonfly-only; paths via `DRAGONFLY_*` env vars).
 
 Commands that write output accept `--dry-run` to log the planned writes instead of performing them.
+
+The pipeline preserves the filename of each output plane. For a Z-axis MIP,
+each rolling window uses the filename of its trailing input, so a width of 3
+starts at the third selected filename. Spatial binning affects Y and X only;
+trim and MIP update dimensions before the later operations consume them.

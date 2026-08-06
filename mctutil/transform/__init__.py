@@ -18,6 +18,7 @@ main = LazyGroup(
 		"hdf-convert": "mctutil.transform.hdf_convert:hdf_convert",
 		"memmap-prep": "mctutil.transform.memmap_prep:memmap_prep",
 		"normalize": "mctutil.transform.normalize:norm",
+		"pipeline": "mctutil.transform.pipeline:pipeline",
 		"raw-convert": "mctutil.transform.raw_convert:raw_convert",
 		"reslice": "mctutil.transform.reslice:reslice",
 		"denoise": "mctutil.transform.simple_noise:simple_denoise",

@@ -70,7 +70,7 @@ CASES = [
 		"mctutil/transform/stitch_reconstructions.py",
 		"stitch_reconstructions",
 	),
-	CommandCase("mctutil/transform/transform.py", "norm"),
+	CommandCase("mctutil/transform/pipeline.py", "pipeline"),
 	CommandCase("mctutil/transform/transpose.py", "transpose_stack"),
 	CommandCase("mctutil/transform/trim.py", "trim"),
 	CommandCase("mctutil/transform/uncompress.py", "uncompress"),

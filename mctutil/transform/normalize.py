@@ -26,6 +26,15 @@ def normalized_image(image, floor, ceiling):
 	return result
 
 
+def normalization_bounds(image, bottom_threshold, top_threshold):
+	"""Return the percentile bounds used by normalization commands."""
+	floor, ceiling = np.percentile(
+		np.asarray(image),
+		(bottom_threshold, top_threshold),
+	)
+	return float(floor), float(ceiling)
+
+
 def norm_helper(image_mem, i, floor, ceiling):
 	with image_mem[i] as image:
 		image[:] = apply_array(
@@ -38,8 +47,11 @@ def norm_helper(image_mem, i, floor, ceiling):
 def normalize(image_mem, index, bottom_threshold, top_threshold, thread_max):
 	"""Straightforward image normalization, disposing of values at edges."""
 	with image_mem[index] as image:
-		floor = np.percentile(image, bottom_threshold)
-		ceiling = np.percentile(image, top_threshold)
+		floor, ceiling = normalization_bounds(
+			image,
+			bottom_threshold,
+			top_threshold,
+		)
 
 		log.write('Normalization',
 			f"{np.min(image)}-{np.max(image)}: {bottom_threshold}-{top_threshold} is {floor:.4g}-{ceiling:.4g}",
