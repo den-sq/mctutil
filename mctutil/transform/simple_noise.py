@@ -10,34 +10,94 @@ import tifffile as tf
 from mctutil.shared.log import log, LOG
 
 
+def _validate_triplet(images):
+	triplet = np.asarray(images)
+	if triplet.ndim != 3 or triplet.shape[0] != 3:
+		raise ValueError(
+			f"denoise core requires exactly three ZYX planes; got {triplet.shape}"
+		)
+	return triplet
+
+
+def threshold_denoised_center(images, threshold):
+	"""Replace a center-plane outlier with the mean of its two neighbors."""
+	if threshold is None or not 0 <= threshold <= 1:
+		raise ValueError("threshold denoise requires a fraction between 0 and 1")
+	triplet = _validate_triplet(images)
+	working = triplet.astype(np.float64, copy=False)
+	gap = (np.max(working) - np.min(working)) * threshold
+	mask = np.logical_and(
+		np.abs(working[1] - working[0]) > gap,
+		np.abs(working[1] - working[2]) > gap,
+	)
+	result = np.array(triplet[1], copy=True)
+	if np.any(mask):
+		replacement = (working[0] + working[2]) / 2
+		result[mask] = replacement[mask]
+	return result
+
+
+def flat_denoised_center(images, threshold):
+	"""Zero center pixels whose preceding and following pixels are both low."""
+	if threshold is None:
+		raise ValueError("flat denoise requires an absolute threshold")
+	triplet = _validate_triplet(images)
+	mask = np.logical_and(triplet[0] < threshold, triplet[2] < threshold)
+	result = np.array(triplet[1], copy=True)
+	result[mask] = 0
+	return result
+
+
+def denoised_volume(volume, mode, threshold, *, boundary="preserve"):
+	"""Denoise every interior Z plane without performing any image I/O.
+
+	``boundary='preserve'`` copies the first and last planes unchanged, while
+	``boundary='drop'`` returns only the interior planes for legacy leaf output.
+	"""
+	array = np.asarray(volume)
+	if array.ndim != 3:
+		raise ValueError(f"denoise requires a three-dimensional ZYX volume; got {array.shape}")
+	if mode not in {"threshold", "flat"}:
+		raise ValueError(f"unsupported denoise mode: {mode}")
+	if boundary not in {"preserve", "drop"}:
+		raise ValueError(f"unsupported denoise boundary policy: {boundary}")
+	operation = (
+		threshold_denoised_center
+		if mode == "threshold"
+		else flat_denoised_center
+	)
+	if len(array) < 3:
+		if boundary == "preserve":
+			return np.array(array, copy=True)
+		return np.empty((0,) + array.shape[1:], dtype=array.dtype)
+	centers = np.stack(
+		tuple(
+			operation(array[index - 1:index + 2], threshold)
+			for index in range(1, len(array) - 1)
+		),
+		axis=0,
+	)
+	if boundary == "drop":
+		return centers
+	result = np.array(array, copy=True)
+	result[1:-1] = centers
+	return result
+
+
 def denoise_threshold(input_paths, output_path, threshold):
-	base_data = np.array([tf.imread(infile) for infile in input_paths]).astype(np.int32)
-
-	floor = np.min(base_data)
-	ceiling = np.max(base_data)
-	gap = (ceiling - floor) * threshold
-
-	mask = np.logical_and(np.abs(np.subtract(base_data[1], base_data[0])) > gap,
-							np.abs(np.subtract(base_data[1], base_data[2]) > gap))
+	base_data = np.stack(tuple(tf.imread(infile) for infile in input_paths))
+	output = threshold_denoised_center(base_data, threshold)
 	log.write(
 		"Simple Denoise",
-		f"threshold stats: ceiling={ceiling}, floor={floor}, threshold={threshold}, "
-		f"gap={gap}, mask_counts={np.unique(mask, return_counts=True)}",
+		f"threshold={threshold}; inputs={[path.name for path in input_paths]}",
 		log_level=LOG.INFO,
 	)
-
-	if len(base_data[0][mask] > 0):
-		base_data[1][mask] = np.average([base_data[0][mask], base_data[2][mask]], axis=0)
-
-	tf.imwrite(output_path, base_data[1].astype(np.uint16))
+	tf.imwrite(output_path, output.astype(np.uint16))
 
 
 def denoise_flat(input_paths, output_path, threshold):
-	base_data = np.array([tf.imread(infile) for infile in input_paths])
-
-	mask = np.logical_and((base_data[0] < threshold), (base_data[2] < threshold))
-	base_data[1][mask] = 0
-	tf.imwrite(output_path, base_data[1])
+	base_data = np.stack(tuple(tf.imread(infile) for infile in input_paths))
+	tf.imwrite(output_path, flat_denoised_center(base_data, threshold))
 
 
 @click.command()
