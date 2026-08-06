@@ -23,12 +23,14 @@ from mctutil.shared.stack_apply import (
 )
 from mctutil.shared.tiff_stack_writer import compression_for, write_tiff_stack
 from mctutil.transform.convert import converted_image
+from mctutil.transform.flip import flipped_volume
 from mctutil.transform.normalize import normalization_bounds, normalized_image
 from mctutil.transform.ops import (
 	circular_mask,
 	maximum_intensity_projection,
 	spatial_bin,
 )
+from mctutil.transform.simple_noise import denoised_volume
 from mctutil.transform.trim import cropped_image
 
 
@@ -37,11 +39,14 @@ PIPELINE_ORDER = (
 	"trim",
 	"mip",
 	"circular-mask",
+	"denoise",
+	"flip",
 	"dtype-convert",
 	"spatial-bin",
 	"compress/write",
 )
 MIP_AXES = {"z": 0, "y": 1, "x": 2, "0": 0, "1": 1, "2": 2}
+FLIP_AXES = MIP_AXES
 
 
 def mip_axis_index(value: str | int) -> int:
@@ -50,6 +55,14 @@ def mip_axis_index(value: str | int) -> int:
 		return MIP_AXES[str(value).lower()]
 	except KeyError as error:
 		raise ValueError(f"unsupported MIP axis: {value}") from error
+
+
+def flip_axis_index(value: str | int) -> int:
+	"""Resolve named and legacy numeric flip-axis values."""
+	try:
+		return FLIP_AXES[str(value).lower()]
+	except KeyError as error:
+		raise ValueError(f"unsupported flip axis: {value}") from error
 
 
 def _validate_normalize_range(
@@ -61,6 +74,19 @@ def _validate_normalize_range(
 	if not 0 <= bottom < top <= 100:
 		raise ValueError(
 			"normalization percentiles must satisfy 0 <= bottom < top <= 100"
+		)
+
+
+def _validate_denoise_config(mode, threshold) -> None:
+	if mode is None and threshold is None:
+		return
+	if mode is None or threshold is None:
+		raise ValueError(
+			"denoise mode and threshold must be supplied together"
+		)
+	if mode == "threshold" and not 0 <= threshold <= 1:
+		raise ValueError(
+			"threshold denoise requires a fraction between 0 and 1"
 		)
 
 
@@ -102,6 +128,24 @@ def _volume_axis(axis: int, ndim: int) -> int:
 	return axis
 
 
+def _optionally_denoised(volume, mode, threshold):
+	_validate_denoise_config(mode, threshold)
+	if mode is None:
+		return volume
+	return denoised_volume(
+		volume,
+		mode,
+		threshold,
+		boundary="preserve",
+	)
+
+
+def _optionally_flipped(volume, flip_axis):
+	if flip_axis is None:
+		return volume
+	return flipped_volume(volume, flip_axis)
+
+
 def apply_transform_pipeline(
 	volume: np.ndarray,
 	*,
@@ -112,6 +156,9 @@ def apply_transform_pipeline(
 	mip_width: int = 0,
 	mip_axis: int = 0,
 	circ_mask_ratio: float | None = None,
+	denoise_mode: str | None = None,
+	denoise_threshold: float | None = None,
+	flip_axis: int | None = None,
 	out_dtype: np.dtype | type | None = np.uint8,
 	bin_power: int = 0,
 ) -> np.ndarray:
@@ -147,6 +194,13 @@ def apply_transform_pipeline(
 			axis=0,
 			value=mask_value,
 		)
+
+	result = _optionally_denoised(
+		result,
+		denoise_mode,
+		denoise_threshold,
+	)
+	result = _optionally_flipped(result, flip_axis)
 
 	if out_dtype is not None:
 		result = np.stack(
@@ -222,14 +276,20 @@ def plan_pipeline_outputs(
 	z_trim=(0.0, 0.0),
 	mip_width: int = 0,
 	mip_axis: int = 0,
+	flip_axis: int | None = None,
 ) -> tuple[StackMapItem, ...]:
-	"""Map transformed Z planes to the filenames of their trailing inputs."""
+	"""Map transformed Z planes to trailing inputs, including Z reversal."""
 	selected = inputs[cli.crop_val(z_trim, len(inputs))]
 	if mip_width > 1 and mip_axis == 0:
 		selected = selected[mip_width - 1:]
 	if not selected:
 		raise ValueError("trim and MIP settings produce no output images")
-	return plan_stack_map(selected, output_dir)
+	sources = tuple(reversed(selected)) if flip_axis == 0 else selected
+	return plan_stack_map(
+		sources,
+		output_dir,
+		target_names=(path.name for path in selected),
+	)
 
 
 def _write_pipeline_image(
@@ -340,6 +400,21 @@ def write_pipeline_outputs(
 	help="Optional centered XY circular-mask diameter ratio.",
 )
 @click.option(
+	"--denoise-mode",
+	type=click.Choice(("threshold", "flat")),
+	help="Optional neighboring-Z denoise operation.",
+)
+@click.option(
+	"--denoise-threshold",
+	type=click.FLOAT,
+	help="Fractional threshold for threshold mode; absolute value for flat mode.",
+)
+@click.option(
+	"--flip-axis",
+	type=click.Choice(tuple(FLIP_AXES)),
+	help="Optional volume flip axis (z/y/x or legacy 0/1/2).",
+)
+@click.option(
 	"-t",
 	"--out-dtype",
 	type=cli.NUMPYTYPE,
@@ -383,6 +458,9 @@ def pipeline(
 	mips,
 	mips_axis,
 	circ_mask_ratio,
+	denoise_mode,
+	denoise_threshold,
+	flip_axis,
 	out_dtype,
 	bin_power,
 	processes,
@@ -391,24 +469,34 @@ def pipeline(
 ):
 	"""Apply an ordered operation chain with one TIFF read and write per plane.
 
-	Order: normalize, trim, MIP, circular mask, dtype conversion, spatial
-	binning, then compression/write.
+	Order: normalize, trim, MIP, circular mask, denoise, flip, dtype conversion,
+	spatial binning, then compression/write.
 	"""
 	log.start()
 	inputs = require_tiff_paths(data_dir)
 	axis = mip_axis_index(mips_axis)
+	resolved_flip_axis = (
+		None
+		if flip_axis is None
+		else flip_axis_index(flip_axis)
+	)
 	normalize_range = (
 		None
 		if normalize_over is None
 		else (normalize_over.start, normalize_over.stop)
 	)
 	_validate_normalize_range(normalize_range)
+	try:
+		_validate_denoise_config(denoise_mode, denoise_threshold)
+	except ValueError as error:
+		raise click.UsageError(str(error)) from error
 	items = plan_pipeline_outputs(
 		inputs,
 		output_dir,
 		z_trim=z_trim,
 		mip_width=mips,
 		mip_axis=axis,
+		flip_axis=resolved_flip_axis,
 	)
 	log.write("Pipeline Order", " -> ".join(PIPELINE_ORDER), log_level=LOG.INFO)
 	if not execute:
@@ -435,6 +523,9 @@ def pipeline(
 			mip_width=mips,
 			mip_axis=axis,
 			circ_mask_ratio=circ_mask_ratio,
+			denoise_mode=denoise_mode,
+			denoise_threshold=denoise_threshold,
+			flip_axis=resolved_flip_axis,
 			out_dtype=out_dtype.nptype,
 			bin_power=bin_power,
 		)

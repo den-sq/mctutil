@@ -10,11 +10,15 @@ Run `mctutil transform --help` to list commands and
 - **`trim`** — Crop an image stack (per-axis absolute or percentage trims).
 - **`normalize`** — Normalize an image stack over a percentile value range.
 - **`pipeline`** — Read a TIFF stack once into shared memory and apply the
-  ordered `normalize → trim → MIP → circular mask → dtype conversion → spatial
-  binning → compression/write` chain. Normalization, MIP, masking, binning, and
-  nonzero trims are optional; output conversion defaults to `uint8`.
+  ordered `normalize → trim → MIP → circular mask → denoise → flip → dtype
+  conversion → spatial binning → compression/write` chain. Normalization, MIP,
+  masking, denoising, flipping, binning, and nonzero trims are optional; output
+  conversion defaults to `uint8`.
   `--mips-axis z|y|x` selects the rolling-projection dimension and
-  `--bin-power N` averages `2**N`-wide XY blocks.
+  `--bin-power N` averages `2**N`-wide XY blocks. Enable neighboring-Z
+  denoising with `--denoise-mode threshold|flat --denoise-threshold N`; pipeline
+  denoising preserves the first and last planes unchanged. `--flip-axis z|y|x`
+  flips the transformed volume after denoising.
 - **`convert`** — Convert an image stack's dtype, optionally splitting into
   horizontal sections. Use `--preserve-names --uncompressed` for the former
   dtype-only `downsample` behavior.
@@ -33,7 +37,9 @@ Run `mctutil transform --help` to list commands and
   as `slice_00000.tif`, and `--dtype` uses clip-then-cast conversion without
   rescaling.
 - **`channelize`** — Write channelized (multi-channel) TIFF output.
-- **`denoise`** — Block-based denoising by intensity-difference threshold.
+- **`denoise`** — Neighboring-Z threshold or flat denoising. The standalone
+  compatibility leaf writes interior planes only; the fused pipeline preserves
+  its boundary planes.
 - **`find-bounds`** — Scan a TIFF stack for global min/max intensity bounds.
 - **`fix-name`** — Zero-pad the numeric suffix in `prefix_N` filenames to five digits.
 - **`decompress-tiff`** — Rewrite every TIFF under a path with compression removed.
@@ -50,5 +56,24 @@ Commands that write output accept `--dry-run` to log the planned writes instead 
 
 The pipeline preserves the filename of each output plane. For a Z-axis MIP,
 each rolling window uses the filename of its trailing input, so a width of 3
-starts at the third selected filename. Spatial binning affects Y and X only;
-trim and MIP update dimensions before the later operations consume them.
+starts at the third selected filename. A Z flip then reverses those transformed
+values into the same ascending target filenames. Spatial binning affects Y and
+X only; trim and MIP update dimensions before the later operations consume
+them.
+
+## Pipeline scope decisions
+
+The #150 follow-up keeps these related commands outside the fused pipeline:
+
+- **`transpose`** remains standalone because its shared mode combines partial
+  stack reads, pixel-shift tracking, an output-axis change, and generated names;
+  it is not one canonical pure transpose step.
+- **`channelize`** remains a terminal standalone writer because it promotes ZYX
+  input to ZYXC output and its randomized mode needs separate reproducibility
+  semantics.
+- **`reslice`** remains a terminal/fan-out export that writes three specially
+  named orthogonal images rather than another ordinary Z stack.
+- **`find-bounds`** remains analysis/reporting and does not transform data.
+
+No further implementation breakout is warranted for these commands without a
+specific workflow that needs them inside the fused chain.

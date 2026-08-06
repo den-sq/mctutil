@@ -23,10 +23,26 @@ def validate_inputs(input_dir, flip_axis):
 	return paths
 
 
+def flipped_array(array, axis):
+	"""Return a pure flipped view of an array along one validated axis."""
+	array = np.asarray(array)
+	if not 0 <= axis < array.ndim:
+		raise ValueError(f"flip axis {axis} is outside a {array.ndim}D array")
+	return np.flip(array, axis=axis)
+
+
+def flipped_volume(volume, flip_axis):
+	"""Flip a ZYX volume along Z=0, Y=1, or X=2."""
+	volume = np.asarray(volume)
+	if volume.ndim != 3:
+		raise ValueError(f"flip requires a three-dimensional ZYX volume; got {volume.shape}")
+	return flipped_array(volume, flip_axis)
+
+
 def flipped_image(image, flip_axis):
 	if flip_axis == 0:
 		return image
-	return np.flip(image, axis=flip_axis - 1)
+	return flipped_array(image, flip_axis - 1)
 
 
 @click.command()
