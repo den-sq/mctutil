@@ -120,7 +120,8 @@ Each category has its own README with the full command breakdown; run
 - [`mem`](mctutil/mem/README.md) — shared-memory cleanup (`clean`, `mark`) and
   node-list submission (`from-file`, `from-range`)
 - [`parse`](mctutil/parse/README.md) — metadata / config / scanlog parsing
-  (`find-errs`, `meta-shift`, `pull-config`, `scanlog-fetch`, `prune-empty`)
+  (`find-errs`, `meta-shift`, `pull-config`, `scanlog-fetch`, `xaid-log`,
+  `prune-empty`)
 - [`hpc`](mctutil/hpc/README.md) — HPC scheduler-side helpers (`time-check`)
 - [`als832`](mctutil/als832/README.md) / [`flats`](mctutil/flats/README.md) —
   ALS Beamline 8.3.2 HDF5 extractors and flat-field drift helpers

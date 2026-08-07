@@ -47,5 +47,12 @@ python scripts/check_optional_dependencies.py --extra transform
 mctutil transform memmap-prep --help
 ```
 
+Google Sheets uploads use the same optional dependency contract:
+
+```console
+python -m pip install -e '.[google-sheets]'
+python scripts/check_optional_dependencies.py --extra google-sheets
+```
+
 Repeat `--extra` to check a combination. TomoPy, GDAL, OpenCV, and Dragonfly
 commands must be checked in their supported conda or application runtime.
