@@ -123,13 +123,13 @@ def test_numpy_tomopy_and_tiff_zarr_contract_matches_conda_environment():
 	base = requirements_by_name(project["dependencies"])
 	environment = requirements_by_name(environment_requirements())
 
-	assert base["numpy"] == "numpy>=1.24,<2"
-	assert environment["numpy"] == "numpy>=1.24,<2"
+	assert base["numpy"] == "numpy>=1.24,<3"
+	assert environment["numpy"] == "numpy>=1.24,<3"
 	assert environment["tifffile"] == "tifffile>=2024.8.30,<2025.5.21"
-	assert environment["tomopy"] == "tomopy>=1.15,<2"
+	assert environment["tomopy"] == "tomopy=1.15.3"
 	assert environment["zarr"] == "zarr>=2.18,<3"
 	assert requirements_by_name(environment_pip_requirements())["numpy"] == (
-		"numpy>=1.24,<2"
+		"numpy>=1.24,<3"
 	)
 
 
