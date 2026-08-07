@@ -12,13 +12,12 @@ can be used in an ordinary Python environment.
   compatibility boundary. Routine patch and minor updates remain available
   inside that range; crossing a major compatibility boundary is deliberate and
   tested in one change.
-- The supported numerical ABI is `numpy>=1.24,<2`, matching the TomoPy 1.x
-  runtime installed from conda-forge. The same bound is present in pip metadata
-  and `environment.yml` so installing an extra cannot silently upgrade the
-  environment to NumPy 2. The bound is intentionally repeated in the
+- The supported numerical ABI is `numpy>=1.24,<3`, including NumPy 2 with the
+  pinned TomoPy 1.15.3 runtime installed from conda-forge. The same bound is
+  present in pip metadata and `environment.yml`. It is intentionally repeated in the
   environment's `pip:` subsection because pip resolves that subsection without
   applying conda's constraints; this prevents Igneous' OpenCV dependency from
-  upgrading NumPy behind conda's back.
+  crossing into an untested future NumPy major version behind conda's back.
 - Tifffile and Zarr are one compatibility set. Tifffile 2025.5.21 changed its
   Zarr store to require Zarr 3 and dropped Python 3.10. Because mctutil supports
   Python 3.10, all TIFF-bearing extras use
