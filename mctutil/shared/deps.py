@@ -9,6 +9,12 @@ from types import ModuleType
 
 
 EXTRA_MODULES: dict[str, tuple[str, ...]] = {
+	"google-sheets": (
+		"google.auth.transport.requests",
+		"google.oauth2.credentials",
+		"google_auth_oauthlib.flow",
+		"googleapiclient.discovery",
+	),
 	"als832": ("h5py", "tifffile"),
 	"flats": ("scipy", "tifffile"),
 	"transform": ("h5py", "tifffile", "zarr"),

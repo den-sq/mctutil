@@ -42,6 +42,7 @@ def test_parse_group_help_lists_find_errs():
 	result = CliRunner().invoke(main, ["parse", "--help"])
 	assert result.exit_code == 0, result.output
 	assert "find-errs" in result.output
+	assert "xaid-log" in result.output
 
 
 def test_hpc_group_keeps_cuda_probe_as_template_only():

@@ -47,6 +47,7 @@ CASES = [
 	CommandCase("mctutil/parse/meta_shift.py", "meta_shift"),
 	CommandCase("mctutil/parse/pull_config.py", "get_conf"),
 	CommandCase("mctutil/parse/scanlog_fetch.py", "scanlog_fetch"),
+	CommandCase("mctutil/parse/xaid_reconstruction_log.py", "xaid_log"),
 	CommandCase("mctutil/transform/channelize.py", "channelize"),
 	CommandCase("mctutil/transform/convert.py", "convert"),
 	CommandCase("mctutil/transform/df_write_tiff.py", "df_write_tiff"),
