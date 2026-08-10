@@ -11,5 +11,6 @@ main = LazyGroup(
 		"prune-empty": "mctutil.parse.empty_dir_removal:prune_empty",
 		"pull-config": "mctutil.parse.pull_config:get_conf",
 		"scanlog-fetch": "mctutil.parse.scanlog_fetch:scanlog_fetch",
+		"xaid-log": "mctutil.parse.xaid_reconstruction_log:xaid_log",
 	},
 )

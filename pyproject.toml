@@ -22,6 +22,11 @@ dependencies = [
 # TomoPy and other conda-forge-first packages can be installed consistently.
 
 [project.optional-dependencies]
+google-sheets = [
+  "google-api-python-client>=2,<3",
+  "google-auth>=2,<3",
+  "google-auth-oauthlib>=1,<2",
+]
 als832 = [
   "h5py>=3.10,<4",
   "tifffile>=2024.8.30,<2025.5.21",
