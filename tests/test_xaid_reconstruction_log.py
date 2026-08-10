@@ -297,7 +297,10 @@ def test_cli_refuses_to_replace_output_without_force(load_module, tmp_path):
 	assert output.read_text(encoding="utf-8") == "keep me"
 
 
-def test_append_google_sheet_verifies_header_and_uses_raw_insert(load_module, tmp_path):
+def test_append_google_sheet_matches_header_names_and_uses_raw_insert(
+	load_module,
+	tmp_path,
+):
 	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
 	config = module.parse_xaid_config(_config_file(tmp_path)).config
 	row = module.build_reconstruction_log_row(config)
@@ -312,7 +315,7 @@ def test_append_google_sheet_verifies_header_and_uses_raw_insert(load_module, tm
 
 	assert response["updates"]["updatedRows"] == 1
 	assert service.values_service.get_calls == [
-		{"spreadsheetId": "spreadsheet-id", "range": "'Recon''s'!A1:CJ1"}
+		{"spreadsheetId": "spreadsheet-id", "range": "'Recon''s'!1:1"}
 	]
 	append_call = service.values_service.append_calls[0]
 	assert append_call["spreadsheetId"] == "spreadsheet-id"
@@ -325,13 +328,102 @@ def test_append_google_sheet_verifies_header_and_uses_raw_insert(load_module, tm
 	}
 
 
-def test_append_google_sheet_rejects_wrong_header(load_module, tmp_path):
+def test_append_google_sheet_matches_reordered_header_by_default(load_module, tmp_path):
 	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
 	config = module.parse_xaid_config(_config_file(tmp_path)).config
 	row = module.build_reconstruction_log_row(config)
-	service = FakeSheetsService(["wrong", "header"])
+	header = list(reversed(module.RECONSTRUCTION_LOG_FIELDS))
+	service = FakeSheetsService(header)
 
-	with pytest.raises(ValueError, match="header mismatch"):
+	module.append_reconstruction_log_row(
+		service,
+		"spreadsheet-id",
+		"Reconstructions",
+		row,
+	)
+
+	append_call = service.values_service.append_calls[0]
+	assert append_call["range"] == "'Reconstructions'!A:CJ"
+	assert append_call["body"]["values"] == [
+		[row[field] for field in header]
+	]
+
+
+def test_append_google_sheet_skips_leading_middle_and_trailing_extra_columns(
+	load_module,
+	tmp_path,
+):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config = module.parse_xaid_config(_config_file(tmp_path)).config
+	row = module.build_reconstruction_log_row(config)
+	header = [
+		"Operator Notes",
+		*module.RECONSTRUCTION_LOG_FIELDS[:2],
+		"Review Status",
+		*module.RECONSTRUCTION_LOG_FIELDS[2:],
+		"Approved By",
+	]
+	service = FakeSheetsService(header)
+
+	module.append_reconstruction_log_row(
+		service,
+		"spreadsheet-id",
+		"Reconstructions",
+		row,
+	)
+
+	append_call = service.values_service.append_calls[0]
+	assert append_call["range"] == "'Reconstructions'!A:CM"
+	values = append_call["body"]["values"][0]
+	assert len(values) == len(header)
+	assert values[0] is None
+	assert values[1:3] == [
+		row[module.RECONSTRUCTION_LOG_FIELDS[0]],
+		row[module.RECONSTRUCTION_LOG_FIELDS[1]],
+	]
+	assert values[3] is None
+	assert values[4:-1] == [
+		row[field] for field in module.RECONSTRUCTION_LOG_FIELDS[2:]
+	]
+	assert values[-1] is None
+
+
+def test_append_google_sheet_accounts_for_blank_columns_before_header(
+	load_module,
+	tmp_path,
+):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config = module.parse_xaid_config(_config_file(tmp_path)).config
+	row = module.build_reconstruction_log_row(config)
+	header = ["", "", *module.RECONSTRUCTION_LOG_FIELDS]
+	service = FakeSheetsService(header)
+
+	module.append_reconstruction_log_row(
+		service,
+		"spreadsheet-id",
+		"Reconstructions",
+		row,
+	)
+
+	append_call = service.values_service.append_calls[0]
+	assert append_call["range"] == "'Reconstructions'!C:CL"
+	assert append_call["body"]["values"] == [
+		[row[field] for field in module.RECONSTRUCTION_LOG_FIELDS]
+	]
+
+
+def test_append_google_sheet_rejects_missing_required_header(load_module, tmp_path):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config = module.parse_xaid_config(_config_file(tmp_path)).config
+	row = module.build_reconstruction_log_row(config)
+	header = list(module.RECONSTRUCTION_LOG_FIELDS)
+	header[-1] = "Internal Export Descriptor"
+	service = FakeSheetsService(header)
+
+	with pytest.raises(
+		ValueError,
+		match="missing required fields.*Internal Export Descriptor ⚠",
+	):
 		module.append_reconstruction_log_row(
 			service,
 			"spreadsheet-id",
@@ -339,6 +431,58 @@ def test_append_google_sheet_rejects_wrong_header(load_module, tmp_path):
 			row,
 		)
 	assert service.values_service.append_calls == []
+
+
+def test_append_google_sheet_rejects_duplicate_required_header(load_module, tmp_path):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config = module.parse_xaid_config(_config_file(tmp_path)).config
+	row = module.build_reconstruction_log_row(config)
+	duplicate = "Software Release Version"
+	header = [*module.RECONSTRUCTION_LOG_FIELDS, duplicate]
+	service = FakeSheetsService(header)
+
+	with pytest.raises(
+		ValueError,
+		match=f"duplicate required fields.*{duplicate}",
+	):
+		module.append_reconstruction_log_row(
+			service,
+			"spreadsheet-id",
+			"Scans",
+			row,
+		)
+	assert service.values_service.append_calls == []
+
+
+def test_append_google_sheet_can_require_strict_header_order(load_module, tmp_path):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config = module.parse_xaid_config(_config_file(tmp_path)).config
+	row = module.build_reconstruction_log_row(config)
+	header = list(reversed(module.RECONSTRUCTION_LOG_FIELDS))
+	service = FakeSheetsService(header)
+
+	with pytest.raises(ValueError, match="header mismatch"):
+		module.append_reconstruction_log_row(
+			service,
+			"spreadsheet-id",
+			"Scans",
+			row,
+			strict_header_order=True,
+		)
+	assert service.values_service.get_calls == [
+		{"spreadsheetId": "spreadsheet-id", "range": "'Scans'!A1:CJ1"}
+	]
+	assert service.values_service.append_calls == []
+
+	canonical_service = FakeSheetsService(module.RECONSTRUCTION_LOG_FIELDS)
+	module.append_reconstruction_log_row(
+		canonical_service,
+		"spreadsheet-id",
+		"Scans",
+		row,
+		strict_header_order=True,
+	)
+	assert len(canonical_service.values_service.append_calls) == 1
 
 
 def test_append_google_sheet_can_explicitly_skip_header_check(load_module, tmp_path):
@@ -356,6 +500,11 @@ def test_append_google_sheet_can_explicitly_skip_header_check(load_module, tmp_p
 	)
 	assert service.values_service.get_calls == []
 	assert len(service.values_service.append_calls) == 1
+	append_call = service.values_service.append_calls[0]
+	assert append_call["range"] == "'Reconstructions'!A:CJ"
+	assert append_call["body"]["values"] == [
+		[row[field] for field in module.RECONSTRUCTION_LOG_FIELDS]
+	]
 
 
 def test_cli_create_tab_writes_header_then_verifies_and_appends(
@@ -415,7 +564,7 @@ def test_cli_create_tab_writes_header_then_verifies_and_appends(
 		}
 	]
 	assert service.values_service.get_calls == [
-		{"spreadsheetId": "spreadsheet-id", "range": "'New Recon'!A1:CJ1"}
+		{"spreadsheetId": "spreadsheet-id", "range": "'New Recon'!1:1"}
 	]
 	assert len(service.values_service.append_calls) == 1
 
@@ -477,6 +626,37 @@ def test_cli_uploads_without_creating_local_csv(load_module, tmp_path, monkeypat
 	assert len(service.values_service.append_calls) == 1
 
 
+def test_cli_can_require_strict_header_order(load_module, tmp_path, monkeypatch):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config_path = _config_file(tmp_path)
+	header = list(reversed(module.RECONSTRUCTION_LOG_FIELDS))
+	service = FakeSheetsService(header)
+	monkeypatch.setattr(module, "build_google_sheets_service", lambda path: service)
+
+	result = CliRunner().invoke(
+		module.xaid_log,
+		[
+			str(config_path),
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"Reconstructions",
+			"--strict-header-order",
+		],
+	)
+
+	assert result.exit_code != 0
+	assert "header mismatch" in result.output
+	assert service.values_service.get_calls == [
+		{
+			"spreadsheetId": "spreadsheet-id",
+			"range": "'Reconstructions'!A1:CJ1",
+		}
+	]
+	assert service.values_service.append_calls == []
+
+
 def test_cli_upload_requires_destination_and_excludes_local_output(
 	load_module,
 	tmp_path,
@@ -513,3 +693,22 @@ def test_cli_upload_requires_destination_and_excludes_local_output(
 	)
 	assert create_without_upload.exit_code != 0
 	assert "--create-tab requires --upload" in create_without_upload.output
+
+	conflicting_header_modes = CliRunner().invoke(
+		module.xaid_log,
+		[
+			str(config_path),
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"Reconstructions",
+			"--strict-header-order",
+			"--no-verify-header",
+		],
+	)
+	assert conflicting_header_modes.exit_code != 0
+	assert (
+		"--strict-header-order cannot be combined with --no-verify-header"
+		in conflicting_header_modes.output
+	)
