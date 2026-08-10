@@ -14,7 +14,7 @@ authors = [
 dependencies = [
   "click>=8.1,<9",
   "natsort>=8.4,<9",
-  "numpy>=1.24,<2",
+  "numpy>=1.24,<3",
   "psutil>=5.9,<8",
   "ruamel.yaml>=0.17,<0.19",
 ]
