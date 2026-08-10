@@ -319,7 +319,7 @@ def create_reconstruction_log_tab_if_missing(
 
 
 def verify_reconstruction_log_header(service, spreadsheet: str, sheet: str) -> None:
-	"""Require the mapped columns to match the converter's target schema."""
+	"""Require the mapped columns to match the converter's canonical order."""
 	header_range = _sheet_range(sheet, RECONSTRUCTION_LOG_HEADER_RANGE)
 	response = service.values().get(
 		spreadsheetId=spreadsheet,
@@ -331,8 +331,64 @@ def verify_reconstruction_log_header(service, spreadsheet: str, sheet: str) -> N
 		raise ValueError(
 			f"Google Sheet header mismatch in {header_range}. "
 			f"Expected {list(RECONSTRUCTION_LOG_FIELDS)!r}; got {list(actual)!r}. "
-			"Select the Reconstructions tab or pass --no-verify-header to override."
+			"Select the intended tab, use the default name-matching mode, or pass "
+			"--no-verify-header for an intentionally positional upload."
 		)
+
+
+def _match_reconstruction_log_header(
+	service,
+	spreadsheet: str,
+	sheet: str,
+	row: dict[str, str],
+) -> tuple[str, list[str | None]]:
+	"""Lay out one row according to the live Sheet header names."""
+	header_range = _sheet_range(sheet, "1:1")
+	response = service.values().get(
+		spreadsheetId=spreadsheet,
+		range=header_range,
+	).execute()
+	rows = response.get("values", [])
+	header = list(rows[0]) if rows else []
+	required = set(RECONSTRUCTION_LOG_FIELDS)
+	positions: dict[str, list[int]] = {}
+	for index, field in enumerate(header):
+		if field in required:
+			positions.setdefault(field, []).append(index)
+
+	missing = [field for field in RECONSTRUCTION_LOG_FIELDS if field not in positions]
+	duplicates = [
+		field
+		for field in RECONSTRUCTION_LOG_FIELDS
+		if len(positions.get(field, ())) > 1
+	]
+	if missing or duplicates:
+		problems = []
+		if missing:
+			problems.append(f"missing required fields {missing!r}")
+		if duplicates:
+			problems.append(f"duplicate required fields {duplicates!r}")
+		raise ValueError(
+			f"Google Sheet header mismatch in {header_range}: "
+			f"{'; '.join(problems)}. Header names must match exactly."
+		)
+
+	first_column_index = next(
+		index for index, field in enumerate(header) if field not in (None, "")
+	)
+	last_column_index = len(header) - 1
+	values: list[str | None] = [
+		None
+		for _ in range(last_column_index - first_column_index + 1)
+	]
+	for field, (column_index,) in positions.items():
+		values[column_index - first_column_index] = row[field]
+
+	column_range = (
+		f"{_column_label(first_column_index + 1)}:"
+		f"{_column_label(last_column_index + 1)}"
+	)
+	return column_range, values
 
 
 def append_reconstruction_log_row(
@@ -342,14 +398,30 @@ def append_reconstruction_log_row(
 	row: dict[str, str],
 	*,
 	verify_header: bool = True,
+	strict_header_order: bool = False,
 ) -> dict:
 	"""Append one reconstruction row to a Google Sheet and return its response."""
-	if verify_header:
+	if strict_header_order and not verify_header:
+		raise ValueError(
+			"strict header ordering cannot be combined with disabled header verification"
+		)
+	if strict_header_order:
 		verify_reconstruction_log_header(service, spreadsheet, sheet)
-	values = [row[field] for field in RECONSTRUCTION_LOG_FIELDS]
+		column_range = RECONSTRUCTION_LOG_COLUMN_RANGE
+		values = [row[field] for field in RECONSTRUCTION_LOG_FIELDS]
+	elif verify_header:
+		column_range, values = _match_reconstruction_log_header(
+			service,
+			spreadsheet,
+			sheet,
+			row,
+		)
+	else:
+		column_range = RECONSTRUCTION_LOG_COLUMN_RANGE
+		values = [row[field] for field in RECONSTRUCTION_LOG_FIELDS]
 	return service.values().append(
 		spreadsheetId=spreadsheet,
-		range=_sheet_range(sheet, RECONSTRUCTION_LOG_COLUMN_RANGE),
+		range=_sheet_range(sheet, column_range),
 		valueInputOption="RAW",
 		insertDataOption="INSERT_ROWS",
 		body={"majorDimension": "ROWS", "values": [values]},
@@ -364,6 +436,8 @@ def _validate_destination_options(
 	force: bool,
 	spreadsheet: str | None,
 	sheet: str | None,
+	verify_header: bool,
+	strict_header_order: bool,
 ) -> None:
 	if create_tab and not upload:
 		raise click.UsageError("--create-tab requires --upload.")
@@ -376,6 +450,10 @@ def _validate_destination_options(
 			"--spreadsheet and --sheet are required with --upload "
 			"(or set MCTUTIL_GSHEET_ID and MCTUTIL_GSHEET_SHEET)."
 		)
+	if strict_header_order and not verify_header:
+		raise click.UsageError(
+			"--strict-header-order cannot be combined with --no-verify-header."
+		)
 
 
 def _upload_reconstruction_log(
@@ -384,6 +462,7 @@ def _upload_reconstruction_log(
 	sheet: str,
 	row: dict[str, str],
 	verify_header: bool,
+	strict_header_order: bool,
 	create_tab: bool,
 ) -> tuple[str, bool]:
 	try:
@@ -401,6 +480,7 @@ def _upload_reconstruction_log(
 			sheet,
 			row,
 			verify_header=verify_header,
+			strict_header_order=strict_header_order,
 		)
 	except Exception as exc:
 		raise click.ClickException(f"Google Sheets upload failed: {exc}") from exc
@@ -465,7 +545,15 @@ def _write_local_reconstruction_log(
 	"--verify-header/--no-verify-header",
 	default=True,
 	show_default=True,
-	help="Verify the mapped destination columns before uploading.",
+	help=(
+		"Match destination columns by exact header name before uploading. "
+		"Disabling this uses the legacy positional order."
+	),
+)
+@click.option(
+	"--strict-header-order",
+	is_flag=True,
+	help="Require the canonical A:CJ header order instead of matching by name.",
 )
 @click.option("--force", is_flag=True, help="Replace OUTPUT if it already exists.")
 def xaid_log(
@@ -477,6 +565,7 @@ def xaid_log(
 	create_tab: bool,
 	google_conf: Path,
 	verify_header: bool,
+	strict_header_order: bool,
 	force: bool,
 ) -> None:
 	"""Convert CONFIG_PATH to a local or Google Sheets reconstruction log."""
@@ -487,6 +576,8 @@ def xaid_log(
 		force=force,
 		spreadsheet=spreadsheet,
 		sheet=sheet,
+		verify_header=verify_header,
+		strict_header_order=strict_header_order,
 	)
 	try:
 		parsed = parse_xaid_config(config_path)
@@ -507,6 +598,7 @@ def xaid_log(
 			sheet,
 			row,
 			verify_header,
+			strict_header_order,
 			create_tab,
 		)
 		if created_tab:
