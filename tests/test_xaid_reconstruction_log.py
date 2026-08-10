@@ -35,6 +35,7 @@ volume_rotation_y = 0.0
 volume_rotation_x = 0.0
 volume_rotation_z = 0.0
 voxel_size = 0.0004652572631042871
+nat_vx_size = 0.000465257263104
 
 [Proj_Filters]
 median_filter_size = 2
@@ -51,21 +52,71 @@ ring_b_size = 0
 [Reconstruction_Settings]
 sod = 5.640559192545288
 sdd = 110.68979560880115
+freeray = None
 reco_type = FDK
+reg_type = None
+iterations = 0
+reg_threshold = 0.0
+reg_lambda = 0.0
 apply_roundmask = 1
 fdk_filter = hamming
 roi_filter = 1
+is_short_scan = 0
+is_offset_scan = 0
+is_detector_offset = 0
+offset_shift = 0
 img_binning = 1.000000000000617
+gui_img_binning = 1
+is_compute_opt_oblique_slice_y = 0
+is_opt_oblique_geom = 0
+is_opt_proj_offset_v = 0
+is_opt_proj_slant_v = 0
+is_opt_oblique_angle = 0
 is_opt_stage_shifts_triangle = 0
 is_opt_stage_shifts = 0
 is_opt_proj_shifts_2 = 0
+is_align_axis = 0
+is_opt_triangle = 0
 is_opt_jitter = 0
+is_jitter_smooth = 1
+jitter_iterations = 3
+shift_u_max = 10
+shift_v_max = 10
+oblique_opt_slice_y = 0
+
+[BHC_Values]
+bhc_cupping_value = 0.0
+bhc_streak_value = 0.0
+bhc_streak_thl_value = 0.0
+starvation_value = 0.0
+scatter_basic_value = 0.0
+dual_energy_factor = 0.0
 
 [GC_Values]
 rotation_axis_offset = [-12.218087352435388]
+cs_y_slice = 2048
+rotation_axis_tilt = 0.0
+tilt_y_slice_min = None
+tilt_y_slice_max = None
 drift_x = 0.0
 drift_y = 0.0
 drift_z = 0.0
+
+[TScan]
+is_opt_tscan = 0
+tscan_max_shift = 140
+
+[Global_Reco_Settings]
+gcf = None
+rotation_axis_tilt = 0.0
+rotation_axis_slant = 0.0
+det_rot_eta = 0.0
+det_rot_theta = 0.0
+det_rot_phi = 0.0
+det_offset_u = 0.0
+det_offset_v = 0.0
+
+[Post_Filters]
 
 [Final_Image_Settings]
 save_path = Z:\\DemoScans\\PSU\\Tail_%04d.tif
@@ -73,6 +124,8 @@ min = -1.1867414
 max = 7.5952454
 export_type = tif16
 export_order = xzy
+recolocation = Z:\\DemoScans\\PSU\\Tail_%04d.tif
+location_string = |w!|u16|xzy|scaleMinMax
 """
 
 
@@ -94,6 +147,7 @@ class FakeValuesService:
 	def __init__(self, header=None):
 		self.header = list(header or [])
 		self.get_calls = []
+		self.update_calls = []
 		self.append_calls = []
 
 	def get(self, **kwargs):
@@ -101,12 +155,17 @@ class FakeValuesService:
 		values = [self.header] if self.header else []
 		return FakeRequest({"values": values})
 
+	def update(self, **kwargs):
+		self.update_calls.append(kwargs)
+		self.header = list(kwargs["body"]["values"][0])
+		return FakeRequest({"updatedRows": 1})
+
 	def append(self, **kwargs):
 		self.append_calls.append(kwargs)
 		return FakeRequest(
 			{
 				"updates": {
-					"updatedRange": "Reconstructions!A24:R24",
+					"updatedRange": "Reconstructions!A24:CJ24",
 					"updatedRows": 1,
 				}
 			}
@@ -114,11 +173,31 @@ class FakeValuesService:
 
 
 class FakeSheetsService:
-	def __init__(self, header=None):
+	def __init__(self, header=None, sheet_titles=()):
 		self.values_service = FakeValuesService(header)
+		self.sheet_titles = list(sheet_titles)
+		self.get_calls = []
+		self.batch_update_calls = []
 
 	def values(self):
 		return self.values_service
+
+	def get(self, **kwargs):
+		self.get_calls.append(kwargs)
+		return FakeRequest(
+			{
+				"sheets": [
+					{"properties": {"title": title}}
+					for title in self.sheet_titles
+				]
+			}
+		)
+
+	def batchUpdate(self, **kwargs):
+		self.batch_update_calls.append(kwargs)
+		properties = kwargs["body"]["requests"][0]["addSheet"]["properties"]
+		self.sheet_titles.append(properties["title"])
+		return FakeRequest({"replies": [{"addSheet": {"properties": properties}}]})
 
 
 def test_build_row_maps_xaid_reconstruction_fields(load_module, tmp_path):
@@ -127,36 +206,59 @@ def test_build_row_maps_xaid_reconstruction_fields(load_module, tmp_path):
 	row = module.build_reconstruction_log_row(parsed.config)
 
 	assert parsed.repaired_first_header is True
-	assert row["Type"] == "PSU"
-	assert row["Sample ID"] == "WaterFlee-319-40-120-UV-MX4145"
-	assert row["center*"] == "X-AID rotation-axis offset: -12.218087352435388"
-	assert row["Do Movement Correction?"] == "0"
-	assert "median=2" in row["proj_filter (BF settings)"]
-	assert "FDK" in row["hoto_tomo_algo (BAC settings)"]
-	assert row["final_recon_crop"] == "X-AID ROI pos=(0,0,800); size=(4095,4095,2463)"
-	assert row["imageJ W"] == "8.7819868"
-	assert row["imageJ L"] == "3.204252"
-	assert row["recon offset angle"] == "0.0"
-	assert "not present in config: scan number, SSD, stain, energy" in row["Notes"]
+	assert tuple(row) == module.RECONSTRUCTION_LOG_FIELDS
+	assert len(row) == 88
+	assert row["Software Release Version"] == "2026.5.1"
+	assert row["Input Projection Data File"] == SOURCE_PATH
+	assert row["Detector Pixel Pitch (mm)"] == "0.009130000000000001"
+	assert row["Sub-Volume Start, Z"] == "800"
+	assert row["Native Voxel Size at Magnification (mm)"] == "0.000465257263104"
+	assert row["Projection Gaussian Smoothing Sigma (px)"] == "0.5"
+	assert row["Partial-Ring Filter Strength"] == "0.0"
+	assert row["Air-Normalization Region"] == "None"
+	assert row["Reconstruction Algorithm"] == "FDK"
+	assert row["Auto-Optimize: Per-Projection Shifts (Variant 2) ⚠"] == "0"
+	assert row["Beam-Hardening Cupping Correction Strength"] == "0.0"
+	assert row["Center-of-Rotation Shift (px)"] == "[-12.218087352435388]"
+	assert row["Translation-Scan Max Shift Search (px)"] == "140"
+	assert row["Detector Rotation η (°)"] == "0.0"
+	assert row["Internal Export Descriptor ⚠"] == "|w!|u16|xzy|scaleMinMax"
 
 
-def test_center_conventions_are_explicit(load_module, tmp_path):
+def test_mapping_field_names_and_sheet_range_are_complete(load_module):
 	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
-	config = module.parse_xaid_config(_config_file(tmp_path)).config
 
-	width_half = module.build_reconstruction_log_row(
-		config,
-		center_convention="width-half",
+	assert len(module.XAID_CONFIG_FIELD_MAPPING) == 88
+	assert len(set(module.RECONSTRUCTION_LOG_FIELDS)) == 88
+	assert module.RECONSTRUCTION_LOG_FIELDS[:3] == (
+		"Software Release Version",
+		"Input Projection Data File",
+		"Detector Pixel Pitch (mm)",
 	)
-	pixel_center = module.build_reconstruction_log_row(
-		config,
-		center_convention="pixel-center",
+	assert module.RECONSTRUCTION_LOG_FIELDS[-3:] == (
+		"Output Axis Ordering",
+		"Reconstruction Output Location",
+		"Internal Export Descriptor ⚠",
 	)
-	assert width_half["center*"] == "2035.781912647564612"
-	assert pixel_center["center*"] == "2035.281912647564612"
+	assert module.RECONSTRUCTION_LOG_LAST_COLUMN == "CJ"
+	assert module.RECONSTRUCTION_LOG_COLUMN_RANGE == "A:CJ"
+	assert module.RECONSTRUCTION_LOG_HEADER_RANGE == "A1:CJ1"
 
 
-def test_cli_writes_target_schema_and_accepts_metadata_overrides(load_module, tmp_path):
+def test_missing_mapped_config_fields_are_blank(load_module, tmp_path):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	path = tmp_path / "minimal-config.txt"
+	path.write_text("[General_Info]\nsoftware_version = 2026.5.1\n", encoding="utf-8")
+
+	config = module.parse_xaid_config(path).config
+	row = module.build_reconstruction_log_row(config)
+
+	assert row["Software Release Version"] == "2026.5.1"
+	assert row["Input Projection Data File"] == ""
+	assert row["Internal Export Descriptor ⚠"] == ""
+
+
+def test_cli_writes_mapped_schema_and_values(load_module, tmp_path):
 	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
 	config_path = _config_file(tmp_path)
 	output = tmp_path / "converted.csv"
@@ -166,18 +268,6 @@ def test_cli_writes_target_schema_and_accepts_metadata_overrides(load_module, tm
 			str(config_path),
 			"--output",
 			str(output),
-			"--scan-number",
-			"147",
-			"--stain",
-			"unstained",
-			"--energy",
-			"40 kV",
-			"--ssd",
-			"105 mm",
-			"--center",
-			"2035.75",
-			"--notes",
-			"operator verified",
 		],
 	)
 
@@ -186,14 +276,10 @@ def test_cli_writes_target_schema_and_accepts_metadata_overrides(load_module, tm
 	with output.open(newline="", encoding="utf-8") as handle:
 		rows = list(csv.DictReader(handle))
 	assert tuple(rows[0]) == module.RECONSTRUCTION_LOG_FIELDS
-	assert rows[0]["o"] == "147"
-	assert rows[0]["SSD"] == "105 mm"
-	assert rows[0]["Stain"] == "unstained"
-	assert rows[0]["Energy"] == "40 kV"
-	assert rows[0]["center*"] == "2035.75"
-	assert "operator verified" in rows[0]["Notes"]
-	assert "not present in config: SIFT ZDP, preview, tight crop" in rows[0]["Notes"]
-	assert "center preserved as the X-AID offset" not in rows[0]["Notes"]
+	assert rows[0]["Software Release Version"] == "2026.5.1"
+	assert rows[0]["Reconstruction Algorithm"] == "FDK"
+	assert rows[0]["Center-of-Rotation Shift (px)"] == "[-12.218087352435388]"
+	assert rows[0]["Output File Format"] == "tif16"
 
 
 def test_cli_refuses_to_replace_output_without_force(load_module, tmp_path):
@@ -226,11 +312,11 @@ def test_append_google_sheet_verifies_header_and_uses_raw_insert(load_module, tm
 
 	assert response["updates"]["updatedRows"] == 1
 	assert service.values_service.get_calls == [
-		{"spreadsheetId": "spreadsheet-id", "range": "'Recon''s'!A1:R1"}
+		{"spreadsheetId": "spreadsheet-id", "range": "'Recon''s'!A1:CJ1"}
 	]
 	append_call = service.values_service.append_calls[0]
 	assert append_call["spreadsheetId"] == "spreadsheet-id"
-	assert append_call["range"] == "'Recon''s'!A:R"
+	assert append_call["range"] == "'Recon''s'!A:CJ"
 	assert append_call["valueInputOption"] == "RAW"
 	assert append_call["insertDataOption"] == "INSERT_ROWS"
 	assert append_call["body"] == {
@@ -272,6 +358,98 @@ def test_append_google_sheet_can_explicitly_skip_header_check(load_module, tmp_p
 	assert len(service.values_service.append_calls) == 1
 
 
+def test_cli_create_tab_writes_header_then_verifies_and_appends(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config_path = _config_file(tmp_path)
+	service = FakeSheetsService(sheet_titles=["Existing"])
+	monkeypatch.setattr(module, "build_google_sheets_service", lambda path: service)
+
+	result = CliRunner().invoke(
+		module.xaid_log,
+		[
+			str(config_path),
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"New Recon",
+			"--create-tab",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert "Created Google Sheets tab with reconstruction header: New Recon" in result.output
+	assert service.get_calls == [
+		{
+			"spreadsheetId": "spreadsheet-id",
+			"fields": "sheets.properties.title",
+		}
+	]
+	assert service.batch_update_calls == [
+		{
+			"spreadsheetId": "spreadsheet-id",
+			"body": {
+				"requests": [
+					{
+						"addSheet": {
+							"properties": {"title": "New Recon"},
+						}
+					}
+				]
+			},
+		}
+	]
+	assert service.values_service.update_calls == [
+		{
+			"spreadsheetId": "spreadsheet-id",
+			"range": "'New Recon'!A1:CJ1",
+			"valueInputOption": "RAW",
+			"body": {
+				"majorDimension": "ROWS",
+				"values": [list(module.RECONSTRUCTION_LOG_FIELDS)],
+			},
+		}
+	]
+	assert service.values_service.get_calls == [
+		{"spreadsheetId": "spreadsheet-id", "range": "'New Recon'!A1:CJ1"}
+	]
+	assert len(service.values_service.append_calls) == 1
+
+
+def test_cli_create_tab_preserves_existing_empty_tab_and_header_error(
+	load_module,
+	tmp_path,
+	monkeypatch,
+):
+	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
+	config_path = _config_file(tmp_path)
+	service = FakeSheetsService(sheet_titles=["Reconstructions"])
+	monkeypatch.setattr(module, "build_google_sheets_service", lambda path: service)
+
+	result = CliRunner().invoke(
+		module.xaid_log,
+		[
+			str(config_path),
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"Reconstructions",
+			"--create-tab",
+		],
+	)
+
+	assert result.exit_code != 0
+	assert "header mismatch" in result.output
+	assert service.batch_update_calls == []
+	assert service.values_service.update_calls == []
+	assert service.values_service.append_calls == []
+
+
 def test_cli_uploads_without_creating_local_csv(load_module, tmp_path, monkeypatch):
 	module = load_module("mctutil/parse/xaid_reconstruction_log.py")
 	config_path = _config_file(tmp_path)
@@ -294,7 +472,7 @@ def test_cli_uploads_without_creating_local_csv(load_module, tmp_path, monkeypat
 	)
 
 	assert result.exit_code == 0, result.output
-	assert "Appended reconstruction log row: Reconstructions!A24:R24" in result.output
+	assert "Appended reconstruction log row: Reconstructions!A24:CJ24" in result.output
 	assert not (tmp_path / "config_reconstruction_log.csv").exists()
 	assert len(service.values_service.append_calls) == 1
 
@@ -328,3 +506,10 @@ def test_cli_upload_requires_destination_and_excludes_local_output(
 	)
 	assert conflicting.exit_code != 0
 	assert "--output cannot be combined with --upload" in conflicting.output
+
+	create_without_upload = CliRunner().invoke(
+		module.xaid_log,
+		[str(config_path), "--create-tab"],
+	)
+	assert create_without_upload.exit_code != 0
+	assert "--create-tab requires --upload" in create_without_upload.output
