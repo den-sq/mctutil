@@ -45,12 +45,18 @@ directory with `--google-conf` or `MCTUTIL_GOOGLE_CONF`. The Google client
 libraries are included in `environment.yml`; pip-only installations can use
 `mctutil[google-sheets]`.
 
-Uploads verify that the destination header in A1:CJ1 exactly matches the
-expected reconstruction schema, then append one row using raw values. Use
-`--no-verify-header` only when intentionally targeting a differently labeled
-but positionally compatible tab. `--create-tab` creates the requested tab and
-writes the expected header only when that tab is absent. If the tab already
-exists, it is left unchanged and the normal header verification still applies.
+Uploads match the 88 mapped fields to exact names in the destination's live
+header row, then append one row using raw values in that Sheet's column order.
+Columns may be reordered, and extra leading, middle, or trailing columns are
+left unwritten. Missing or duplicate mapped field names stop the upload before
+anything is appended; names containing `⚠` must match exactly.
+
+Pass `--strict-header-order` to require the canonical A1:CJ1 header order. Use
+`--no-verify-header` only for an intentionally positional upload; it skips the
+header read and writes the canonical 88-value order to A:CJ. These two options
+cannot be combined. `--create-tab` creates the requested tab in canonical
+mapping order only when that tab is absent. If the tab already exists, it is
+left unchanged and the selected header behavior still applies.
 
 Defaults: `prune-empty` **defaults to `--dry-run`** because `rmdir` is
 destructive. `pull-config` and `scanlog-fetch` **default to `--execute`** (they
