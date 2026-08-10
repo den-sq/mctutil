@@ -27,7 +27,7 @@ python -m pip install --no-deps -e .
 Notes:
 - `environment.yml` is the authoritative dependency set for this repository.
 - Core pip metadata supports `numpy>=1.24,<3`; the full Conda environment pins
-  TomoPy 1.15.3 for NumPy 2 compatibility.
+  TomoPy 1.15.3 or greater for NumPy 2 compatibility.
 - Conda-forge is the supported source for `tomopy`; plain `pip install tomopy`
   does not work.
 - A few packages are still pulled through the `pip:` section because they are
