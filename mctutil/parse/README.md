@@ -13,6 +13,9 @@ for a command's options.
 - **`meta-shift`** — Run the per-sample meta-shift engine, delegating lab-specific schema (folder conventions, status enum, sbatch parsing, sheet layout) to a `--schema` adapter (e.g. `chenglab`).
 - **`pull-config`** — Copy config files found under a root into a target directory.
 - **`scanlog-fetch`** — Copy scanlogs into a target location.
+- **`sigray-scan-log`** — Extract one concise scan row per numbered Sigray
+  projection HDF5 acquisition. FLAT, DARK, and POST files enrich those rows but
+  do not become scan rows.
 - **`xaid-log`** — Convert a MITOS X-AID reconstruction `config.txt` into one
   88-column CSV row. Each configured value is written to its clear-name field
   from the X-AID field mapping, in mapping order (columns A-CJ).
@@ -21,9 +24,52 @@ for a command's options.
 Example:
 
 ```bash
+mctutil parse sigray-scan-log /mnt/e/20260514_sample \
+  --output scans.csv
+
 mctutil parse xaid-log config.txt \
   --output reconstruction_log.csv
 ```
+
+`sigray-scan-log` accepts one or more HDF5 files or acquisition directories.
+Directory discovery inspects direct children only so it does not traverse large
+TIFF reconstruction trees; pass multiple directories when needed. It recognizes
+numbered projection names such as `sample_000.h5` and writes a separate row for
+every FOV acquisition, even when several acquisitions share a containing
+folder. `Projection Data File` stores the portable HDF5 basename and can be
+matched to the basename of X-AID's `Input Projection Data File`;
+`Acquisition Group` records the parent folder.
+
+The initial reader intentionally targets the observed Sigray/Data Exchange
+layout and requires exact HDF5 paths. It reads projection shape and metadata,
+theta, completion flags, timestamps, and detector IDs without loading the
+projection image array. Stage positions are per-file medians. The status and
+warning fields expose incomplete frames, frame-averaging-aware detector-ID
+gaps, invalid theta, missing metadata, stage motion, and uncertain references.
+`Dropped Frames` counts raw detector IDs missing beyond the normal
+`Exposures per Projection` stride.
+External POST references are associated by detector shape and sample stage;
+FLAT and DARK files may be shared across the acquisition group. Ambiguous
+matches are left blank and reported rather than inferred from filename suffixes.
+
+The canonical scan header contains 42 machine-derived fields. User-managed
+Sheet columns such as Project, Sample ID, Stain, Operator, and Notes can remain
+alongside them: header-name upload mode leaves extra columns unwritten.
+
+To append scan rows directly to Google Sheets:
+
+```bash
+mctutil parse sigray-scan-log /mnt/e/20260514_sample \
+  --upload \
+  --spreadsheet SPREADSHEET_ID \
+  --sheet Scans \
+  --create-tab
+```
+
+The Sigray and X-AID commands share the same OAuth cache, create-tab behavior,
+exact header-name matching, strict-order option, and explicit positional mode.
+Pip-only installs can use `mctutil[sigray]` for CSV extraction and add
+`mctutil[google-sheets]` for uploads; the full conda environment includes both.
 
 The CSV header uses the mapping's clear names, from `Software Release Version`
 through `Internal Export Descriptor ⚠`. Values are preserved as recorded in

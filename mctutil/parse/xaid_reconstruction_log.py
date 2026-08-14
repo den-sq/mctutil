@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import configparser
-import csv
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
-from tempfile import NamedTemporaryFile
 
 import click
 
-from mctutil.shared.deps import require
+from mctutil.parse import tabular_log
 
 
 XAID_CONFIG_FIELD_MAPPING = (
@@ -107,22 +105,14 @@ XAID_CONFIG_FIELD_MAPPING = (
 )
 
 
-def _column_label(column_number: int) -> str:
-	"""Return the A1 column label for a one-based column number."""
-	if column_number < 1:
-		raise ValueError("column number must be positive")
-	label = ""
-	while column_number:
-		column_number, remainder = divmod(column_number - 1, 26)
-		label = chr(ord("A") + remainder) + label
-	return label
+_column_label = tabular_log.column_label
 
 
 RECONSTRUCTION_LOG_FIELDS = tuple(item[2] for item in XAID_CONFIG_FIELD_MAPPING)
 RECONSTRUCTION_LOG_LAST_COLUMN = _column_label(len(RECONSTRUCTION_LOG_FIELDS))
 RECONSTRUCTION_LOG_COLUMN_RANGE = f"A:{RECONSTRUCTION_LOG_LAST_COLUMN}"
 RECONSTRUCTION_LOG_HEADER_RANGE = f"A1:{RECONSTRUCTION_LOG_LAST_COLUMN}1"
-GOOGLE_SHEETS_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
+GOOGLE_SHEETS_SCOPES = tabular_log.GOOGLE_SHEETS_SCOPES
 
 
 @dataclass(frozen=True)
@@ -198,83 +188,22 @@ def write_reconstruction_log_csv(
 	force: bool = False,
 ) -> None:
 	"""Atomically write a one-row reconstruction-log CSV."""
-	if output.exists() and not force:
-		raise FileExistsError(f"Output already exists: {output} (pass --force to replace it)")
-	output.parent.mkdir(parents=True, exist_ok=True)
-	temporary_path = None
-	try:
-		with NamedTemporaryFile(
-			"w",
-			encoding="utf-8",
-			newline="",
-			dir=output.parent,
-			prefix=f".{output.name}.",
-			delete=False,
-		) as handle:
-			temporary_path = Path(handle.name)
-			writer = csv.DictWriter(handle, fieldnames=RECONSTRUCTION_LOG_FIELDS)
-			writer.writeheader()
-			writer.writerow(row)
-		os.replace(temporary_path, output)
-	except OSError:
-		if temporary_path is not None:
-			temporary_path.unlink(missing_ok=True)
-		raise
+	tabular_log.write_csv(
+		output,
+		RECONSTRUCTION_LOG_FIELDS,
+		[row],
+		force=force,
+	)
 
 
 def build_google_sheets_service(google_conf: Path):
 	"""Authenticate and return the Google Sheets v4 spreadsheets service."""
-	(
-		google_auth_requests,
-		google_oauth2_credentials,
-		google_auth_oauthlib_flow,
-		googleapiclient_discovery,
-	) = require(
-		(
-			"google.auth.transport.requests",
-			"google.oauth2.credentials",
-			"google_auth_oauthlib.flow",
-			"googleapiclient.discovery",
-		),
-		"google-sheets",
-		purpose="Google Sheets upload dependencies are unavailable",
-	)
-	Request = google_auth_requests.Request
-	Credentials = google_oauth2_credentials.Credentials
-	InstalledAppFlow = google_auth_oauthlib_flow.InstalledAppFlow
-	build = googleapiclient_discovery.build
-
-	token_path = google_conf / "gsheets_token.json"
-	credentials_path = google_conf / "gsheets_credentials.json"
-	credentials = None
-	if token_path.exists():
-		credentials = Credentials.from_authorized_user_file(
-			token_path,
-			GOOGLE_SHEETS_SCOPES,
-		)
-
-	if credentials is None or not credentials.valid:
-		if credentials and credentials.expired and credentials.refresh_token:
-			credentials.refresh(Request())
-		else:
-			if not credentials_path.exists():
-				raise FileNotFoundError(
-					f"Google OAuth client credentials not found: {credentials_path}"
-				)
-			flow = InstalledAppFlow.from_client_secrets_file(
-				credentials_path,
-				GOOGLE_SHEETS_SCOPES,
-			)
-			credentials = flow.run_local_server(port=0)
-		token_path.write_text(credentials.to_json(), encoding="utf-8")
-
-	return build("sheets", "v4", credentials=credentials).spreadsheets()
+	return tabular_log.build_google_sheets_service(google_conf)
 
 
 def _sheet_range(sheet: str, cells: str) -> str:
 	"""Return quoted A1 notation, including support for apostrophes in tab names."""
-	quoted_sheet = sheet.replace("'", "''")
-	return f"'{quoted_sheet}'!{cells}"
+	return tabular_log.sheet_range(sheet, cells)
 
 
 def create_reconstruction_log_tab_if_missing(
@@ -283,57 +212,22 @@ def create_reconstruction_log_tab_if_missing(
 	sheet: str,
 ) -> bool:
 	"""Create a missing tab with the reconstruction header; preserve existing tabs."""
-	response = service.get(
-		spreadsheetId=spreadsheet,
-		fields="sheets.properties.title",
-	).execute()
-	titles = {
-		item.get("properties", {}).get("title")
-		for item in response.get("sheets", [])
-	}
-	if sheet in titles:
-		return False
-
-	service.batchUpdate(
-		spreadsheetId=spreadsheet,
-		body={
-			"requests": [
-				{
-					"addSheet": {
-						"properties": {"title": sheet},
-					}
-				}
-			]
-		},
-	).execute()
-	service.values().update(
-		spreadsheetId=spreadsheet,
-		range=_sheet_range(sheet, RECONSTRUCTION_LOG_HEADER_RANGE),
-		valueInputOption="RAW",
-		body={
-			"majorDimension": "ROWS",
-			"values": [list(RECONSTRUCTION_LOG_FIELDS)],
-		},
-	).execute()
-	return True
+	return tabular_log.create_tab_if_missing(
+		service,
+		spreadsheet,
+		sheet,
+		RECONSTRUCTION_LOG_FIELDS,
+	)
 
 
 def verify_reconstruction_log_header(service, spreadsheet: str, sheet: str) -> None:
 	"""Require the mapped columns to match the converter's canonical order."""
-	header_range = _sheet_range(sheet, RECONSTRUCTION_LOG_HEADER_RANGE)
-	response = service.values().get(
-		spreadsheetId=spreadsheet,
-		range=header_range,
-	).execute()
-	values = response.get("values", [])
-	actual = tuple(values[0]) if values else ()
-	if actual != RECONSTRUCTION_LOG_FIELDS:
-		raise ValueError(
-			f"Google Sheet header mismatch in {header_range}. "
-			f"Expected {list(RECONSTRUCTION_LOG_FIELDS)!r}; got {list(actual)!r}. "
-			"Select the intended tab, use the default name-matching mode, or pass "
-			"--no-verify-header for an intentionally positional upload."
-		)
+	tabular_log.verify_header(
+		service,
+		spreadsheet,
+		sheet,
+		RECONSTRUCTION_LOG_FIELDS,
+	)
 
 
 def _match_reconstruction_log_header(
@@ -343,52 +237,14 @@ def _match_reconstruction_log_header(
 	row: dict[str, str],
 ) -> tuple[str, list[str | None]]:
 	"""Lay out one row according to the live Sheet header names."""
-	header_range = _sheet_range(sheet, "1:1")
-	response = service.values().get(
-		spreadsheetId=spreadsheet,
-		range=header_range,
-	).execute()
-	rows = response.get("values", [])
-	header = list(rows[0]) if rows else []
-	required = set(RECONSTRUCTION_LOG_FIELDS)
-	positions: dict[str, list[int]] = {}
-	for index, field in enumerate(header):
-		if field in required:
-			positions.setdefault(field, []).append(index)
-
-	missing = [field for field in RECONSTRUCTION_LOG_FIELDS if field not in positions]
-	duplicates = [
-		field
-		for field in RECONSTRUCTION_LOG_FIELDS
-		if len(positions.get(field, ())) > 1
-	]
-	if missing or duplicates:
-		problems = []
-		if missing:
-			problems.append(f"missing required fields {missing!r}")
-		if duplicates:
-			problems.append(f"duplicate required fields {duplicates!r}")
-		raise ValueError(
-			f"Google Sheet header mismatch in {header_range}: "
-			f"{'; '.join(problems)}. Header names must match exactly."
-		)
-
-	first_column_index = next(
-		index for index, field in enumerate(header) if field not in (None, "")
+	matched_range, values = tabular_log.match_header(
+		service,
+		spreadsheet,
+		sheet,
+		RECONSTRUCTION_LOG_FIELDS,
+		[row],
 	)
-	last_column_index = len(header) - 1
-	values: list[str | None] = [
-		None
-		for _ in range(last_column_index - first_column_index + 1)
-	]
-	for field, (column_index,) in positions.items():
-		values[column_index - first_column_index] = row[field]
-
-	column_range = (
-		f"{_column_label(first_column_index + 1)}:"
-		f"{_column_label(last_column_index + 1)}"
-	)
-	return column_range, values
+	return matched_range, values[0]
 
 
 def append_reconstruction_log_row(
@@ -401,31 +257,15 @@ def append_reconstruction_log_row(
 	strict_header_order: bool = False,
 ) -> dict:
 	"""Append one reconstruction row to a Google Sheet and return its response."""
-	if strict_header_order and not verify_header:
-		raise ValueError(
-			"strict header ordering cannot be combined with disabled header verification"
-		)
-	if strict_header_order:
-		verify_reconstruction_log_header(service, spreadsheet, sheet)
-		column_range = RECONSTRUCTION_LOG_COLUMN_RANGE
-		values = [row[field] for field in RECONSTRUCTION_LOG_FIELDS]
-	elif verify_header:
-		column_range, values = _match_reconstruction_log_header(
-			service,
-			spreadsheet,
-			sheet,
-			row,
-		)
-	else:
-		column_range = RECONSTRUCTION_LOG_COLUMN_RANGE
-		values = [row[field] for field in RECONSTRUCTION_LOG_FIELDS]
-	return service.values().append(
-		spreadsheetId=spreadsheet,
-		range=_sheet_range(sheet, column_range),
-		valueInputOption="RAW",
-		insertDataOption="INSERT_ROWS",
-		body={"majorDimension": "ROWS", "values": [values]},
-	).execute()
+	return tabular_log.append_rows(
+		service,
+		spreadsheet,
+		sheet,
+		RECONSTRUCTION_LOG_FIELDS,
+		[row],
+		verify=verify_header,
+		strict_header_order=strict_header_order,
+	)
 
 
 def _validate_destination_options(
@@ -439,21 +279,16 @@ def _validate_destination_options(
 	verify_header: bool,
 	strict_header_order: bool,
 ) -> None:
-	if create_tab and not upload:
-		raise click.UsageError("--create-tab requires --upload.")
-	if upload and output is not None:
-		raise click.UsageError("--output cannot be combined with --upload.")
-	if upload and force:
-		raise click.UsageError("--force applies only to local CSV output.")
-	if upload and (not spreadsheet or not sheet):
-		raise click.UsageError(
-			"--spreadsheet and --sheet are required with --upload "
-			"(or set MCTUTIL_GSHEET_ID and MCTUTIL_GSHEET_SHEET)."
-		)
-	if strict_header_order and not verify_header:
-		raise click.UsageError(
-			"--strict-header-order cannot be combined with --no-verify-header."
-		)
+	tabular_log.validate_destination_options(
+		upload=upload,
+		create_tab=create_tab,
+		output=output,
+		force=force,
+		spreadsheet=spreadsheet,
+		sheet=sheet,
+		verify=verify_header,
+		strict_header_order=strict_header_order,
+	)
 
 
 def _upload_reconstruction_log(
