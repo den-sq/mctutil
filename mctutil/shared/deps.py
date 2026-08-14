@@ -16,6 +16,7 @@ EXTRA_MODULES: dict[str, tuple[str, ...]] = {
 		"googleapiclient.discovery",
 	),
 	"als832": ("h5py", "tifffile"),
+	"sigray": ("h5py",),
 	"flats": ("scipy", "tifffile"),
 	"transform": ("h5py", "tifffile", "zarr"),
 	"ng": (
