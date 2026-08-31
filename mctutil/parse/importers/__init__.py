@@ -49,6 +49,16 @@ from .engine import (
 	ImportEngine,
 	ValueCandidate,
 )
+from .export import (
+	EXPORT_PROFILE_REGISTRY,
+	ExportColumn,
+	ExportProfile,
+	ExportProfileRegistry,
+	append_records,
+	materialize_row,
+	materialize_rows,
+	write_records_csv,
+)
 from .schema import (
 	RECONSTRUCTION_SCHEMA_REGISTRY,
 	SCAN_SCHEMA_REGISTRY,
@@ -68,6 +78,10 @@ __all__ = [
 	"BASE_DIAGNOSTIC_CODES",
 	"Diagnostic",
 	"DiagnosticCodeRegistry",
+	"EXPORT_PROFILE_REGISTRY",
+	"ExportColumn",
+	"ExportProfile",
+	"ExportProfileRegistry",
 	"FieldSpec",
 	"FieldType",
 	"ImportRecord",
@@ -98,9 +112,13 @@ __all__ = [
 	"evaluate_write",
 	"detect_adapter",
 	"discover_homogeneous",
+	"append_records",
 	"load_builtin_mapping",
 	"load_mapping",
 	"load_mapping_text",
+	"materialize_row",
+	"materialize_rows",
 	"promote_extension",
 	"select_adapter",
+	"write_records_csv",
 ]
