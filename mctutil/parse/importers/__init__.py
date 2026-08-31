@@ -43,6 +43,12 @@ from .registry import (
 	discover_homogeneous,
 	select_adapter,
 )
+from .engine import (
+	DEFAULT_PRECEDENCE_ORDER,
+	CandidateCollector,
+	ImportEngine,
+	ValueCandidate,
+)
 from .schema import (
 	RECONSTRUCTION_SCHEMA_REGISTRY,
 	SCAN_SCHEMA_REGISTRY,
@@ -57,12 +63,15 @@ from .schema import (
 __all__ = [
 	"CanonicalSchema",
 	"CanonicalValue",
+	"CandidateCollector",
+	"DEFAULT_PRECEDENCE_ORDER",
 	"BASE_DIAGNOSTIC_CODES",
 	"Diagnostic",
 	"DiagnosticCodeRegistry",
 	"FieldSpec",
 	"FieldType",
 	"ImportRecord",
+	"ImportEngine",
 	"MappingDefinition",
 	"MappingValidationError",
 	"PrecedencePolicy",
@@ -85,6 +94,7 @@ __all__ = [
 	"SourceRegistry",
 	"StrictnessMode",
 	"WriteDecision",
+	"ValueCandidate",
 	"evaluate_write",
 	"detect_adapter",
 	"discover_homogeneous",

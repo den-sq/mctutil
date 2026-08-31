@@ -272,6 +272,10 @@ def _validate_read(read: ReadRule, field_spec: FieldSpec) -> None:
 		raise MappingValidationError(
 			f"field {field_spec.key!r} is unitless but the read declares {read.source_unit!r}"
 		)
+	if field_spec.unit is not None and read.source_unit is None:
+		raise MappingValidationError(
+			f"field {field_spec.key!r} requires an explicit source_unit"
+		)
 
 
 def _validate_transform(transform: TransformRule, field_spec: FieldSpec) -> None:

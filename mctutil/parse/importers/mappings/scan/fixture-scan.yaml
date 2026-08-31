@@ -8,6 +8,7 @@ fields:
       kind: json_pointer
       role: primary
       pointer: /projection_count
+      source_unit: count
       state: observed
     select: scalar
   scan_id:
