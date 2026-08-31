@@ -45,6 +45,8 @@ CASES = [
 	CommandCase("mctutil/ng/validate.py", "validate"),
 	CommandCase("mctutil/parse/find_err_general.py", "find_errs"),
 	CommandCase("mctutil/parse/meta_shift.py", "meta_shift"),
+	CommandCase("mctutil/parse/importers/cli.py", "scan_log"),
+	CommandCase("mctutil/parse/importers/cli.py", "reconstruction_log"),
 	CommandCase("mctutil/parse/pull_config.py", "get_conf"),
 	CommandCase("mctutil/parse/scanlog_fetch.py", "scanlog_fetch"),
 	CommandCase("mctutil/parse/sigray_scan_log.py", "sigray_scan_log"),

@@ -8,15 +8,23 @@ source file.
 from __future__ import annotations
 
 import configparser
+import json
 import shlex
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
 
 class ReaderError(ValueError):
 	"""A declared read cannot be satisfied by its opened artifact."""
+
+
+class ArtifactDescriptor(Protocol):
+	role: str
+	path: Path
+	media_type: str
 
 
 @dataclass(frozen=True)
@@ -244,3 +252,37 @@ class ReaderContext:
 		except StopIteration as exc:
 			raise ReaderError(f"opened artifact role is unavailable: {role}") from exc
 		return reader(artifact, locator)
+
+
+@contextmanager
+def open_artifacts(
+	artifacts: Iterable[ArtifactDescriptor],
+) -> Iterator[ReaderContext]:
+	"""Open an adapter-declared artifact set read-only for mapping evaluation.
+
+	Phase 1 intentionally supports only the synthetic JSON media type. Real
+	HDF5/INI/XLSX source openers arrive with their adapters and optional extras.
+	"""
+
+	opened = []
+	for artifact in artifacts:
+		if artifact.media_type != "application/json":
+			raise ReaderError(
+				f"no Phase-1 opener for media type: {artifact.media_type}"
+			)
+		try:
+			with artifact.path.open("r", encoding="utf-8") as handle:
+				content = json.load(handle)
+			size = artifact.path.stat().st_size
+		except (OSError, ValueError) as exc:
+			raise ReaderError(f"cannot open JSON artifact {artifact.path}: {exc}") from exc
+		opened.append(
+			OpenedArtifact(
+				artifact.role,
+				artifact.path,
+				artifact.media_type,
+				content,
+				{"size": size},
+			)
+		)
+	yield ReaderContext(tuple(opened))
