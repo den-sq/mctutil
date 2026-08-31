@@ -1,0 +1,21 @@
+mapping_format: 1
+schema: scan/1.0
+source: fixture-scan
+
+fields:
+  projection_count_acquired:
+    read:
+      kind: json_pointer
+      role: primary
+      pointer: /projection_count
+      state: observed
+    select: scalar
+  scan_id:
+    read:
+      kind: json_pointer
+      role: primary
+      pointer: /scan_id
+      state: observed
+    select: scalar
+    transforms:
+      - whitespace: strip

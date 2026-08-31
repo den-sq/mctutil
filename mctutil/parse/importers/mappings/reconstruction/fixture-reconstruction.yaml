@@ -1,0 +1,23 @@
+mapping_format: 1
+schema: reconstruction/1.0
+source: fixture-reconstruction
+
+fields:
+  reconstruction_algorithm:
+    read:
+      kind: json_pointer
+      role: primary
+      pointer: /algorithm
+      state: configured
+    select: scalar
+    transforms:
+      - whitespace: strip
+  reconstruction_id:
+    read:
+      kind: json_pointer
+      role: primary
+      pointer: /reconstruction_id
+      state: configured
+    select: scalar
+    transforms:
+      - whitespace: strip

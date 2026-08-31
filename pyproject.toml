@@ -94,3 +94,7 @@ include = [
 
 [tool.setuptools.package-data]
 "mctutil.mem" = ["config/*.json"]
+"mctutil.parse.importers" = [
+  "mappings/*.md",
+  "mappings/*/*.yaml",
+]

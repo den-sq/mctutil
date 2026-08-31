@@ -13,6 +13,13 @@ from .model import (
 	PrecedencePolicy,
 	SourceEvidence,
 )
+from .mapping import (
+	MappingDefinition,
+	MappingValidationError,
+	load_builtin_mapping,
+	load_mapping,
+	load_mapping_text,
+)
 from .schema import (
 	RECONSTRUCTION_SCHEMA_REGISTRY,
 	SCAN_SCHEMA_REGISTRY,
@@ -30,6 +37,8 @@ __all__ = [
 	"FieldSpec",
 	"FieldType",
 	"ImportRecord",
+	"MappingDefinition",
+	"MappingValidationError",
 	"PrecedencePolicy",
 	"RECONSTRUCTION_SCHEMA_REGISTRY",
 	"ReconstructionSchema",
@@ -38,5 +47,8 @@ __all__ = [
 	"SchemaRegistry",
 	"SchemaVersion",
 	"SourceEvidence",
+	"load_builtin_mapping",
+	"load_mapping",
+	"load_mapping_text",
 	"promote_extension",
 ]
