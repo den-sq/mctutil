@@ -15,6 +15,7 @@ class FixtureAdapter:
 	kind: RecordKind
 	source_id: str
 	id_field: str
+	version: str = "fixture/1"
 
 	def probe(self, inputs: tuple[Path, ...]):
 		from ..registry import (

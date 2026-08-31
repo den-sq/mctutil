@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import csv
-import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Iterable, Mapping
 
 import click
 
 from mctutil.shared.deps import require
+from mctutil.shared.atomic_output import atomic_text_output
 
 
 GOOGLE_SHEETS_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
@@ -45,28 +44,10 @@ def write_csv(
 	force: bool = False,
 ) -> None:
 	"""Atomically write tabular rows to a CSV in canonical field order."""
-	if output.exists() and not force:
-		raise FileExistsError(f"Output already exists: {output} (pass --force to replace it)")
-	output.parent.mkdir(parents=True, exist_ok=True)
-	temporary_path = None
-	try:
-		with NamedTemporaryFile(
-			"w",
-			encoding="utf-8",
-			newline="",
-			dir=output.parent,
-			prefix=f".{output.name}.",
-			delete=False,
-		) as handle:
-			temporary_path = Path(handle.name)
-			writer = csv.DictWriter(handle, fieldnames=fields)
-			writer.writeheader()
-			writer.writerows(rows)
-		os.replace(temporary_path, output)
-	except OSError:
-		if temporary_path is not None:
-			temporary_path.unlink(missing_ok=True)
-		raise
+	with atomic_text_output(output, force=force, newline="") as handle:
+		writer = csv.DictWriter(handle, fieldnames=fields)
+		writer.writeheader()
+		writer.writerows(rows)
 
 
 def build_google_sheets_service(google_conf: Path):

@@ -59,6 +59,13 @@ from .export import (
 	materialize_rows,
 	write_records_csv,
 )
+from .audit import (
+	AUDIT_FORMAT_VERSION,
+	AuditItem,
+	audit_document,
+	validate_audit_document,
+	write_audit_jsonl,
+)
 from .schema import (
 	RECONSTRUCTION_SCHEMA_REGISTRY,
 	SCAN_SCHEMA_REGISTRY,
@@ -76,6 +83,8 @@ __all__ = [
 	"CandidateCollector",
 	"DEFAULT_PRECEDENCE_ORDER",
 	"BASE_DIAGNOSTIC_CODES",
+	"AUDIT_FORMAT_VERSION",
+	"AuditItem",
 	"Diagnostic",
 	"DiagnosticCodeRegistry",
 	"EXPORT_PROFILE_REGISTRY",
@@ -113,6 +122,7 @@ __all__ = [
 	"detect_adapter",
 	"discover_homogeneous",
 	"append_records",
+	"audit_document",
 	"load_builtin_mapping",
 	"load_mapping",
 	"load_mapping_text",
@@ -120,5 +130,7 @@ __all__ = [
 	"materialize_rows",
 	"promote_extension",
 	"select_adapter",
+	"validate_audit_document",
+	"write_audit_jsonl",
 	"write_records_csv",
 ]

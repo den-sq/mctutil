@@ -128,6 +128,7 @@ class CandidateSink(Protocol):
 class SourceAdapter(Protocol):
 	source_id: str
 	kind: RecordKind
+	version: str
 
 	def probe(self, inputs: tuple[Path, ...]) -> ProbeResult:
 		...
