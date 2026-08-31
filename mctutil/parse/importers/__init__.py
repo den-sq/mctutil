@@ -20,6 +20,14 @@ from .mapping import (
 	load_mapping,
 	load_mapping_text,
 )
+from .diagnostics import (
+	BASE_DIAGNOSTIC_CODES,
+	Diagnostic,
+	DiagnosticCodeRegistry,
+	StrictnessMode,
+	WriteDecision,
+	evaluate_write,
+)
 from .schema import (
 	RECONSTRUCTION_SCHEMA_REGISTRY,
 	SCAN_SCHEMA_REGISTRY,
@@ -34,6 +42,9 @@ from .schema import (
 __all__ = [
 	"CanonicalSchema",
 	"CanonicalValue",
+	"BASE_DIAGNOSTIC_CODES",
+	"Diagnostic",
+	"DiagnosticCodeRegistry",
 	"FieldSpec",
 	"FieldType",
 	"ImportRecord",
@@ -47,6 +58,9 @@ __all__ = [
 	"SchemaRegistry",
 	"SchemaVersion",
 	"SourceEvidence",
+	"StrictnessMode",
+	"WriteDecision",
+	"evaluate_write",
 	"load_builtin_mapping",
 	"load_mapping",
 	"load_mapping_text",

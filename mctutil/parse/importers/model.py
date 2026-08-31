@@ -9,7 +9,10 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Literal, Mapping
+from typing import TYPE_CHECKING, Callable, Literal, Mapping, TypeVar
+
+if TYPE_CHECKING:
+	from .diagnostics import Diagnostic
 
 
 CANONICAL_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
@@ -22,6 +25,7 @@ EvidenceState = Literal["configured", "effective", "observed", "derived"]
 ValueState = Literal[
 	"configured", "effective", "observed", "derived", "missing"
 ]
+T = TypeVar("T")
 
 
 class FieldType(str, Enum):
@@ -234,7 +238,7 @@ class PrecedencePolicy:
 			raise ValueError(f"unknown precedence states: {sorted(unknown)!r}")
 
 
-def _immutable_mapping(values: Mapping[str, Any]) -> Mapping[str, Any]:
+def _immutable_mapping(values: Mapping[str, T]) -> Mapping[str, T]:
 	return MappingProxyType(dict(values))
 
 
@@ -247,7 +251,7 @@ class ImportRecord:
 	source_id: str
 	values: Mapping[str, CanonicalValue]
 	extensions: Mapping[str, CanonicalValue] = field(default_factory=dict)
-	diagnostics: tuple[Any, ...] = ()
+	diagnostics: tuple[Diagnostic, ...] = ()
 
 	def __post_init__(self) -> None:
 		if self.kind not in {"scan", "reconstruction"}:
@@ -267,7 +271,23 @@ class ImportRecord:
 			raise TypeError("record extensions must be CanonicalValue instances")
 		if set(self.values) & set(self.extensions):
 			raise ValueError("canonical and extension keys must be disjoint")
+		from .diagnostics import Diagnostic
+
+		if any(not isinstance(item, Diagnostic) for item in self.diagnostics):
+			raise TypeError("record diagnostics must be Diagnostic instances")
 
 		object.__setattr__(self, "values", _immutable_mapping(self.values))
 		object.__setattr__(self, "extensions", _immutable_mapping(self.extensions))
 		object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
+
+	@property
+	def diagnostic_status(self) -> str:
+		from .diagnostics import diagnostic_status
+
+		return diagnostic_status(self.diagnostics)
+
+	@property
+	def diagnostic_summary(self) -> str:
+		from .diagnostics import diagnostic_summary
+
+		return diagnostic_summary(self.diagnostics)
