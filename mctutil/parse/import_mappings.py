@@ -358,11 +358,40 @@ XAID_RECONSTRUCTION_MAPPING = {
 
 SEVEN_BM_RECONSTRUCTION_MAPPING = {
 	"input_projection_file": {"locator": "--file-name"},
+	"propagation_distance_mm": {
+		"locator": "--propagation-distance",
+		"source_unit": "mm",
+		"canonical_unit": "mm",
+	},
+	"projection_binning": {"locator": "--binning"},
+	"native_voxel_size_mm": {
+		"locator": "--pixel-size",
+		"source_unit": "um",
+		"canonical_unit": "mm",
+		"multiplier": 0.001,
+	},
 	"rotation_axis_coordinate_px": {
 		"locator": "--rotation-axis",
 		"source_unit": "px",
 		"canonical_unit": "px",
 	},
 	"rotation_axis_auto_method": {"locator": "--rotation-axis-auto"},
+	"bright_ratio": {"locator": "--bright-ratio"},
+	"flat_linear": {"locator": "--flat-linear"},
+	"minus_log_enabled": {"locator": "--minus-log"},
+	"outlier_kernel_px": {
+		"locator": "--dezinger",
+		"source_unit": "px",
+		"canonical_unit": "px",
+	},
+	"outlier_threshold": {"locator": "--dezinger-threshold"},
+	"ring_stripe_method": {"locator": "--remove-stripe-method"},
+	"phase_retrieval_method": {"locator": "--retrieve-phase-method"},
 	"reconstruction_type": {"locator": "--reconstruction-type"},
+	"reconstruction_algorithm": {"locator": "--reconstruction-algorithm"},
+	"reconstruction_filter": {"locator": "--fbp-filter"},
+	"output_path": {"locator": "--out-path-name"},
+	"output_format": {"locator": "--save-format"},
+	"output_dtype": {"locator": "--dtype"},
+	"overwrite_policy": {"locator": "--clear-folder"},
 }

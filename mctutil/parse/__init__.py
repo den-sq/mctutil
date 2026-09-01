@@ -10,6 +10,8 @@ main = LazyGroup(
 		"meta-shift": "mctutil.parse.meta_shift:meta_shift",
 		"prune-empty": "mctutil.parse.empty_dir_removal:prune_empty",
 		"pull-config": "mctutil.parse.pull_config:get_conf",
+		"reconstruction-log": "mctutil.parse.import_commands:reconstruction_log",
+		"scan-log": "mctutil.parse.import_commands:scan_log",
 		"scanlog-fetch": "mctutil.parse.scanlog_fetch:scanlog_fetch",
 		"sigray-scan-log": "mctutil.parse.sigray_scan_log:sigray_scan_log",
 		"xaid-log": "mctutil.parse.xaid_reconstruction_log:xaid_log",

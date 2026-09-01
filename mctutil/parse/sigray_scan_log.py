@@ -833,6 +833,19 @@ def extract_scan_rows(paths: Iterable[Path]) -> list[dict[str, str]]:
 	return rows
 
 
+def read_planned_projection_count(path: Path) -> int | None:
+	"""Return the configured count without changing legacy row formatting."""
+	h5py = _require_h5py()
+	try:
+		with h5py.File(path, "r") as handle:
+			expected = _median(handle, EXPECTED_PROJECTIONS_PATH)
+	except OSError:
+		return None
+	if expected is None or not math.isfinite(expected):
+		return None
+	return int(round(expected))
+
+
 def _default_output(inputs: tuple[Path, ...]) -> Path:
 	if len(inputs) == 1:
 		input_path = inputs[0]

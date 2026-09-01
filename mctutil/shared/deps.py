@@ -10,6 +10,7 @@ from types import ModuleType
 
 EXTRA_MODULES: dict[str, tuple[str, ...]] = {
 	"google-sheets": (
+		"google.auth.exceptions",
 		"google.auth.transport.requests",
 		"google.oauth2.credentials",
 		"google_auth_oauthlib.flow",

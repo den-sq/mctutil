@@ -171,12 +171,17 @@ def _get(config: configparser.ConfigParser, section: str, key: str) -> str:
 	return config.get(section_name, key, fallback="").strip()
 
 
+def get_xaid_value(config: configparser.ConfigParser, section: str, key: str) -> str:
+	"""Return one case-insensitive X-AID section/key value."""
+	return _get(config, section, key)
+
+
 def build_reconstruction_log_row(
 	config: configparser.ConfigParser,
 ) -> dict[str, str]:
 	"""Build one row using the authoritative X-AID clear-name field mapping."""
 	return {
-		output_name: _get(config, section, key)
+		output_name: get_xaid_value(config, section, key)
 		for section, key, output_name in XAID_CONFIG_FIELD_MAPPING
 	}
 
