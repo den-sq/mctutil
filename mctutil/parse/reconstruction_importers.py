@@ -11,6 +11,12 @@ from typing import Iterable
 import numpy as np
 
 from mctutil.parse import xaid_reconstruction_log
+from mctutil.parse.import_h5 import (
+	H5_SUFFIXES,
+	discover_files,
+	representative_value as _h5_value,
+	require_h5py,
+)
 from mctutil.parse.import_mappings import (
 	ALS832_RECONSTRUCTION_MAPPING,
 	SEVEN_BM_RECONSTRUCTION_MAPPING,
@@ -30,59 +36,6 @@ from mctutil.parse.import_records import (
 from mctutil.shared.deps import require
 
 
-_H5_SUFFIXES = (".h5", ".hdf5")
-
-
-def _require_h5py():
-	return require(
-		"h5py",
-		"als832",
-		purpose="reconstruction HDF5 import dependencies are unavailable",
-	)
-
-
-def _discover_files(inputs: Iterable[Path], suffixes: tuple[str, ...]) -> tuple[Path, ...]:
-	paths: set[Path] = set()
-	for raw_path in inputs:
-		path = Path(raw_path)
-		if path.is_dir():
-			paths.update(
-				item
-				for item in path.iterdir()
-				if item.is_file() and item.suffix.casefold() in suffixes
-			)
-		elif path.is_file() and path.suffix.casefold() in suffixes:
-			paths.add(path)
-	if not paths:
-		raise ValueError("no matching reconstruction metadata inputs found")
-	return tuple(sorted(paths, key=lambda item: str(item)))
-
-
-def _h5_dataset(handle, path: str):
-	item = handle.get(path)
-	return item if item is not None and hasattr(item, "shape") else None
-
-
-def _h5_value(handle, path: str):
-	dataset = _h5_dataset(handle, path)
-	if dataset is None:
-		return None
-	try:
-		values = np.asarray(dataset[()]).reshape(-1)
-	except OSError:
-		return None
-	if not values.size:
-		return None
-	if values.dtype.kind in "iufb":
-		finite = values[np.isfinite(values.astype(float, copy=False))]
-		return float(np.median(finite)) if finite.size else None
-	for value in values:
-		decoded = decode_scalar(value)
-		if decoded:
-			return decoded
-	return None
-
-
 def _apply_h5_mapping(handle, mapping, values: dict[str, object | None]) -> None:
 	apply_direct_mapping(
 		mapping,
@@ -98,7 +51,7 @@ def _tuple_or_none(items: Iterable[object | None]) -> tuple | None:
 
 
 def _als832_reconstruction(path: Path) -> ReconstructionRecord:
-	h5py = _require_h5py()
+	h5py = require_h5py("reconstruction HDF5 import dependencies are unavailable")
 	values = empty_reconstruction_values()
 	warnings: list[str] = []
 	with h5py.File(path, "r") as handle:
@@ -146,7 +99,9 @@ def _als832_reconstruction(path: Path) -> ReconstructionRecord:
 
 def read_als832_reconstructions(inputs: Iterable[Path]) -> tuple[ReconstructionRecord, ...]:
 	"""Read configured ALS832 embedded reconstruction setup values."""
-	paths = _discover_files(inputs, _H5_SUFFIXES)
+	paths = discover_files(
+		inputs, H5_SUFFIXES, "no matching reconstruction metadata inputs found"
+	)
 	return tuple(_als832_reconstruction(path) for path in paths)
 
 
@@ -245,7 +200,9 @@ def _xaid_reconstruction(path: Path) -> ReconstructionRecord:
 
 def read_xaid_reconstructions(inputs: Iterable[Path]) -> tuple[ReconstructionRecord, ...]:
 	"""Wrap the existing X-AID parser and normalize reviewed configuration fields."""
-	paths = _discover_files(inputs, (".cfg", ".ini", ".txt"))
+	paths = discover_files(
+		inputs, (".cfg", ".ini", ".txt"), "no matching reconstruction metadata inputs found"
+	)
 	return tuple(_xaid_reconstruction(path) for path in paths)
 
 

@@ -9,6 +9,13 @@ from typing import Iterable
 import numpy as np
 
 from mctutil.parse import sigray_scan_log, tabular_log
+from mctutil.parse.import_h5 import (
+	H5_SUFFIXES,
+	dataset as _dataset,
+	discover_files,
+	representative_value as _representative_value,
+	require_h5py,
+)
 from mctutil.parse.import_mappings import (
 	ALS832_SCAN_MAPPING,
 	CHENGLAB_CAMERA_SCAN_MAPPING,
@@ -31,62 +38,11 @@ from mctutil.shared.deps import require
 CHENGLAB_READONLY_SCOPES = (
 	"https://www.googleapis.com/auth/spreadsheets.readonly",
 )
-_H5_SUFFIXES = (".h5", ".hdf5")
 _FRAME_LOCATION_PATHS = (
 	"/exchange/HDF5FrameLocation",
 	"/measurement/defaults/HDF5FrameLocation",
 	"/measurement/instrument/detector/HDF5FrameLocation",
 )
-
-
-def _require_h5py():
-	return require(
-		"h5py",
-		"als832",
-		purpose="scan HDF5 import dependencies are unavailable",
-	)
-
-
-def _discover_h5_files(inputs: Iterable[Path]) -> tuple[Path, ...]:
-	paths: set[Path] = set()
-	for raw_path in inputs:
-		path = Path(raw_path)
-		if path.is_dir():
-			paths.update(
-				item
-				for item in path.iterdir()
-				if item.is_file() and item.suffix.casefold() in _H5_SUFFIXES
-			)
-		elif path.is_file() and path.suffix.casefold() in _H5_SUFFIXES:
-			paths.add(path)
-	if not paths:
-		raise ValueError("no .h5 or .hdf5 scan inputs found")
-	return tuple(sorted(paths, key=lambda item: str(item)))
-
-
-def _dataset(handle, path: str):
-	item = handle.get(path)
-	return item if item is not None and hasattr(item, "shape") else None
-
-
-def _representative_value(handle, path: str):
-	dataset = _dataset(handle, path)
-	if dataset is None:
-		return None
-	try:
-		values = np.asarray(dataset[()]).reshape(-1)
-	except OSError:
-		return None
-	if not values.size:
-		return None
-	if values.dtype.kind in "iufb":
-		finite = values[np.isfinite(values.astype(float, copy=False))]
-		return float(np.median(finite)) if finite.size else None
-	for value in values:
-		decoded = decode_scalar(value)
-		if decoded:
-			return decoded
-	return None
 
 
 def _apply_h5_mapping(handle, mapping, values: dict[str, object | None]) -> None:
@@ -174,7 +130,7 @@ def _finish_scan(values: dict[str, object | None], warnings: list[str]) -> None:
 
 
 def _als832_record(path: Path) -> ScanRecord:
-	h5py = _require_h5py()
+	h5py = require_h5py("scan HDF5 import dependencies are unavailable")
 	values = empty_scan_values()
 	warnings: list[str] = []
 	with h5py.File(path, "r") as handle:
@@ -197,7 +153,8 @@ def _als832_record(path: Path) -> ScanRecord:
 
 def read_als832_scans(inputs: Iterable[Path]) -> tuple[ScanRecord, ...]:
 	"""Read ALS 8.3.2 Data Exchange scans and embedded references."""
-	return tuple(_als832_record(path) for path in _discover_h5_files(inputs))
+	paths = discover_files(inputs, H5_SUFFIXES, "no .h5 or .hdf5 scan inputs found")
+	return tuple(_als832_record(path) for path in paths)
 
 
 def _split_references(value: str, parent: Path) -> tuple[str, ...]:
@@ -404,7 +361,7 @@ def _seven_bm_integrity(
 
 
 def _aps_7bm_record(path: Path) -> ScanRecord:
-	h5py = _require_h5py()
+	h5py = require_h5py("scan HDF5 import dependencies are unavailable")
 	values = empty_scan_values()
 	warnings: list[str] = []
 	with h5py.File(path, "r") as handle:
@@ -455,7 +412,8 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 
 def read_aps_7bm_scans(inputs: Iterable[Path]) -> tuple[ScanRecord, ...]:
 	"""Read APS 7-BM scans after frame-location filtering."""
-	return tuple(_aps_7bm_record(path) for path in _discover_h5_files(inputs))
+	paths = discover_files(inputs, H5_SUFFIXES, "no .h5 or .hdf5 scan inputs found")
+	return tuple(_aps_7bm_record(path) for path in paths)
 
 
 def _has_exact_readonly_scope(credentials) -> bool:
