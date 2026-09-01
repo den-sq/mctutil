@@ -681,7 +681,11 @@ def _tomocupy_reconstruction(
 	)
 	metadata_files = tuple(
 		str(path)
-		for path in (matched_config, rec_line, rot_cen)
+		for path in (
+			matched_config,
+			rec_line,
+			rot_cen if center_file_value is not None else None,
+		)
 		if path is not None
 	)
 	values["source_metadata_files"] = metadata_files

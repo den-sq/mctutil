@@ -193,6 +193,10 @@ def test_tomocupy_uses_exact_join_command_precedence_and_output_metadata(tmp_pat
 
 def test_tomocupy_does_not_join_a_different_scan_record(tmp_path):
 	rec_line, config, center = _tomocupy_fixture(tmp_path, matching_config=False)
+	center.write_text(
+		json.dumps({"other.h5": {"center": 800, "unrelated-number": 42}}),
+		encoding="utf-8",
+	)
 
 	record, = reconstruction_importers.read_tomocupy_7bm_reconstructions(
 		(rec_line, config, center)
@@ -200,4 +204,25 @@ def test_tomocupy_does_not_join_a_different_scan_record(tmp_path):
 
 	assert record.values["propagation_distance_mm"] is None
 	assert record.values["sinogram_range"] is None
+	assert record.values["rotation_axis_coordinate_px"] == 123.5
+	assert str(center) not in record.values["source_metadata_files"]
 	assert any("no exact record" in warning for warning in record.warnings)
+	assert any("no exact center" in warning for warning in record.warnings)
+
+
+def test_tomocupy_center_file_precedes_config_only_for_the_exact_scan(tmp_path):
+	rec_line, config, center = _tomocupy_fixture(tmp_path)
+	rec_line.write_text(
+		rec_line.read_text(encoding="utf-8").replace("--rotation-axis 123.5 ", ""),
+		encoding="utf-8",
+	)
+	configured = json.loads(config.read_text(encoding="utf-8"))
+	configured["records"][0]["rotation_axis"] = 100.0
+	config.write_text(json.dumps(configured), encoding="utf-8")
+	center.write_text(json.dumps({"scan one.h5": 124.0, "other.h5": 999.0}), encoding="utf-8")
+
+	record, = reconstruction_importers.read_tomocupy_7bm_reconstructions(
+		(rec_line, config, center)
+	)
+
+	assert record.values["rotation_axis_coordinate_px"] == 124.0

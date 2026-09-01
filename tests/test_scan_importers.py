@@ -145,6 +145,9 @@ class _ReadonlyService:
 
 
 def test_chenglab_camera_reads_real_rows_with_only_values_get():
+	assert scan_importers.CHENGLAB_READONLY_SCOPES == (
+		"https://www.googleapis.com/auth/spreadsheets.readonly",
+	)
 	headers = [
 		"Scan ID",
 		"Projection Total",
