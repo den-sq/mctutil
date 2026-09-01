@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-import re
 import shlex
 from typing import Iterable
 
@@ -18,14 +17,19 @@ from mctutil.parse.import_mappings import (
 	XAID_RECONSTRUCTION_MAPPING,
 )
 from mctutil.parse.import_records import (
-	RECONSTRUCTION_FIELDS,
+	RECONSTRUCTION_FIELD_BY_NAME,
 	ReconstructionRecord,
+	apply_direct_mapping,
+	coerce_value,
+	decode_scalar,
 	empty_reconstruction_values,
+	parse_bool,
+	parse_float,
+	parse_int,
 )
 from mctutil.shared.deps import require
 
 
-_FIELD_BY_NAME = {item.name: item for item in RECONSTRUCTION_FIELDS}
 _H5_SUFFIXES = (".h5", ".hdf5")
 
 
@@ -35,64 +39,6 @@ def _require_h5py():
 		"als832",
 		purpose="reconstruction HDF5 import dependencies are unavailable",
 	)
-
-
-def _decode(value) -> str:
-	if isinstance(value, (bytes, np.bytes_)):
-		return bytes(value).decode("utf-8", errors="replace").strip()
-	return str(value).strip()
-
-
-def _parse_float(value) -> float | None:
-	if value is None or type(value) is bool:
-		return None
-	if isinstance(value, (int, float, np.number)):
-		result = float(value)
-	else:
-		match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", _decode(value))
-		if match is None:
-			return None
-		result = float(match.group(0))
-	return result if math.isfinite(result) else None
-
-
-def _parse_int(value) -> int | None:
-	number = _parse_float(value)
-	if number is None or not math.isclose(number, round(number), abs_tol=1e-6):
-		return None
-	return int(round(number))
-
-
-def _parse_bool(value) -> bool | None:
-	if type(value) is bool:
-		return value
-	if isinstance(value, (int, float)) and not isinstance(value, bool):
-		return bool(value)
-	text = _decode(value).casefold()
-	if text in {"1", "true", "yes", "y", "on"}:
-		return True
-	if text in {"0", "false", "no", "n", "off"}:
-		return False
-	return None
-
-
-def _coerce(value, field_name: str):
-	if value is None:
-		return None
-	if isinstance(value, str) and value.strip().casefold() in {"", "none", "null", "nan"}:
-		return None
-	value_type = _FIELD_BY_NAME[field_name].value_type
-	if value_type is str:
-		return _decode(value)
-	if value_type is int:
-		return _parse_int(value)
-	if value_type is float:
-		return _parse_float(value)
-	if value_type is bool:
-		return _parse_bool(value)
-	if value_type is tuple and isinstance(value, (list, tuple)):
-		return tuple(value)
-	return None
 
 
 def _discover_files(inputs: Iterable[Path], suffixes: tuple[str, ...]) -> tuple[Path, ...]:
@@ -131,21 +77,19 @@ def _h5_value(handle, path: str):
 		finite = values[np.isfinite(values.astype(float, copy=False))]
 		return float(np.median(finite)) if finite.size else None
 	for value in values:
-		decoded = _decode(value)
+		decoded = decode_scalar(value)
 		if decoded:
 			return decoded
 	return None
 
 
 def _apply_h5_mapping(handle, mapping, values: dict[str, object | None]) -> None:
-	for field_name, entry in mapping.items():
-		raw_value = _h5_value(handle, entry["locator"])
-		if raw_value is None:
-			continue
-		if "multiplier" in entry:
-			number = _parse_float(raw_value)
-			raw_value = number * entry["multiplier"] if number is not None else None
-		values[field_name] = _coerce(raw_value, field_name)
+	apply_direct_mapping(
+		mapping,
+		RECONSTRUCTION_FIELD_BY_NAME,
+		lambda locator: _h5_value(handle, locator),
+		values,
+	)
 
 
 def _tuple_or_none(items: Iterable[object | None]) -> tuple | None:
@@ -167,8 +111,11 @@ def _als832_reconstruction(path: Path) -> ReconstructionRecord:
 		values.update(
 			{
 				"reconstruction_id": f"{path.stem}:tomo_rec_setup",
-				"project_id": _coerce(project_id, "project_id"),
-				"scan_id": _decode(scan_id),
+				"project_id": coerce_value(
+					project_id,
+					RECONSTRUCTION_FIELD_BY_NAME["project_id"].value_type,
+				),
+				"scan_id": decode_scalar(scan_id),
 				"input_projection_file": str(path),
 				"input_data_path": "/exchange/data",
 				"software_name": "ALS832 tomography setup",
@@ -177,13 +124,13 @@ def _als832_reconstruction(path: Path) -> ReconstructionRecord:
 				"source_metadata_files": (str(path),),
 			}
 		)
-		normalize_by_roi = _parse_bool(
+		normalize_by_roi = parse_bool(
 			_h5_value(handle, "/process/tomo_rec/setup/algorithm/normalize_by_ROI")
 		)
 		if normalize_by_roi is not None:
 			values["normalization_method"] = "roi" if normalize_by_roi else "flat-dark"
 		values["normalization_roi"] = _tuple_or_none(
-			_parse_int(_h5_value(handle, f"/process/tomo_rec/setup/algorithm/{name}"))
+			parse_int(_h5_value(handle, f"/process/tomo_rec/setup/algorithm/{name}"))
 			for name in (
 				"normalization_ROI_left",
 				"normalization_ROI_right",
@@ -209,15 +156,12 @@ def _ini_value(config, section: str, key: str) -> str | None:
 
 
 def _apply_ini_mapping(config, values: dict[str, object | None]) -> None:
-	for field_name, entry in XAID_RECONSTRUCTION_MAPPING.items():
-		section, key = entry["locator"]
-		raw_value = _ini_value(config, section, key)
-		if raw_value is None:
-			continue
-		if "multiplier" in entry:
-			number = _parse_float(raw_value)
-			raw_value = number * entry["multiplier"] if number is not None else None
-		values[field_name] = _coerce(raw_value, field_name)
+	apply_direct_mapping(
+		XAID_RECONSTRUCTION_MAPPING,
+		RECONSTRUCTION_FIELD_BY_NAME,
+		lambda locator: _ini_value(config, *locator),
+		values,
+	)
 
 
 def _ini_tuple(config, section: str, keys: tuple[str, ...], parser) -> tuple | None:
@@ -238,25 +182,25 @@ def _set_xaid_composites(config, values: dict[str, object | None]) -> None:
 		config,
 		"ROI",
 		("roi_posx", "roi_posy", "roi_posz"),
-		_parse_int,
+		parse_int,
 	)
 	values["volume_roi_extent_xyz"] = _ini_tuple(
 		config,
 		"ROI",
 		("roi_sizex", "roi_sizey", "roi_sizez"),
-		_parse_int,
+		parse_int,
 	)
 	values["output_rotation_xyz_deg"] = _ini_tuple(
 		config,
 		"VolumeData",
 		("volume_rotation_x", "volume_rotation_y", "volume_rotation_z"),
-		_parse_float,
+		parse_float,
 	)
 	values["drift_correction_xyz"] = _ini_tuple(
 		config,
 		"GC_Values",
 		("drift_x", "drift_y", "drift_z"),
-		_parse_float,
+		parse_float,
 	)
 	values["ring_stripe_parameters"] = _named_ini_values(
 		config,
@@ -421,7 +365,7 @@ def _named_json_numbers(node, accepted_keys: set[str]) -> tuple[float, ...]:
 	if isinstance(node, dict):
 		for key, value in node.items():
 			if _normal_key(str(key)) in accepted_keys:
-				number = _parse_float(value)
+				number = parse_float(value)
 				if number is not None:
 					numbers.append(number)
 			numbers.extend(_named_json_numbers(value, accepted_keys))
@@ -433,7 +377,7 @@ def _named_json_numbers(node, accepted_keys: set[str]) -> tuple[float, ...]:
 
 def _scalar_number(value) -> float | None:
 	if isinstance(value, (str, bytes, int, float, np.number)) and not isinstance(value, bool):
-		return _parse_float(value)
+		return parse_float(value)
 	return None
 
 
@@ -494,15 +438,16 @@ def _apply_tomocupy_mapping(
 	configured_options: dict[str, object],
 	values: dict[str, object | None],
 ) -> None:
-	for field_name, entry in SEVEN_BM_RECONSTRUCTION_MAPPING.items():
-		option = entry["locator"].removeprefix("--")
-		raw_value = _effective_option(option, command_options, configured_options)
-		if raw_value is None:
-			continue
-		if "multiplier" in entry:
-			number = _parse_float(raw_value)
-			raw_value = number * entry["multiplier"] if number is not None else None
-		values[field_name] = _coerce(raw_value, field_name)
+	apply_direct_mapping(
+		SEVEN_BM_RECONSTRUCTION_MAPPING,
+		RECONSTRUCTION_FIELD_BY_NAME,
+		lambda locator: _effective_option(
+			locator.removeprefix("--"),
+			command_options,
+			configured_options,
+		),
+		values,
+	)
 
 
 def _tomocupy_ranges(
@@ -511,11 +456,11 @@ def _tomocupy_ranges(
 	values: dict[str, object | None],
 ) -> None:
 	values["projection_range"] = _tuple_or_none(
-		_parse_int(_effective_option(name, command_options, configured_options))
+		parse_int(_effective_option(name, command_options, configured_options))
 		for name in ("start-proj", "end-proj")
 	)
 	values["sinogram_range"] = _tuple_or_none(
-		_parse_int(_effective_option(name, command_options, configured_options))
+		parse_int(_effective_option(name, command_options, configured_options))
 		for name in ("start-row", "end-row")
 	)
 
@@ -525,7 +470,7 @@ def _tomocupy_derived(
 	configured_options: dict[str, object],
 	values: dict[str, object | None],
 ) -> None:
-	exponent = _parse_int(_effective_option("binning", command_options, configured_options))
+	exponent = parse_int(_effective_option("binning", command_options, configured_options))
 	if exponent is not None and exponent >= 0:
 		values["projection_binning"] = 2 ** exponent
 		native = values["native_voxel_size_mm"]
@@ -541,7 +486,7 @@ def _tomocupy_derived(
 		center_method = configured_options.get("cor-method-full")
 		if center_method is not None:
 			values["rotation_axis_auto_method"] = (
-				"manual" if _decode(center_method).casefold() == "manual" else "auto"
+				"manual" if decode_scalar(center_method).casefold() == "manual" else "auto"
 			)
 	_tomocupy_ranges(command_options, configured_options, values)
 
@@ -651,7 +596,7 @@ def _tomocupy_reconstruction(
 	center_file_value = _read_rotation_center(rot_cen, scan_id)
 	if rot_cen is not None and center_file_value is None:
 		warnings.append(f"{rot_cen.name} has no exact center for scan {scan_id!r}; ignored")
-	command_center = _parse_float(command_options.get("rotation-axis"))
+	command_center = parse_float(command_options.get("rotation-axis"))
 	if command_center is not None:
 		values["rotation_axis_coordinate_px"] = command_center
 		if center_file_value is not None and not math.isclose(

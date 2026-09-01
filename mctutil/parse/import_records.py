@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+import math
+import re
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,105 @@ class ReconstructionRecord:
 	source_locations: tuple[str, ...]
 	values: dict[str, object | None]
 	warnings: list[str] = field(default_factory=list)
+
+
+def decode_scalar(value) -> str:
+	"""Decode one source scalar to stripped text."""
+	if isinstance(value, (bytes, np.bytes_)):
+		return bytes(value).decode("utf-8", errors="replace").strip()
+	return str(value).strip()
+
+
+def parse_bool(value) -> bool | None:
+	"""Parse the boolean spellings observed across importer sources."""
+	if type(value) is bool:
+		return value
+	if isinstance(value, (int, float)) and not isinstance(value, bool):
+		return bool(value)
+	text = decode_scalar(value).casefold()
+	if text in {"1", "true", "yes", "y", "on", "x"}:
+		return True
+	if text in {"0", "false", "no", "n", "off", ""}:
+		return False
+	return None
+
+
+def parse_float(value) -> float | None:
+	"""Parse one finite numeric source scalar."""
+	if value is None or type(value) is bool:
+		return None
+	if isinstance(value, (int, float, np.number)):
+		result = float(value)
+	else:
+		match = re.search(
+			r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?",
+			decode_scalar(value),
+		)
+		if match is None:
+			return None
+		result = float(match.group(0))
+	return result if math.isfinite(result) else None
+
+
+def parse_int(value) -> int | None:
+	"""Parse one integer-valued source scalar."""
+	number = parse_float(value)
+	if number is None or not math.isclose(number, round(number), abs_tol=1e-6):
+		return None
+	return int(round(number))
+
+
+def parse_datetime(value) -> datetime | None:
+	"""Parse one timezone-declared source timestamp and normalize it to UTC."""
+	if isinstance(value, datetime):
+		result = value
+	else:
+		text = decode_scalar(value).replace("Z", "+00:00")
+		try:
+			result = datetime.fromisoformat(text)
+		except ValueError:
+			return None
+	if result.tzinfo is None:
+		return None
+	return result.astimezone(timezone.utc)
+
+
+def coerce_value(value, value_type: type):
+	"""Coerce one source scalar to its declared canonical field type."""
+	if value is None:
+		return None
+	if isinstance(value, str) and value.strip().casefold() in {"", "none", "null", "nan"}:
+		return None
+	if value_type is str:
+		return decode_scalar(value)
+	if value_type is int:
+		return parse_int(value)
+	if value_type is float:
+		return parse_float(value)
+	if value_type is bool:
+		return parse_bool(value)
+	if value_type is datetime:
+		return parse_datetime(value)
+	if value_type is tuple and isinstance(value, (list, tuple)):
+		return tuple(value)
+	return None
+
+
+def apply_direct_mapping(
+	mapping: Mapping[str, Mapping[str, object]],
+	field_by_name: Mapping[str, FieldDefinition],
+	read_value: Callable[[object], object],
+	values: dict[str, object | None],
+) -> None:
+	"""Apply only direct locators, numeric multipliers, and declared types."""
+	for field_name, entry in mapping.items():
+		raw_value = read_value(entry["locator"])
+		if raw_value is None:
+			continue
+		if "multiplier" in entry:
+			number = parse_float(raw_value)
+			raw_value = number * entry["multiplier"] if number is not None else None
+		values[field_name] = coerce_value(raw_value, field_by_name[field_name].value_type)
 
 
 def _f(
@@ -198,6 +302,13 @@ RECONSTRUCTION_FIELDS = (
 	_f("output_image_shape", tuple, "Output Image Shape (px)", "px"),
 	_f("output_dtype_observed", str, "Observed Output Data Type"),
 )
+
+
+SCAN_FIELD_BY_NAME = {item.name: item for item in SCAN_FIELDS}
+RECONSTRUCTION_FIELD_BY_NAME = {
+	item.name: item
+	for item in RECONSTRUCTION_FIELDS
+}
 
 
 WARNING_HEADER = "Metadata Warnings"

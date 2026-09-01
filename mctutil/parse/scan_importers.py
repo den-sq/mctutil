@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import math
+from datetime import datetime, timedelta
 from pathlib import Path
-import re
 from typing import Iterable
 
 import numpy as np
@@ -17,9 +15,15 @@ from mctutil.parse.import_mappings import (
 	SEVEN_BM_SCAN_MAPPING,
 )
 from mctutil.parse.import_records import (
-	SCAN_FIELDS,
+	SCAN_FIELD_BY_NAME,
 	ScanRecord,
+	apply_direct_mapping,
+	coerce_value,
+	decode_scalar,
 	empty_scan_values,
+	parse_datetime,
+	parse_float,
+	parse_int,
 )
 from mctutil.shared.deps import require
 
@@ -27,7 +31,6 @@ from mctutil.shared.deps import require
 CHENGLAB_READONLY_SCOPES = (
 	"https://www.googleapis.com/auth/spreadsheets.readonly",
 )
-_SCAN_FIELD_BY_NAME = {item.name: item for item in SCAN_FIELDS}
 _H5_SUFFIXES = (".h5", ".hdf5")
 _FRAME_LOCATION_PATHS = (
 	"/exchange/HDF5FrameLocation",
@@ -66,12 +69,6 @@ def _dataset(handle, path: str):
 	return item if item is not None and hasattr(item, "shape") else None
 
 
-def _decode(value) -> str:
-	if isinstance(value, (bytes, np.bytes_)):
-		return bytes(value).decode("utf-8", errors="replace").strip()
-	return str(value).strip()
-
-
 def _representative_value(handle, path: str):
 	dataset = _dataset(handle, path)
 	if dataset is None:
@@ -86,89 +83,19 @@ def _representative_value(handle, path: str):
 		finite = values[np.isfinite(values.astype(float, copy=False))]
 		return float(np.median(finite)) if finite.size else None
 	for value in values:
-		decoded = _decode(value)
+		decoded = decode_scalar(value)
 		if decoded:
 			return decoded
 	return None
 
 
-def _parse_bool(value) -> bool | None:
-	if type(value) is bool:
-		return value
-	if isinstance(value, (int, float)) and not isinstance(value, bool):
-		return bool(value)
-	text = _decode(value).casefold()
-	if text in {"1", "true", "yes", "y", "on", "x"}:
-		return True
-	if text in {"0", "false", "no", "n", "off", ""}:
-		return False
-	return None
-
-
-def _parse_float(value) -> float | None:
-	if value is None or type(value) is bool:
-		return None
-	if isinstance(value, (int, float, np.number)):
-		result = float(value)
-	else:
-		match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", _decode(value))
-		if match is None:
-			return None
-		result = float(match.group(0))
-	return result if math.isfinite(result) else None
-
-
-def _parse_int(value) -> int | None:
-	number = _parse_float(value)
-	if number is None or not math.isclose(number, round(number), abs_tol=1e-6):
-		return None
-	return int(round(number))
-
-
-def _parse_datetime(value) -> datetime | None:
-	if isinstance(value, datetime):
-		result = value
-	else:
-		text = _decode(value).replace("Z", "+00:00")
-		try:
-			result = datetime.fromisoformat(text)
-		except ValueError:
-			return None
-	if result.tzinfo is None:
-		return None
-	return result.astimezone(timezone.utc)
-
-
-def _coerce(value, field_name: str):
-	if value is None:
-		return None
-	if isinstance(value, str) and value.strip().casefold() in {"", "none", "null", "nan"}:
-		return None
-	value_type = _SCAN_FIELD_BY_NAME[field_name].value_type
-	if value_type is str:
-		return _decode(value)
-	if value_type is int:
-		return _parse_int(value)
-	if value_type is float:
-		return _parse_float(value)
-	if value_type is bool:
-		return _parse_bool(value)
-	if value_type is datetime:
-		return _parse_datetime(value)
-	if value_type is tuple and isinstance(value, (list, tuple)):
-		return tuple(value)
-	return None
-
-
 def _apply_h5_mapping(handle, mapping, values: dict[str, object | None]) -> None:
-	for field_name, entry in mapping.items():
-		raw_value = _representative_value(handle, entry["locator"])
-		if raw_value is None:
-			continue
-		if "multiplier" in entry:
-			number = _parse_float(raw_value)
-			raw_value = number * entry["multiplier"] if number is not None else None
-		values[field_name] = _coerce(raw_value, field_name)
+	apply_direct_mapping(
+		mapping,
+		SCAN_FIELD_BY_NAME,
+		lambda locator: _representative_value(handle, locator),
+		values,
+	)
 
 
 def _reference_count(dataset) -> int:
@@ -282,7 +209,7 @@ def _split_references(value: str, parent: Path) -> tuple[str, ...]:
 
 
 def _legacy_datetime(value: str) -> datetime | None:
-	return _parse_datetime(value) if value else None
+	return parse_datetime(value) if value else None
 
 
 def _populate_sigray_row(
@@ -328,7 +255,10 @@ def _populate_sigray_row(
 	for field_name, header in text_fields.items():
 		values[field_name] = row[header] or None
 	for field_name, header in numeric_fields.items():
-		values[field_name] = _coerce(row[header], field_name)
+		values[field_name] = coerce_value(
+			row[header],
+			SCAN_FIELD_BY_NAME[field_name].value_type,
+		)
 
 	values["projection_data_file"] = str(path)
 	values["source_metadata_file"] = str(path)
@@ -340,8 +270,8 @@ def _populate_sigray_row(
 
 	binning = tuple(part.strip() for part in row["Detector Binning"].split("x"))
 	if binning and binning[0]:
-		values["binning_x"] = _parse_int(binning[0])
-		values["binning_y"] = _parse_int(binning[-1])
+		values["binning_x"] = parse_int(binning[0])
+		values["binning_y"] = parse_int(binning[-1])
 
 	references: list[str] = []
 	for header, field_name in (
@@ -404,7 +334,7 @@ def _frame_mask(dataset) -> np.ndarray:
 			return numeric == 1
 		return numeric >= 0
 	bad = {"", "none", "null", "missing", "invalid", "-1"}
-	return np.asarray([_decode(value).casefold() not in bad for value in values])
+	return np.asarray([decode_scalar(value).casefold() not in bad for value in values])
 
 
 def _seven_bm_mask(handle, frame_count: int, warnings: list[str]) -> np.ndarray:
@@ -424,10 +354,10 @@ def _seven_bm_mask(handle, frame_count: int, warnings: list[str]) -> np.ndarray:
 def _dataset_unit(dataset) -> str | None:
 	for key in ("units", "unit", "NDAttrUnits"):
 		if key in dataset.attrs:
-			return _decode(dataset.attrs[key]).casefold()
+			return decode_scalar(dataset.attrs[key]).casefold()
 	for key in dataset.attrs:
-		if _decode(key).casefold().endswith("_units"):
-			return _decode(dataset.attrs[key]).casefold()
+		if decode_scalar(key).casefold().endswith("_units"):
+			return decode_scalar(dataset.attrs[key]).casefold()
 	return None
 
 
@@ -436,7 +366,7 @@ def _length_mm(handle, paths: tuple[str, ...], label: str, warnings: list[str]) 
 		dataset = _dataset(handle, path)
 		if dataset is None:
 			continue
-		value = _parse_float(_representative_value(handle, path))
+		value = parse_float(_representative_value(handle, path))
 		unit = _dataset_unit(dataset)
 		if value is None:
 			return None
@@ -598,7 +528,7 @@ def _camera_local_datetime(value) -> datetime | None:
 		return None
 	if isinstance(value, (int, float)) and not isinstance(value, bool):
 		return datetime(1899, 12, 30) + timedelta(days=float(value))
-	text = _decode(value).replace("Z", "+00:00")
+	text = decode_scalar(value).replace("Z", "+00:00")
 	try:
 		return datetime.fromisoformat(text)
 	except ValueError:
@@ -662,7 +592,10 @@ def _camera_record(
 		if field_name in {"scan_start", "scan_stop"}:
 			continue
 		raw_value = _camera_value(row, entry["locator"])
-		values[field_name] = _coerce(raw_value, field_name)
+		values[field_name] = coerce_value(
+			raw_value,
+			SCAN_FIELD_BY_NAME[field_name].value_type,
+		)
 
 	values["facility_name"] = "ChengLab Camera"
 	values["acquisition_system_id"] = "ChengLab Camera"
@@ -697,14 +630,14 @@ def read_chenglab_camera_scans(
 	rows = response.get("values", [])
 	if not rows:
 		raise ValueError(f"{sheet!r} contains no header row")
-	headers = [_decode(value) for value in rows[0]]
+	headers = [decode_scalar(value) for value in rows[0]]
 	if "Scan ID" not in headers:
 		raise ValueError(f"{sheet!r} is missing required 'Scan ID' header")
 
 	records = []
 	for row_number, raw_row in enumerate(rows[1:], start=2):
 		row = dict(zip(headers, raw_row))
-		scan_id = _decode(row.get("Scan ID", ""))
+		scan_id = decode_scalar(row.get("Scan ID", ""))
 		if not scan_id or scan_id.casefold() in {"scan id", "setup", "default"}:
 			continue
 		records.append(_camera_record(spreadsheet, sheet, row_number, row))
