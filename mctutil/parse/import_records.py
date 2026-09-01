@@ -205,3 +205,13 @@ SCAN_HEADERS = tuple(item.header for item in SCAN_FIELDS) + (WARNING_HEADER,)
 RECONSTRUCTION_HEADERS = tuple(item.header for item in RECONSTRUCTION_FIELDS) + (
 	WARNING_HEADER,
 )
+
+
+def empty_scan_values() -> dict[str, object | None]:
+	"""Return one missing-value slot for every canonical scan field."""
+	return {item.name: None for item in SCAN_FIELDS}
+
+
+def empty_reconstruction_values() -> dict[str, object | None]:
+	"""Return one missing-value slot for every canonical reconstruction field."""
+	return {item.name: None for item in RECONSTRUCTION_FIELDS}
