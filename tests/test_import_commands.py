@@ -59,6 +59,50 @@ def _read_csv(path: Path):
 		return reader.fieldnames, list(reader)
 
 
+def _stub_sheet_destination(monkeypatch, *, created=False):
+	calls = {}
+	service = object()
+
+	def build(google_conf):
+		calls["google_conf"] = google_conf
+		return service
+
+	def create(received_service, spreadsheet, sheet, headers):
+		calls["create"] = (received_service, spreadsheet, sheet, headers)
+		return created
+
+	def append(
+		received_service,
+		spreadsheet,
+		sheet,
+		headers,
+		rows,
+		*,
+		verify,
+		strict_header_order,
+	):
+		calls["append"] = (
+			received_service,
+			spreadsheet,
+			sheet,
+			headers,
+			list(rows),
+			verify,
+			strict_header_order,
+		)
+		return {"updates": {"updatedRange": f"{sheet}!A2"}}
+
+	monkeypatch.setattr(tabular_log, "build_google_sheets_service", build)
+	monkeypatch.setattr(tabular_log, "create_tab_if_missing", create)
+	monkeypatch.setattr(tabular_log, "append_rows", append)
+	monkeypatch.setattr(
+		tabular_log,
+		"require_google_sheets_dependencies",
+		lambda **_kwargs: (),
+	)
+	return service, calls
+
+
 def test_scan_log_end_to_end_uses_canonical_headers_and_csv_writer(tmp_path, monkeypatch):
 	input_path = _als_scan(tmp_path)
 	output = tmp_path / "scans.csv"
@@ -118,6 +162,199 @@ def test_reconstruction_log_end_to_end_prints_contextual_warning(tmp_path):
 	assert rows[0]["Reconstruction ID"] == "xaid"
 	assert rows[0]["Scan ID"] == "scan-7"
 	assert rows[0]["Metadata Warnings"] == "repaired malformed first section header"
+
+
+def test_scan_log_uploads_canonical_rows_and_can_create_tab(tmp_path, monkeypatch):
+	input_path = _als_scan(tmp_path)
+	google_conf = tmp_path / "google"
+	service, calls = _stub_sheet_destination(monkeypatch, created=True)
+
+	result = CliRunner().invoke(
+		import_commands.scan_log,
+		[
+			str(input_path),
+			"--source",
+			"als832",
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"Scans",
+			"--create-tab",
+			"--google-conf",
+			str(google_conf),
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert result.output == (
+		"Created Google Sheets tab with scan header: Scans\n"
+		"Appended 1 scan record(s): Scans!A2\n"
+	)
+	assert calls["google_conf"] == google_conf
+	assert calls["create"] == (service, "spreadsheet-id", "Scans", SCAN_HEADERS)
+	append = calls["append"]
+	assert append[:4] == (service, "spreadsheet-id", "Scans", SCAN_HEADERS)
+	assert append[4][0]["Scan ID"] == "scan-1"
+	assert append[4][0]["Scan Start (UTC)"] == "2026-01-02T03:04:05+00:00"
+	assert append[5:] == (True, False)
+
+
+def test_reconstruction_log_upload_uses_environment_destination(tmp_path, monkeypatch):
+	input_path = _xaid_config(tmp_path)
+	google_conf = Path("~/.creds/mctutil-test").expanduser()
+	service, calls = _stub_sheet_destination(monkeypatch)
+	monkeypatch.setenv("MCTUTIL_GSHEET_ID", "environment-spreadsheet")
+	monkeypatch.setenv("MCTUTIL_GSHEET_SHEET", "Reconstructions")
+	monkeypatch.setenv("MCTUTIL_GOOGLE_CONF", "~/.creds/mctutil-test")
+
+	result = CliRunner().invoke(
+		import_commands.reconstruction_log,
+		[
+			str(input_path),
+			"--source",
+			"xaid",
+			"--upload",
+			"--strict-header-order",
+		],
+	)
+
+	assert result.exit_code == 0, result.output
+	assert "Appended 1 reconstruction record(s): Reconstructions!A2" in result.output
+	assert calls["google_conf"] == google_conf
+	assert "create" not in calls
+	append = calls["append"]
+	assert append[:4] == (
+		service,
+		"environment-spreadsheet",
+		"Reconstructions",
+		RECONSTRUCTION_HEADERS,
+	)
+	assert append[4][0]["Reconstruction ID"] == "xaid"
+	assert append[4][0]["Metadata Warnings"] == "repaired malformed first section header"
+	assert append[5:] == (True, True)
+
+
+def test_upload_dependency_failure_precedes_source_dispatch(tmp_path, monkeypatch):
+	input_path = tmp_path / "input.h5"
+	input_path.touch()
+
+	def missing_dependencies(*, error_type=RuntimeError):
+		raise error_type("Google Sheets upload dependencies are unavailable")
+
+	monkeypatch.setattr(
+		tabular_log,
+		"require_google_sheets_dependencies",
+		missing_dependencies,
+	)
+	monkeypatch.setattr(
+		import_commands.import_pipeline,
+		"read_records",
+		lambda *_args, **_kwargs: pytest.fail("dispatcher must not run"),
+	)
+
+	result = CliRunner().invoke(
+		import_commands.scan_log,
+		[
+			str(input_path),
+			"--source",
+			"als832",
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"Scans",
+		],
+	)
+
+	assert result.exit_code == 1
+	assert "Google Sheets upload dependencies are unavailable" in result.output
+	assert not isinstance(result.exception, AssertionError)
+
+
+@pytest.mark.parametrize(
+	"command",
+	(import_commands.scan_log, import_commands.reconstruction_log),
+)
+def test_destination_help_declares_google_conf_environment_and_fallback(command):
+	result = CliRunner().invoke(command, ["--help"])
+
+	assert result.exit_code == 0, result.output
+	assert "env var: MCTUTIL_GOOGLE_CONF" in result.output
+	assert f"default: {tabular_log.DEFAULT_GOOGLE_CONF}" in result.output
+
+
+@pytest.mark.parametrize(
+	"destination_arguments, message",
+	(
+		((), "--output is required unless --upload is used"),
+		(("--upload",), "--spreadsheet and --sheet are required"),
+		(
+			(
+				"--upload",
+				"--spreadsheet",
+				"spreadsheet-id",
+				"--sheet",
+				"Scans",
+				"--output",
+				"output.csv",
+			),
+			"--output cannot be combined with --upload",
+		),
+		(
+			(
+				"--upload",
+				"--spreadsheet",
+				"spreadsheet-id",
+				"--sheet",
+				"Scans",
+				"--force",
+			),
+			"--force applies only to local CSV output",
+		),
+		(
+			(
+				"--upload",
+				"--spreadsheet",
+				"spreadsheet-id",
+				"--sheet",
+				"Scans",
+				"--strict-header-order",
+				"--no-verify-header",
+			),
+			"--strict-header-order cannot be combined with --no-verify-header",
+		),
+		(("--create-tab", "--output", "output.csv"), "--create-tab requires --upload"),
+	),
+)
+def test_destination_contract_fails_before_dispatch(
+	tmp_path,
+	monkeypatch,
+	destination_arguments,
+	message,
+):
+	input_path = tmp_path / "input.h5"
+	input_path.touch()
+	monkeypatch.delenv("MCTUTIL_GSHEET_ID", raising=False)
+	monkeypatch.delenv("MCTUTIL_GSHEET_SHEET", raising=False)
+	monkeypatch.setattr(
+		import_commands.import_pipeline,
+		"read_records",
+		lambda *_args, **_kwargs: pytest.fail("dispatcher must not run"),
+	)
+
+	result = CliRunner().invoke(
+		import_commands.scan_log,
+		[
+			str(input_path),
+			"--source",
+			"als832",
+			*destination_arguments,
+		],
+	)
+
+	assert result.exit_code == 2
+	assert message in result.output
 
 
 @pytest.mark.parametrize(
