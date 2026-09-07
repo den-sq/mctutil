@@ -95,6 +95,11 @@ def _stub_sheet_destination(monkeypatch, *, created=False):
 	monkeypatch.setattr(tabular_log, "build_google_sheets_service", build)
 	monkeypatch.setattr(tabular_log, "create_tab_if_missing", create)
 	monkeypatch.setattr(tabular_log, "append_rows", append)
+	monkeypatch.setattr(
+		tabular_log,
+		"require_google_sheets_dependencies",
+		lambda **_kwargs: (),
+	)
 	return service, calls
 
 
@@ -197,11 +202,11 @@ def test_scan_log_uploads_canonical_rows_and_can_create_tab(tmp_path, monkeypatc
 
 def test_reconstruction_log_upload_uses_environment_destination(tmp_path, monkeypatch):
 	input_path = _xaid_config(tmp_path)
-	google_conf = tmp_path / "google"
+	google_conf = Path("~/.creds/mctutil-test").expanduser()
 	service, calls = _stub_sheet_destination(monkeypatch)
 	monkeypatch.setenv("MCTUTIL_GSHEET_ID", "environment-spreadsheet")
 	monkeypatch.setenv("MCTUTIL_GSHEET_SHEET", "Reconstructions")
-	monkeypatch.setenv("MCTUTIL_GOOGLE_CONF", str(google_conf))
+	monkeypatch.setenv("MCTUTIL_GOOGLE_CONF", "~/.creds/mctutil-test")
 
 	result = CliRunner().invoke(
 		import_commands.reconstruction_log,
@@ -228,6 +233,55 @@ def test_reconstruction_log_upload_uses_environment_destination(tmp_path, monkey
 	assert append[4][0]["Reconstruction ID"] == "xaid"
 	assert append[4][0]["Metadata Warnings"] == "repaired malformed first section header"
 	assert append[5:] == (True, True)
+
+
+def test_upload_dependency_failure_precedes_source_dispatch(tmp_path, monkeypatch):
+	input_path = tmp_path / "input.h5"
+	input_path.touch()
+
+	def missing_dependencies(*, error_type=RuntimeError):
+		raise error_type("Google Sheets upload dependencies are unavailable")
+
+	monkeypatch.setattr(
+		tabular_log,
+		"require_google_sheets_dependencies",
+		missing_dependencies,
+	)
+	monkeypatch.setattr(
+		import_commands.import_pipeline,
+		"read_records",
+		lambda *_args, **_kwargs: pytest.fail("dispatcher must not run"),
+	)
+
+	result = CliRunner().invoke(
+		import_commands.scan_log,
+		[
+			str(input_path),
+			"--source",
+			"als832",
+			"--upload",
+			"--spreadsheet",
+			"spreadsheet-id",
+			"--sheet",
+			"Scans",
+		],
+	)
+
+	assert result.exit_code == 1
+	assert "Google Sheets upload dependencies are unavailable" in result.output
+	assert not isinstance(result.exception, AssertionError)
+
+
+@pytest.mark.parametrize(
+	"command",
+	(import_commands.scan_log, import_commands.reconstruction_log),
+)
+def test_destination_help_declares_google_conf_environment_and_fallback(command):
+	result = CliRunner().invoke(command, ["--help"])
+
+	assert result.exit_code == 0, result.output
+	assert "env var: MCTUTIL_GOOGLE_CONF" in result.output
+	assert f"default: {tabular_log.DEFAULT_GOOGLE_CONF}" in result.output
 
 
 @pytest.mark.parametrize(
