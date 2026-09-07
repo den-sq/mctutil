@@ -1,8 +1,9 @@
-"""CSV commands for the canonical scan and reconstruction readers."""
+"""CSV and Google Sheets commands for the canonical metadata readers."""
 
 from __future__ import annotations
 
 from datetime import datetime
+import os
 from pathlib import Path
 
 import click
@@ -19,6 +20,68 @@ from mctutil.parse.import_records import (
 
 _DEFAULT_CHENGLAB_SHEET = "ScanLog"
 _DEFAULT_GOOGLE_CONF = Path("~/.creds/gsheets").expanduser()
+
+
+def _google_conf_default() -> Path:
+	return Path(
+		os.environ.get("MCTUTIL_GOOGLE_CONF", str(_DEFAULT_GOOGLE_CONF))
+	).expanduser()
+
+
+def _destination_options(function):
+	"""Declare the established tabular-log destination contract once."""
+	options = (
+		click.option(
+			"--output",
+			type=click.Path(dir_okay=False, path_type=Path),
+			help="Destination CSV; required unless --upload is used.",
+		),
+		click.option(
+			"--upload",
+			is_flag=True,
+			help="Append records to Google Sheets instead of writing a local CSV.",
+		),
+		click.option(
+			"--spreadsheet",
+			default=lambda: os.environ.get("MCTUTIL_GSHEET_ID"),
+			help="Destination spreadsheet ID; may use MCTUTIL_GSHEET_ID.",
+		),
+		click.option(
+			"--sheet",
+			default=lambda: os.environ.get("MCTUTIL_GSHEET_SHEET"),
+			help="Destination tab; may use MCTUTIL_GSHEET_SHEET.",
+		),
+		click.option(
+			"--create-tab",
+			is_flag=True,
+			help="Create a missing destination tab with the canonical header.",
+		),
+		click.option(
+			"--google-conf",
+			type=click.Path(file_okay=False, path_type=Path),
+			default=_google_conf_default,
+			show_default="~/.creds/gsheets",
+			help="Directory containing Google Sheets credentials and tokens.",
+		),
+		click.option(
+			"--verify-header/--no-verify-header",
+			default=True,
+			show_default=True,
+			help=(
+				"Match destination columns by exact header name. Disabling this uses "
+				"canonical positional order."
+			),
+		),
+		click.option(
+			"--strict-header-order",
+			is_flag=True,
+			help="Require canonical header order instead of matching by name.",
+		),
+		click.option("--force", is_flag=True, help="Replace an existing output CSV."),
+	)
+	for option in reversed(options):
+		function = option(function)
+	return function
 
 
 def _csv_value(value):
@@ -46,15 +109,84 @@ def _emit_warnings(records) -> None:
 			click.echo(f"Warning [{context}]: {warning}", err=True)
 
 
-def _import_to_csv(
+def _validate_destination(
+	*,
+	output: Path | None,
+	upload: bool,
+	spreadsheet: str | None,
+	sheet: str | None,
+	create_tab: bool,
+	force: bool,
+	verify_header: bool,
+	strict_header_order: bool,
+) -> None:
+	tabular_log.validate_destination_options(
+		upload=upload,
+		create_tab=create_tab,
+		output=output,
+		force=force,
+		spreadsheet=spreadsheet,
+		sheet=sheet,
+		verify=verify_header,
+		strict_header_order=strict_header_order,
+	)
+	if not upload and output is None:
+		raise click.UsageError("--output is required unless --upload is used.")
+
+
+def _upload_rows(
+	kind: str,
+	rows: list[dict[str, object]],
+	headers: tuple[str, ...],
+	google_conf: Path,
+	spreadsheet: str,
+	sheet: str,
+	create_tab: bool,
+	verify_header: bool,
+	strict_header_order: bool,
+) -> None:
+	try:
+		service = tabular_log.build_google_sheets_service(google_conf)
+		created_tab = create_tab and tabular_log.create_tab_if_missing(
+			service,
+			spreadsheet,
+			sheet,
+			headers,
+		)
+		response = tabular_log.append_rows(
+			service,
+			spreadsheet,
+			sheet,
+			headers,
+			rows,
+			verify=verify_header,
+			strict_header_order=strict_header_order,
+		)
+	except Exception as exc:
+		raise click.ClickException(f"Google Sheets upload failed: {exc}") from exc
+	if created_tab:
+		click.echo(f"Created Google Sheets tab with {kind} header: {sheet}")
+	updated_range = response.get("updates", {}).get("updatedRange", "unknown range")
+	click.echo(f"Appended {len(rows)} {kind} record(s): {updated_range}")
+
+
+def _import_records(
 	kind: str,
 	source: str,
 	reader_args: tuple,
 	reader_kwargs: dict,
-	output: Path,
+	output: Path | None,
 	force: bool,
 	fields,
 	headers: tuple[str, ...],
+	*,
+	upload: bool,
+	spreadsheet: str | None,
+	sheet: str | None,
+	create_tab: bool,
+	google_conf: Path,
+	verify_header: bool,
+	strict_header_order: bool,
 ) -> None:
 	try:
 		records = import_pipeline.read_records(
@@ -66,12 +198,23 @@ def _import_to_csv(
 		if not records:
 			raise ValueError(f"{source} produced no {kind} records")
 		_emit_warnings(records)
-		tabular_log.write_csv(
-			output,
-			headers,
-			_rows(records, fields),
-			force=force,
-		)
+		rows = list(_rows(records, fields))
+		if upload:
+			_upload_rows(
+				kind,
+				rows,
+				headers,
+				google_conf,
+				spreadsheet,
+				sheet,
+				create_tab,
+				verify_header,
+				strict_header_order,
+			)
+			return
+		tabular_log.write_csv(output, headers, rows, force=force)
+	except click.ClickException:
+		raise
 	except (OSError, RuntimeError, TypeError, ValueError) as exc:
 		raise click.ClickException(str(exc)) from exc
 	click.echo(f"Wrote {len(records)} {kind} record(s) to {output}")
@@ -97,28 +240,33 @@ def _import_to_csv(
 	"--input-sheet",
 	help="ChengLab input tab (default: ScanLog).",
 )
-@click.option(
-	"--google-conf",
-	type=click.Path(file_okay=False, path_type=Path),
-	help="ChengLab credential directory (default: ~/.creds/gsheets).",
-)
-@click.option(
-	"--output",
-	type=click.Path(dir_okay=False, path_type=Path),
-	required=True,
-	help="Destination CSV.",
-)
-@click.option("--force", is_flag=True, help="Replace an existing output CSV.")
+@_destination_options
 def scan_log(
 	inputs: tuple[Path, ...],
 	source: str,
 	input_spreadsheet: str | None,
 	input_sheet: str | None,
-	google_conf: Path | None,
-	output: Path,
+	output: Path | None,
+	upload: bool,
+	spreadsheet: str | None,
+	sheet: str | None,
+	create_tab: bool,
+	google_conf: Path,
+	verify_header: bool,
+	strict_header_order: bool,
 	force: bool,
 ) -> None:
 	"""Import canonical scan records from one explicit homogeneous source."""
+	_validate_destination(
+		output=output,
+		upload=upload,
+		spreadsheet=spreadsheet,
+		sheet=sheet,
+		create_tab=create_tab,
+		force=force,
+		verify_header=verify_header,
+		strict_header_order=strict_header_order,
+	)
 	if source == "chenglab-camera":
 		if inputs:
 			raise click.UsageError(
@@ -131,19 +279,19 @@ def scan_log(
 		reader_args = (input_spreadsheet,)
 		reader_kwargs = {
 			"sheet": input_sheet or _DEFAULT_CHENGLAB_SHEET,
-			"google_conf": google_conf or _DEFAULT_GOOGLE_CONF,
+			"google_conf": google_conf,
 		}
 	else:
 		if not inputs:
 			raise click.UsageError(f"{source} requires one or more input paths")
-		if input_spreadsheet is not None or input_sheet is not None or google_conf is not None:
+		if input_spreadsheet is not None or input_sheet is not None:
 			raise click.UsageError(
 				"Sheets input options are valid only for chenglab-camera"
 			)
 		reader_args = (inputs,)
 		reader_kwargs = {}
 
-	_import_to_csv(
+	_import_records(
 		"scan",
 		source,
 		reader_args,
@@ -152,6 +300,13 @@ def scan_log(
 		force,
 		SCAN_FIELDS,
 		SCAN_HEADERS,
+		upload=upload,
+		spreadsheet=spreadsheet,
+		sheet=sheet,
+		create_tab=create_tab,
+		google_conf=google_conf,
+		verify_header=verify_header,
+		strict_header_order=strict_header_order,
 	)
 
 
@@ -168,21 +323,32 @@ def scan_log(
 	required=True,
 	help="Explicit reconstruction source; automatic detection is not supported.",
 )
-@click.option(
-	"--output",
-	type=click.Path(dir_okay=False, path_type=Path),
-	required=True,
-	help="Destination CSV.",
-)
-@click.option("--force", is_flag=True, help="Replace an existing output CSV.")
+@_destination_options
 def reconstruction_log(
 	inputs: tuple[Path, ...],
 	source: str,
-	output: Path,
+	output: Path | None,
+	upload: bool,
+	spreadsheet: str | None,
+	sheet: str | None,
+	create_tab: bool,
+	google_conf: Path,
+	verify_header: bool,
+	strict_header_order: bool,
 	force: bool,
 ) -> None:
 	"""Import canonical reconstruction records from one explicit source."""
-	_import_to_csv(
+	_validate_destination(
+		output=output,
+		upload=upload,
+		spreadsheet=spreadsheet,
+		sheet=sheet,
+		create_tab=create_tab,
+		force=force,
+		verify_header=verify_header,
+		strict_header_order=strict_header_order,
+	)
+	_import_records(
 		"reconstruction",
 		source,
 		(inputs,),
@@ -191,4 +357,11 @@ def reconstruction_log(
 		force,
 		RECONSTRUCTION_FIELDS,
 		RECONSTRUCTION_HEADERS,
+		upload=upload,
+		spreadsheet=spreadsheet,
+		sheet=sheet,
+		create_tab=create_tab,
+		google_conf=google_conf,
+		verify_header=verify_header,
+		strict_header_order=strict_header_order,
 	)

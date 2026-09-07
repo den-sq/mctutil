@@ -12,6 +12,10 @@ for a command's options.
   `--clean-out` optionally write the two sorted directory lists.
 - **`meta-shift`** — Run the per-sample meta-shift engine, delegating lab-specific schema (folder conventions, status enum, sbatch parsing, sheet layout) to a `--schema` adapter (e.g. `chenglab`).
 - **`pull-config`** — Copy config files found under a root into a target directory.
+- **`scan-log`** — Import canonical scan records from ALS832, Sigray, APS 7-BM,
+  or ChengLab Camera into CSV or Google Sheets.
+- **`reconstruction-log`** — Import canonical reconstruction records from
+  ALS832, X-AID, or 7-BM/TomoCuPy into CSV or Google Sheets.
 - **`scanlog-fetch`** — Copy scanlogs into a target location.
 - **`sigray-scan-log`** — Extract one concise scan row per numbered Sigray
   projection HDF5 acquisition. FLAT, DARK, and POST files enrich those rows but
@@ -30,6 +34,33 @@ mctutil parse sigray-scan-log /mnt/e/20260514_sample \
 mctutil parse xaid-log config.txt \
   --output reconstruction_log.csv
 ```
+
+The canonical commands can append directly to Google Sheets through the same
+destination implementation used by the legacy commands:
+
+```bash
+mctutil parse scan-log /data/aps-7bm \
+  --source aps-7bm \
+  --upload \
+  --spreadsheet SPREADSHEET_ID \
+  --sheet Scans \
+  --create-tab
+
+mctutil parse reconstruction-log /data/reconstructions \
+  --source tomocupy-7bm \
+  --upload \
+  --spreadsheet SPREADSHEET_ID \
+  --sheet Reconstructions \
+  --create-tab
+```
+
+Use `--output FILE.csv` instead of `--upload` for local output. Uploads match
+canonical columns by exact header name, so destination columns may be reordered
+and unrelated columns are preserved. Credentials default to
+`~/.creds/gsheets`; `MCTUTIL_GSHEET_ID`, `MCTUTIL_GSHEET_SHEET`, and
+`MCTUTIL_GOOGLE_CONF` provide the established environment defaults. For a
+ChengLab import, `--input-spreadsheet` and `--input-sheet` select the source;
+`--spreadsheet` and `--sheet` select the independent destination.
 
 `sigray-scan-log` accepts one or more HDF5 files or acquisition directories.
 Directory discovery inspects direct children only so it does not traverse large
