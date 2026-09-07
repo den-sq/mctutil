@@ -39,6 +39,7 @@ CHENGLAB_READONLY_SCOPES = (
 	"https://www.googleapis.com/auth/spreadsheets.readonly",
 )
 _FRAME_LOCATION_PATHS = (
+	"/defaults/HDF5FrameLocation",
 	"/exchange/HDF5FrameLocation",
 	"/measurement/defaults/HDF5FrameLocation",
 	"/measurement/instrument/detector/HDF5FrameLocation",
@@ -80,7 +81,6 @@ def _set_image_values(data, values: dict[str, object | None]) -> None:
 def _valid_angles(
 	handle,
 	projection_count: int,
-	mask: np.ndarray | None,
 	warnings: list[str],
 ) -> np.ndarray:
 	dataset = _dataset(handle, "/exchange/theta")
@@ -88,11 +88,9 @@ def _valid_angles(
 		warnings.append("missing /exchange/theta")
 		return np.asarray([], dtype=float)
 	theta = np.asarray(dataset[()]).reshape(-1).astype(float, copy=False)
-	if mask is not None and theta.size == mask.size:
-		theta = theta[mask]
 	if theta.size != projection_count:
 		warnings.append(
-			f"theta length {theta.size} does not match valid projection count {projection_count}"
+			f"theta length {theta.size} does not match stored projection count {projection_count}"
 		)
 		theta = theta[:projection_count]
 	return theta[np.isfinite(theta)]
@@ -143,7 +141,7 @@ def _als832_record(path: Path) -> ScanRecord:
 		values["source_metadata_file"] = str(path)
 		values["projection_count_acquired"] = int(data.shape[0])
 		_set_image_values(data, values)
-		theta = _valid_angles(handle, int(data.shape[0]), None, warnings)
+		theta = _valid_angles(handle, int(data.shape[0]), warnings)
 		_set_angle_values(theta, values, warnings)
 		_set_reference_values(handle, path, values)
 	values["scan_file_size_gb"] = float(path.stat().st_size / 1e9)
@@ -283,29 +281,27 @@ def _find_frame_location(handle):
 	return matches[0] if len(matches) == 1 else (None, None)
 
 
-def _frame_mask(dataset) -> np.ndarray:
-	values = np.asarray(dataset[()]).reshape(-1)
-	if values.dtype.kind in "iufb":
-		numeric = values.astype(float, copy=False)
-		if np.all(np.isin(numeric, (0, 1))):
-			return numeric == 1
-		return numeric >= 0
-	bad = {"", "none", "null", "missing", "invalid", "-1"}
-	return np.asarray([decode_scalar(value).casefold() not in bad for value in values])
-
-
-def _seven_bm_mask(handle, frame_count: int, warnings: list[str]) -> np.ndarray:
+def _seven_bm_projection_routes(
+	handle,
+	projection_count: int,
+	warnings: list[str],
+) -> np.ndarray | None:
 	dataset, path = _find_frame_location(handle)
 	if dataset is None:
-		warnings.append("HDF5FrameLocation is missing; no frames were accepted")
-		return np.zeros(frame_count, dtype=bool)
-	mask = _frame_mask(dataset)
-	if mask.size != frame_count:
+		warnings.append("HDF5FrameLocation is missing; detector integrity was not checked")
+		return None
+	routes = np.asarray(
+		["/" + decode_scalar(value).lstrip("/") for value in np.asarray(dataset[()]).reshape(-1)]
+	)
+	projection_routes = routes == "/exchange/data"
+	routed_count = int(np.count_nonzero(projection_routes))
+	if routed_count != projection_count:
 		warnings.append(
-			f"{path} length {mask.size} does not match stored frame count {frame_count}"
+			f"{path} routes {routed_count} frames to /exchange/data but the dataset "
+			f"stores {projection_count}"
 		)
-		return np.zeros(frame_count, dtype=bool)
-	return mask
+		return None
+	return projection_routes
 
 
 def _dataset_unit(dataset) -> str | None:
@@ -329,7 +325,7 @@ def _length_mm(handle, paths: tuple[str, ...], label: str, warnings: list[str]) 
 			return None
 		if unit in {"mm", "millimeter", "millimetre"}:
 			return value
-		if unit in {"um", "µm", "micron", "microns", "micrometer", "micrometre"}:
+		if unit in {"um", "μm", "micron", "microns", "micrometer", "micrometre"}:
 			return value * 0.001
 		warnings.append(f"{label} unit is unavailable or unsupported at {path}")
 		return None
@@ -338,11 +334,14 @@ def _length_mm(handle, paths: tuple[str, ...], label: str, warnings: list[str]) 
 
 def _seven_bm_integrity(
 	handle,
-	mask: np.ndarray,
+	projection_routes: np.ndarray | None,
 	values: dict[str, object | None],
 	warnings: list[str],
 ) -> None:
+	if projection_routes is None:
+		return
 	for path in (
+		"/defaults/NDArrayUniqueId",
 		"/measurement/defaults/NDArrayUniqueId",
 		"/measurement/instrument/detector/NDArrayUniqueId",
 	):
@@ -350,12 +349,15 @@ def _seven_bm_integrity(
 		if dataset is None:
 			continue
 		identifiers = np.asarray(dataset[()]).reshape(-1)
-		if identifiers.size != mask.size:
+		if identifiers.size != projection_routes.size:
 			warnings.append("detector unique-ID length does not match frame locations")
 			return
-		differences = np.diff(identifiers[mask].astype(int, copy=False))
-		values["dropped_frames"] = int(np.sum(np.maximum(differences - 1, 0)))
-		if np.any(differences <= 0):
+		positions = np.flatnonzero(projection_routes)
+		projection_ids = identifiers[projection_routes].astype(np.int64, copy=False)
+		id_steps = np.diff(projection_ids)
+		route_steps = np.diff(positions)
+		values["dropped_frames"] = int(np.sum(np.maximum(id_steps - route_steps, 0)))
+		if np.any(id_steps <= 0):
 			warnings.append("detector unique IDs repeat or run backward")
 		return
 
@@ -369,8 +371,8 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 		if data is None or len(data.shape) != 3:
 			raise ValueError(f"{path}: missing three-dimensional /exchange/data")
 		_apply_h5_mapping(handle, SEVEN_BM_SCAN_MAPPING, values)
-		mask = _seven_bm_mask(handle, int(data.shape[0]), warnings)
-		projection_count = int(np.count_nonzero(mask))
+		projection_count = int(data.shape[0])
+		projection_routes = _seven_bm_projection_routes(handle, projection_count, warnings)
 		values.update(
 			{
 				"facility_name": "APS 7-BM",
@@ -382,7 +384,7 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 			}
 		)
 		_set_image_values(data, values)
-		theta = _valid_angles(handle, projection_count, mask, warnings)
+		theta = _valid_angles(handle, projection_count, warnings)
 		_set_angle_values(theta, values, warnings)
 		_set_reference_values(handle, path, values)
 		values["detector_pixel_pitch_mm"] = _length_mm(
@@ -404,7 +406,7 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 			"sample-plane resolution",
 			warnings,
 		)
-		_seven_bm_integrity(handle, mask, values, warnings)
+		_seven_bm_integrity(handle, projection_routes, values, warnings)
 	values["scan_file_size_gb"] = float(path.stat().st_size / 1e9)
 	_finish_scan(values, warnings)
 	return ScanRecord("aps-7bm", (str(path),), values, warnings)
