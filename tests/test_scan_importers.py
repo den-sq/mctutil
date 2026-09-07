@@ -88,7 +88,8 @@ def test_sigray_reader_reuses_existing_discovery_and_extraction(tmp_path, monkey
 	assert record.warnings == ["legacy warning"]
 
 
-def test_aps_7bm_routes_acquisition_frames_before_integrity_checks(tmp_path):
+@pytest.mark.parametrize("pixel_unit", ("µm", "μm"))
+def test_aps_7bm_routes_acquisition_frames_before_integrity_checks(tmp_path, pixel_unit):
 	path = tmp_path / "seven-bm.h5"
 	with h5py.File(path, "w") as handle:
 		_put(handle, "/exchange/data", np.zeros((4, 4, 5), dtype=np.uint16))
@@ -110,7 +111,7 @@ def test_aps_7bm_routes_acquisition_frames_before_integrity_checks(tmp_path):
 		_put(handle, "/defaults/HDF5FrameLocation", routes)
 		_put(handle, "/defaults/NDArrayUniqueId", (10, 11, 12, 13, 14, 16, 17, 18, 19))
 		pitch = _put(handle, "/measurement/instrument/detector/pixel_size", 6.9)
-		pitch.attrs["units"] = "μm"
+		pitch.attrs["units"] = pixel_unit
 		resolution = _put(handle, "/measurement/instrument/objective/resolution", 2.0)
 		resolution.attrs["units"] = "um"
 		_put(handle, "/process/acquisition/scan_type", np.bytes_("fly"))
@@ -136,6 +137,8 @@ def test_aps_7bm_route_mismatch_warns_without_discarding_stored_projections(tmp_
 	with h5py.File(path, "w") as handle:
 		_put(handle, "/exchange/data", np.zeros((2, 4, 5), dtype=np.uint16))
 		_put(handle, "/exchange/theta", (0.0, 180.0))
+		pitch = _put(handle, "/measurement/instrument/detector/physical_pixel_size", 6.5)
+		pitch.attrs["units"] = "um"
 		_put(
 			handle,
 			"/defaults/HDF5FrameLocation",
@@ -147,6 +150,7 @@ def test_aps_7bm_route_mismatch_warns_without_discarding_stored_projections(tmp_
 	assert record.values["projection_count_acquired"] == 2
 	assert record.values["rotation_stop_actual_deg"] == 180.0
 	assert record.values["dropped_frames"] is None
+	assert record.values["detector_pixel_pitch_mm"] == pytest.approx(0.0065)
 	assert record.warnings == [
 		"/defaults/HDF5FrameLocation routes 1 frames to /exchange/data but the dataset "
 		"stores 2"

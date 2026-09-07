@@ -325,7 +325,7 @@ def _length_mm(handle, paths: tuple[str, ...], label: str, warnings: list[str]) 
 			return None
 		if unit in {"mm", "millimeter", "millimetre"}:
 			return value
-		if unit in {"um", "μm", "micron", "microns", "micrometer", "micrometre"}:
+		if unit in {"um", "µm", "μm", "micron", "microns", "micrometer", "micrometre"}:
 			return value * 0.001
 		warnings.append(f"{label} unit is unavailable or unsupported at {path}")
 		return None
