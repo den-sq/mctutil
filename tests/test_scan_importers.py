@@ -88,34 +88,73 @@ def test_sigray_reader_reuses_existing_discovery_and_extraction(tmp_path, monkey
 	assert record.warnings == ["legacy warning"]
 
 
-def test_aps_7bm_filters_frames_before_angles_and_integrity(tmp_path):
+@pytest.mark.parametrize("pixel_unit", ("µm", "μm"))
+def test_aps_7bm_routes_acquisition_frames_before_integrity_checks(tmp_path, pixel_unit):
 	path = tmp_path / "seven-bm.h5"
 	with h5py.File(path, "w") as handle:
 		_put(handle, "/exchange/data", np.zeros((4, 4, 5), dtype=np.uint16))
 		_put(handle, "/exchange/theta", (0.0, 10.0, 20.0, 30.0))
-		_put(handle, "/exchange/HDF5FrameLocation", (1, 0, 1, 1))
-		_put(handle, "/measurement/defaults/NDArrayUniqueId", (10, 11, 13, 15))
-		pitch = _put(handle, "/measurement/instrument/detector/physical_pixel_size", 6.5)
-		pitch.attrs["units"] = "um"
+		_put(handle, "/exchange/data_white", np.zeros((2, 4, 5)))
+		_put(handle, "/exchange/data_dark", np.zeros((1, 4, 5)))
+		_put(handle, "/exchange/data_gains", np.zeros((2, 4, 5)))
+		routes = (
+			"/exchange/data_dark",
+			"/exchange/data_white",
+			"/exchange/data_gains",
+			"/exchange/data",
+			"/exchange/data",
+			"/exchange/data",
+			"/exchange/data",
+			"/exchange/data_white",
+			"/exchange/data_gains",
+		)
+		_put(handle, "/defaults/HDF5FrameLocation", routes)
+		_put(handle, "/defaults/NDArrayUniqueId", (10, 11, 12, 13, 14, 16, 17, 18, 19))
+		pitch = _put(handle, "/measurement/instrument/detector/pixel_size", 6.9)
+		pitch.attrs["units"] = pixel_unit
 		resolution = _put(handle, "/measurement/instrument/objective/resolution", 2.0)
 		resolution.attrs["units"] = "um"
 		_put(handle, "/process/acquisition/scan_type", np.bytes_("fly"))
 		_put(handle, "/process/acquisition/rotation/num_angles", 4)
-		_put(handle, "/exchange/data_white", np.zeros((2, 4, 5)))
-		_put(handle, "/exchange/data_dark", np.zeros((1, 4, 5)))
 
 	record, = scan_importers.read_aps_7bm_scans((path,))
 	values = record.values
 
-	assert values["projection_count_acquired"] == 3
+	assert values["projection_count_acquired"] == 4
 	assert values["rotation_start_deg"] == 0.0
 	assert values["rotation_stop_actual_deg"] == 30.0
-	assert values["angular_step_deg"] == 15.0
-	assert values["dropped_frames"] == 3
-	assert values["detector_pixel_pitch_mm"] == pytest.approx(0.0065)
+	assert values["angular_step_deg"] == 10.0
+	assert values["dropped_frames"] == 1
+	assert values["detector_pixel_pitch_mm"] == pytest.approx(0.0069)
 	assert values["effective_pixel_size_mm"] == pytest.approx(0.002)
 	assert values["physical_fov_width_mm"] == pytest.approx(0.01)
 	assert values["physical_fov_height_mm"] == pytest.approx(0.008)
+	assert record.warnings == []
+
+
+def test_aps_7bm_route_mismatch_warns_without_discarding_stored_projections(tmp_path):
+	path = tmp_path / "seven-bm-mismatch.h5"
+	with h5py.File(path, "w") as handle:
+		_put(handle, "/exchange/data", np.zeros((2, 4, 5), dtype=np.uint16))
+		_put(handle, "/exchange/theta", (0.0, 180.0))
+		pitch = _put(handle, "/measurement/instrument/detector/physical_pixel_size", 6.5)
+		pitch.attrs["units"] = "um"
+		_put(
+			handle,
+			"/defaults/HDF5FrameLocation",
+			("/exchange/data_dark", "/exchange/data"),
+		)
+
+	record, = scan_importers.read_aps_7bm_scans((path,))
+
+	assert record.values["projection_count_acquired"] == 2
+	assert record.values["rotation_stop_actual_deg"] == 180.0
+	assert record.values["dropped_frames"] is None
+	assert record.values["detector_pixel_pitch_mm"] == pytest.approx(0.0065)
+	assert record.warnings == [
+		"/defaults/HDF5FrameLocation routes 1 frames to /exchange/data but the dataset "
+		"stores 2"
+	]
 
 
 class _Request:
