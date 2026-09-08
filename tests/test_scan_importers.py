@@ -88,8 +88,34 @@ def test_sigray_reader_reuses_existing_discovery_and_extraction(tmp_path, monkey
 	assert record.warnings == ["legacy warning"]
 
 
-@pytest.mark.parametrize("pixel_unit", ("µm", "μm"))
-def test_aps_7bm_routes_acquisition_frames_before_integrity_checks(tmp_path, pixel_unit):
+def _put_epics_times(handle, times):
+	seconds = np.floor(times).astype(np.uint32)
+	nanoseconds = np.rint((np.asarray(times) - seconds) * 1_000_000_000).astype(np.uint32)
+	_put(handle, "/defaults/NDArrayEpicsTSSec", seconds)
+	_put(handle, "/defaults/NDArrayEpicsTSnSec", nanoseconds)
+
+
+@pytest.mark.parametrize(
+	("pitch_path", "resolution_path", "pixel_unit"),
+	(
+		(
+			"/measurement/instrument/detector/pixel_size",
+			"/measurement/instrument/detection_system/objective/resolution",
+			"µm",
+		),
+		(
+			"/measurement/instrument/detector/physical_pixel_size",
+			"/measurement/instrument/objective/resolution",
+			"μm",
+		),
+	),
+)
+def test_aps_7bm_populates_real_layout_metadata_from_one_route_authority(
+	tmp_path,
+	pitch_path,
+	resolution_path,
+	pixel_unit,
+):
 	path = tmp_path / "seven-bm.h5"
 	with h5py.File(path, "w") as handle:
 		_put(handle, "/exchange/data", np.zeros((4, 4, 5), dtype=np.uint16))
@@ -109,51 +135,211 @@ def test_aps_7bm_routes_acquisition_frames_before_integrity_checks(tmp_path, pix
 			"/exchange/data_gains",
 		)
 		_put(handle, "/defaults/HDF5FrameLocation", routes)
-		_put(handle, "/defaults/NDArrayUniqueId", (10, 11, 12, 13, 14, 16, 17, 18, 19))
-		pitch = _put(handle, "/measurement/instrument/detector/pixel_size", 6.9)
+		_put(handle, "/defaults/NDArrayUniqueId", np.arange(10, 19))
+		_put_epics_times(handle, (100, 100.01, 100.02, 100.1, 100.208, 100.316, 100.424, 100.5, 100.51))
+		_put(handle, "/measurement/instrument/source/name", np.bytes_("Advanced Photon Source"))
+		_put(handle, "/measurement/instrument/source/beamline", np.bytes_("7-BM"))
+		_put(handle, "/measurement/sample/experiment/proposal", np.bytes_("P-1"))
+		_put(handle, "/measurement/sample/name", np.bytes_(""))
+		_put(handle, "/measurement/sample/file/name", np.bytes_("sample-group"))
+		_put(handle, "/measurement/sample/experimenter/name", np.bytes_("Operator"))
+		_put(handle, "/measurement/sample/description_1", np.bytes_(""))
+		_put(handle, "/measurement/sample/description_2", np.bytes_("note one"))
+		_put(handle, "/measurement/sample/description_3", np.bytes_("note two"))
+		_put(handle, "/measurement/instrument/detector/exposure_time", 0.09)
+		_put(handle, "/measurement/instrument/detector/binning_x", 2)
+		_put(handle, "/measurement/instrument/detector/binning_y", 2)
+		_put(handle, "/measurement/instrument/detector/gain", 0.0)
+		_put(handle, "/measurement/instrument/detector/roi/min_x", 0)
+		_put(handle, "/measurement/instrument/detector/roi/min_y", 0)
+		_put(handle, "/measurement/instrument/detector/roi/size_x", 5)
+		_put(handle, "/measurement/instrument/detector/roi/size_y", 4)
+		_put(handle, "/measurement/instrument/detector/max_size_x", 5)
+		_put(handle, "/measurement/instrument/detector/max_size_y", 4)
+		_put(handle, "/measurement/instrument/sample_motor_stack/setup/x", 1.0)
+		_put(handle, "/measurement/instrument/sample_motor_stack/setup/y", 2.0)
+		_put(handle, "/measurement/instrument/sample_motor_stack/setup/z", 3.0)
+		_put(handle, "/measurement/instrument/detector_motor_stack/setup/z", 325.0)
+		_put(handle, "/measurement/instrument/sample_motor_stack/detector_distance", 325.0)
+		pitch = _put(handle, pitch_path, 6.9)
 		pitch.attrs["units"] = pixel_unit
-		resolution = _put(handle, "/measurement/instrument/objective/resolution", 2.0)
+		resolution = _put(handle, resolution_path, 2.0)
 		resolution.attrs["units"] = "um"
-		_put(handle, "/process/acquisition/scan_type", np.bytes_("fly"))
+		_put(handle, "/process/acquisition/scan_type", np.bytes_("Single"))
 		_put(handle, "/process/acquisition/rotation/num_angles", 4)
+		_put(handle, "/process/acquisition/rotation/start", 0.0)
+		_put(handle, "/process/acquisition/rotation/step", 10.0)
+		_put(handle, "/process/acquisition/rotation/speed", 100.0)
+		_put(handle, "/process/acquisition/pixels_y_per_360_deg", 0.0)
+		_put(handle, "/process/acquisition/flat_fields/mode", np.bytes_("Both"))
+		_put(handle, "/process/acquisition/flat_fields/number", 1)
+		_put(handle, "/process/acquisition/flat_fields/flat_exposure_time", 0.09)
+		_put(handle, "/process/acquisition/dark_fields/mode", np.bytes_("Start"))
+		_put(handle, "/process/acquisition/dark_fields/number", 1)
 
 	record, = scan_importers.read_aps_7bm_scans((path,))
 	values = record.values
 
+	assert values["facility_name"] == "Advanced Photon Source"
+	assert values["acquisition_system_id"] == "7-BM"
+	assert values["project_id"] == "P-1"
+	assert values["sample_id"] is None
+	assert values["acquisition_group"] == "sample-group"
+	assert values["operator"] == "Operator"
+	assert values["notes"] == "note one; note two"
 	assert values["projection_count_acquired"] == 4
 	assert values["rotation_start_deg"] == 0.0
+	assert values["rotation_stop_planned_deg"] == 30.0
 	assert values["rotation_stop_actual_deg"] == 30.0
 	assert values["angular_step_deg"] == 10.0
-	assert values["dropped_frames"] == 1
+	assert values["fov_count"] == 1
+	assert values["helical"] is False
+	assert values["exposure_us"] == 90_000.0
+	assert values["flat_exposure_us"] == 90_000.0
+	assert values["trigger_period_us"] == pytest.approx(108_000.0)
+	assert values["trigger_overhead_us"] == pytest.approx(18_000.0)
+	assert values["scan_start"].isoformat() == "1990-01-01T00:01:40+00:00"
+	assert values["scan_stop"].isoformat() == "1990-01-01T00:01:40.510000+00:00"
+	assert values["scan_duration_s"] == pytest.approx(0.51)
+	assert values["binning_x"] == values["binning_y"] == 2
+	assert values["crop_enabled"] is False
+	assert values["crop_offset_x_px"] == values["crop_offset_y_px"] == 0
+	assert values["detector_gain"] == 0.0
+	assert values["sample_stage_x_mm"] == 1.0
+	assert values["sample_stage_y_mm"] == 2.0
+	assert values["sample_stage_z_mm"] == 3.0
+	assert values["detector_stage_z_mm"] == 325.0
+	assert values["sample_detector_distance_mm"] == 325.0
+	assert values["flat_frame_count"] == 2
+	assert values["flat_frame_count_pre"] == 1
+	assert values["flat_frame_count_post"] == 1
+	assert values["dark_frame_count"] == 1
+	assert values["post_reference_files"] == (f"{path}:/exchange/data_white",)
+	assert values["dropped_frames"] == 0
 	assert values["detector_pixel_pitch_mm"] == pytest.approx(0.0069)
 	assert values["effective_pixel_size_mm"] == pytest.approx(0.002)
 	assert values["physical_fov_width_mm"] == pytest.approx(0.01)
 	assert values["physical_fov_height_mm"] == pytest.approx(0.008)
+	assert values["projection_frame_size_mb"] == 0.00004
+	assert values["source_energy_kev"] is None
+	assert values["source_power"] is None
+	assert values["source_target"] is None
+	assert values["acquisition_status"] == "Complete"
 	assert record.warnings == []
 
 
-def test_aps_7bm_route_mismatch_warns_without_discarding_stored_projections(tmp_path):
-	path = tmp_path / "seven-bm-mismatch.h5"
+def test_aps_7bm_partial_scan_reports_routed_count_and_uid_gap(tmp_path):
+	path = tmp_path / "seven-bm-partial.h5"
 	with h5py.File(path, "w") as handle:
-		_put(handle, "/exchange/data", np.zeros((2, 4, 5), dtype=np.uint16))
-		_put(handle, "/exchange/theta", (0.0, 180.0))
-		pitch = _put(handle, "/measurement/instrument/detector/physical_pixel_size", 6.5)
-		pitch.attrs["units"] = "um"
-		_put(
-			handle,
-			"/defaults/HDF5FrameLocation",
-			("/exchange/data_dark", "/exchange/data"),
-		)
+		_put(handle, "/exchange/data", np.zeros((3, 4, 5), dtype=np.uint16))
+		_put(handle, "/exchange/theta", (0.0, 1.0, 2.0))
+		_put(handle, "/defaults/HDF5FrameLocation", ("/exchange/data",) * 3)
+		_put(handle, "/defaults/NDArrayUniqueId", (10, 12, 13))
+		_put_epics_times(handle, (100.0, 100.1, 100.2))
+		_put(handle, "/process/acquisition/rotation/num_angles", 4)
 
 	record, = scan_importers.read_aps_7bm_scans((path,))
 
-	assert record.values["projection_count_acquired"] == 2
-	assert record.values["rotation_stop_actual_deg"] == 180.0
-	assert record.values["dropped_frames"] is None
-	assert record.values["detector_pixel_pitch_mm"] == pytest.approx(0.0065)
-	assert record.warnings == [
-		"/defaults/HDF5FrameLocation routes 1 frames to /exchange/data but the dataset "
-		"stores 2"
+	assert record.values["projection_count_acquired"] == 3
+	assert record.values["dropped_frames"] == 1
+	assert record.values["incomplete_frames"] is None
+	assert record.values["acquisition_status"] == "Warnings"
+	assert "detector unique IDs indicate 1 dropped projection frame(s)" in record.warnings
+	assert "planned projection count 4 does not match routed acquisition count 3" in record.warnings
+
+
+def test_aps_7bm_zero_route_placeholder_overrides_dataset_shapes(tmp_path):
+	path = tmp_path / "seven-bm-placeholder.h5"
+	with h5py.File(path, "w") as handle:
+		_put(handle, "/exchange/data", np.zeros((1, 4, 5), dtype=np.uint16))
+		_put(handle, "/exchange/data_white", np.zeros((1, 4, 5), dtype=np.uint16))
+		_put(handle, "/exchange/data_dark", np.zeros((1, 4, 5), dtype=np.uint16))
+		_put(handle, "/defaults/HDF5FrameLocation", ("/exchange/data_dark",))
+		_put(handle, "/defaults/NDArrayUniqueId", (10,))
+		_put_epics_times(handle, (100.0,))
+		_put(handle, "/process/acquisition/rotation/num_angles", 1)
+		_put(handle, "/process/acquisition/flat_fields/mode", np.bytes_("Both"))
+		_put(handle, "/process/acquisition/flat_fields/number", 1)
+
+	record, = scan_importers.read_aps_7bm_scans((path,))
+
+	assert record.values["projection_count_acquired"] == 0
+	assert record.values["flat_frame_count"] == 0
+	assert record.values["dark_frame_count"] == 1
+	assert record.values["flat_reference_files"] is None
+	assert record.values["incomplete_frames"] is None
+	assert record.values["acquisition_status"] == "Warnings"
+	assert any("routes 0 frames to /exchange/data but the dataset stores 1" in item for item in record.warnings)
+	assert any("routes 0 frames to /exchange/data_white but the dataset stores 1" in item for item in record.warnings)
+	assert "missing /exchange/theta" in record.warnings
+	assert "configured flat fields expect 1 pre/1 post frames but routes contain 0 pre/0 post" in record.warnings
+
+
+def test_aps_7bm_pre_only_crop_and_configured_timing_fallback(tmp_path):
+	path = tmp_path / "seven-bm-pre-only.h5"
+	with h5py.File(path, "w") as handle:
+		_put(handle, "/exchange/data", np.zeros((2, 4, 5), dtype=np.uint16))
+		_put(handle, "/exchange/theta", (0.0, 1.0))
+		_put(handle, "/exchange/data_white", np.zeros((1, 4, 5), dtype=np.uint16))
+		_put(
+			handle,
+			"/defaults/HDF5FrameLocation",
+			("/exchange/data_white", "/exchange/data", "/exchange/data"),
+		)
+		_put(handle, "/defaults/NDArrayUniqueId", (10, 11, 12))
+		_put(handle, "/process/acquisition/start_date", np.bytes_("June 18, 2026 19:00:00"))
+		_put(handle, "/process/acquisition/end_date", np.bytes_("June 18, 2026 19:01:00"))
+		_put(handle, "/process/acquisition/rotation/start", 0.0)
+		_put(handle, "/process/acquisition/rotation/step", 1.0)
+		_put(handle, "/process/acquisition/rotation/speed", 10.0)
+		_put(handle, "/process/acquisition/rotation/num_angles", 2)
+		_put(handle, "/process/acquisition/pixels_y_per_360_deg", 2.0)
+		_put(handle, "/process/acquisition/flat_fields/mode", np.bytes_("Start"))
+		_put(handle, "/process/acquisition/flat_fields/number", 1)
+		_put(handle, "/measurement/instrument/detector/exposure_time", 0.09)
+		_put(handle, "/measurement/instrument/detector/roi/min_x", 1)
+		_put(handle, "/measurement/instrument/detector/roi/min_y", 2)
+		_put(handle, "/measurement/instrument/detector/roi/size_x", 5)
+		_put(handle, "/measurement/instrument/detector/roi/size_y", 4)
+		_put(handle, "/measurement/instrument/detector/max_size_x", 8)
+		_put(handle, "/measurement/instrument/detector/max_size_y", 8)
+
+	record, = scan_importers.read_aps_7bm_scans((path,))
+	values = record.values
+
+	assert values["flat_frame_count_pre"] == 1
+	assert values["flat_frame_count_post"] == 0
+	assert values["post_reference_files"] is None
+	assert values["crop_enabled"] is True
+	assert values["crop_offset_x_px"] == 1
+	assert values["crop_offset_y_px"] == 2
+	assert values["helical"] is True
+	assert values["fov_count"] is None
+	assert values["scan_start"].isoformat() == "2026-06-19T00:00:00+00:00"
+	assert values["scan_stop"].isoformat() == "2026-06-19T00:01:00+00:00"
+	assert values["scan_duration_s"] == 60.0
+	assert values["trigger_period_us"] == pytest.approx(100_000.0)
+	assert values["trigger_overhead_us"] == pytest.approx(10_000.0)
+	assert "EPICS frame timestamps are missing" in record.warnings
+	assert "process acquisition timestamps are timezone-less; inferred America/Chicago" in record.warnings
+	assert any("trigger period uses configured rotation step/speed" in item for item in record.warnings)
+
+
+def test_aps_7bm_process_time_fallback_preserves_an_existing_bound(tmp_path):
+	path = tmp_path / "seven-bm-process-time.h5"
+	with h5py.File(path, "w") as handle:
+		_put(handle, "/process/acquisition/end_date", np.bytes_("June 18, 2026 19:01:00"))
+		values = scan_importers.empty_scan_values()
+		values["scan_start"] = scan_importers.parse_datetime("2026-06-19T00:00:00Z")
+		warnings = []
+
+		scan_importers._set_process_timing(handle, values, warnings)
+
+	assert values["scan_start"].isoformat() == "2026-06-19T00:00:00+00:00"
+	assert values["scan_stop"].isoformat() == "2026-06-19T00:01:00+00:00"
+	assert values["scan_duration_s"] == 60.0
+	assert warnings == [
+		"process acquisition timestamps are timezone-less; inferred America/Chicago"
 	]
 
 

@@ -110,11 +110,70 @@ SIGRAY_SCAN_MAPPING = {
 
 
 SEVEN_BM_SCAN_MAPPING = {
+	"facility_name": {"locator": "/measurement/instrument/source/name"},
+	"acquisition_system_id": {
+		"locator": "/measurement/instrument/source/beamline"
+	},
+	"project_id": {"locator": "/measurement/sample/experiment/proposal"},
+	"sample_id": {"locator": "/measurement/sample/name"},
+	"acquisition_group": {"locator": "/measurement/sample/file/name"},
+	"operator": {"locator": "/measurement/sample/experimenter/name"},
 	"scan_method": {"locator": "/process/acquisition/scan_type"},
 	"projection_count_planned": {
 		"locator": "/process/acquisition/rotation/num_angles",
 		"source_unit": "count",
 		"canonical_unit": "count",
+	},
+	"rotation_start_deg": {
+		"locator": "/process/acquisition/rotation/start",
+		"source_unit": "deg",
+		"canonical_unit": "deg",
+	},
+	"angular_step_deg": {
+		"locator": "/process/acquisition/rotation/step",
+		"source_unit": "deg",
+		"canonical_unit": "deg",
+	},
+	"helical": {"locator": "/process/acquisition/pixels_y_per_360_deg"},
+	"exposure_us": {
+		"locator": "/measurement/instrument/detector/exposure_time",
+		"source_unit": "s",
+		"canonical_unit": "us",
+		"multiplier": 1_000_000.0,
+	},
+	"flat_exposure_us": {
+		"locator": "/process/acquisition/flat_fields/flat_exposure_time",
+		"source_unit": "s",
+		"canonical_unit": "us",
+		"multiplier": 1_000_000.0,
+	},
+	"binning_x": {"locator": "/measurement/instrument/detector/binning_x"},
+	"binning_y": {"locator": "/measurement/instrument/detector/binning_y"},
+	"detector_gain": {"locator": "/measurement/instrument/detector/gain"},
+	"sample_stage_x_mm": {
+		"locator": "/measurement/instrument/sample_motor_stack/setup/x",
+		"source_unit": "mm",
+		"canonical_unit": "mm",
+	},
+	"sample_stage_y_mm": {
+		"locator": "/measurement/instrument/sample_motor_stack/setup/y",
+		"source_unit": "mm",
+		"canonical_unit": "mm",
+	},
+	"sample_stage_z_mm": {
+		"locator": "/measurement/instrument/sample_motor_stack/setup/z",
+		"source_unit": "mm",
+		"canonical_unit": "mm",
+	},
+	"detector_stage_z_mm": {
+		"locator": "/measurement/instrument/detector_motor_stack/setup/z",
+		"source_unit": "mm",
+		"canonical_unit": "mm",
+	},
+	"sample_detector_distance_mm": {
+		"locator": "/measurement/instrument/sample_motor_stack/detector_distance",
+		"source_unit": "mm",
+		"canonical_unit": "mm",
 	},
 }
 
