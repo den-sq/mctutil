@@ -136,22 +136,32 @@ def _tomocupy_fixture(tmp_path, *, matching_config=True):
 		encoding="utf-8",
 	)
 	config = tmp_path / "recon_params.json"
+	configured_scan = (
+		"/data/scan one.h5" if matching_config else "/data/other.h5"
+	)
 	config.write_text(
 		json.dumps(
 			{
-				"records": [
-					{
-						"file_name": (
-							"/data/scan one.h5" if matching_config else "/data/other.h5"
-						),
-						"bright_ratio": 0.9,
-						"propagation_distance": 42,
-						"flat_linear": True,
-						"cor_method_full": "manual",
-						"start_row": 2,
-						"end_row": 5,
-					}
-				]
+				configured_scan: {
+					"cor_method_full": "manual",
+					"params": {
+						"--bright-ratio": {"value": 0.9, "include": None},
+						"--flat-linear": {"value": "True", "include": None},
+						"--minus-log": {"value": "True", "include": False},
+					},
+					"phase": {
+						"--propagation-distance": {"value": 42, "include": True},
+						"--energy": {"value": 0.0, "include": False},
+					},
+					"data": {
+						"--out-path-name": {"value": "", "include": False},
+						"--verbose": {"value": False, "include": None},
+					},
+					"performance": {
+						"--start-row": {"value": 2, "include": None},
+						"--end-row": {"value": 5, "include": None},
+					},
+				}
 			}
 		),
 		encoding="utf-8",
@@ -182,13 +192,50 @@ def test_tomocupy_uses_exact_join_command_precedence_and_output_metadata(tmp_pat
 	assert values["output_voxel_size_mm"] == pytest.approx(0.004)
 	assert values["rotation_axis_coordinate_px"] == 123.5
 	assert values["rotation_axis_auto_method"] == "manual"
+	assert values["flat_linear"] is True
+	assert values["minus_log_enabled"] is None
 	assert values["projection_range"] == (1, 10)
 	assert values["sinogram_range"] == (2, 5)
 	assert values["output_file_count"] == 2
 	assert values["output_image_shape"] == (4, 5)
 	assert values["output_dtype_observed"] == "float32"
 	assert values["reconstruction_status"] == "completed"
-	assert any("rot_cen.json disagrees" in warning for warning in record.warnings)
+	assert record.warnings == ["rot_cen.json disagrees with effective --rotation-axis"]
+
+
+def test_tomocupy_parses_real_option_wrappers_by_parent_name():
+	warnings = []
+	options = reconstruction_importers._tomocupy_configured_options(
+		{
+			"cor_method_full": "manual",
+			"params": {
+				"--binning": {"value": "0", "include": None},
+				"--start-row": {"value": 0, "include": None},
+				"--flat-linear": {"value": "False", "include": None},
+				"--minus-log": {"value": "True", "include": False},
+			},
+			"rings": {
+				"--fw-filter": {"value": "sym16", "include": True},
+			},
+			"data": {
+				"--out-path-name": {"value": "", "include": None},
+				"--verbose": {"value": False, "include": None},
+			},
+			"unexpected": {
+				"--missing-value": {"include": True, "other": 5},
+			},
+		},
+		warnings,
+	)
+
+	assert options == {
+		"cor-method-full": "manual",
+		"binning": "0",
+		"start-row": 0,
+		"flat-linear": "False",
+		"fw-filter": "sym16",
+	}
+	assert warnings == []
 
 
 def test_tomocupy_does_not_join_a_different_scan_record(tmp_path):
@@ -217,7 +264,7 @@ def test_tomocupy_center_file_precedes_config_only_for_the_exact_scan(tmp_path):
 		encoding="utf-8",
 	)
 	configured = json.loads(config.read_text(encoding="utf-8"))
-	configured["records"][0]["rotation_axis"] = 100.0
+	configured["/data/scan one.h5"]["rotation_axis"] = 100.0
 	config.write_text(json.dumps(configured), encoding="utf-8")
 	center.write_text(json.dumps({"scan one.h5": 124.0, "other.h5": 999.0}), encoding="utf-8")
 

@@ -273,28 +273,63 @@ def _matching_json_records(node, scan_id: str) -> tuple[dict, ...]:
 	return tuple(unique)
 
 
-def _flatten_options(node: dict, warnings: list[str]) -> dict[str, object]:
+def _tomocupy_wrapped_option(key, child) -> tuple[str, object, object] | None:
+	if not isinstance(child, dict) or not str(key).startswith("--"):
+		return None
+	members = {
+		_normal_key(str(member)): item
+		for member, item in child.items()
+	}
+	if "value" not in members:
+		return None
+	return (
+		_normal_key(str(key)).removeprefix("--"),
+		members["value"],
+		members.get("include"),
+	)
+
+
+def _tomocupy_option_is_included(value, include) -> bool:
+	"""Apply TomoCuPy's false/true/automatic option-inclusion state."""
+	if include is False:
+		return False
+	if include is True:
+		return True
+	return value is not None and value is not False and value != ""
+
+
+def _tomocupy_configured_entries(node):
+	if not isinstance(node, dict):
+		return
+	for key, child in node.items():
+		if isinstance(child, dict) and str(key).startswith("--"):
+			wrapped = _tomocupy_wrapped_option(key, child)
+			if wrapped is not None:
+				option, value, include = wrapped
+				if _tomocupy_option_is_included(value, include):
+					yield option, value
+		elif isinstance(child, (dict, list)):
+			items = child if isinstance(child, list) else (child,)
+			for item in items:
+				yield from _tomocupy_configured_entries(item)
+		else:
+			normalized = _normal_key(str(key)).removeprefix("--")
+			if normalized not in {"include", "value"}:
+				yield normalized, child
+
+
+def _tomocupy_configured_options(
+	node: dict,
+	warnings: list[str],
+) -> dict[str, object]:
+	"""Return one normalized option map from a matched TomoCuPy JSON record."""
 	options: dict[str, object] = {}
 	conflicts: set[str] = set()
-
-	def visit(value):
-		if not isinstance(value, dict):
-			return
-		for key, child in value.items():
-			if isinstance(child, dict):
-				visit(child)
-				continue
-			if isinstance(child, list) and child and isinstance(child[0], dict):
-				for item in child:
-					visit(item)
-				continue
-			normalized = _normal_key(str(key))
-			if normalized in options and options[normalized] != child:
-				conflicts.add(normalized)
-			else:
-				options[normalized] = child
-
-	visit(node)
+	for key, value in _tomocupy_configured_entries(node):
+		if key in options and options[key] != value:
+			conflicts.add(key)
+		else:
+			options[key] = value
 	for key in sorted(conflicts):
 		options.pop(key, None)
 		warnings.append(f"configured JSON contains conflicting {key!r} values")
@@ -314,7 +349,7 @@ def _load_matching_config(path: Path | None, scan_id: str, warnings: list[str]) 
 		return {}, None
 	if len(matches) > 1:
 		raise ValueError(f"{path}: multiple JSON records match scan {scan_id!r}")
-	return _flatten_options(matches[0], warnings), path
+	return _tomocupy_configured_options(matches[0], warnings), path
 
 
 def _named_json_numbers(node, accepted_keys: set[str]) -> tuple[float, ...]:
