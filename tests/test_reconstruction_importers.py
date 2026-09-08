@@ -221,6 +221,9 @@ def test_tomocupy_parses_real_option_wrappers_by_parent_name():
 				"--out-path-name": {"value": "", "include": None},
 				"--verbose": {"value": False, "include": None},
 			},
+			"unexpected": {
+				"--missing-value": {"include": True, "other": 5},
+			},
 		},
 		warnings,
 	)

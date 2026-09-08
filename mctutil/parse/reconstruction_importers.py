@@ -302,11 +302,12 @@ def _tomocupy_configured_entries(node):
 	if not isinstance(node, dict):
 		return
 	for key, child in node.items():
-		wrapped = _tomocupy_wrapped_option(key, child)
-		if wrapped is not None:
-			option, value, include = wrapped
-			if _tomocupy_option_is_included(value, include):
-				yield option, value
+		if isinstance(child, dict) and str(key).startswith("--"):
+			wrapped = _tomocupy_wrapped_option(key, child)
+			if wrapped is not None:
+				option, value, include = wrapped
+				if _tomocupy_option_is_included(value, include):
+					yield option, value
 		elif isinstance(child, (dict, list)):
 			items = child if isinstance(child, list) else (child,)
 			for item in items:
