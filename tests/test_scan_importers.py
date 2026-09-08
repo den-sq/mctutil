@@ -95,9 +95,25 @@ def _put_epics_times(handle, times):
 	_put(handle, "/defaults/NDArrayEpicsTSnSec", nanoseconds)
 
 
-@pytest.mark.parametrize("pixel_unit", ("µm", "μm"))
+@pytest.mark.parametrize(
+	("pitch_path", "resolution_path", "pixel_unit"),
+	(
+		(
+			"/measurement/instrument/detector/pixel_size",
+			"/measurement/instrument/detection_system/objective/resolution",
+			"µm",
+		),
+		(
+			"/measurement/instrument/detector/physical_pixel_size",
+			"/measurement/instrument/objective/resolution",
+			"μm",
+		),
+	),
+)
 def test_aps_7bm_populates_real_layout_metadata_from_one_route_authority(
 	tmp_path,
+	pitch_path,
+	resolution_path,
 	pixel_unit,
 ):
 	path = tmp_path / "seven-bm.h5"
@@ -145,13 +161,9 @@ def test_aps_7bm_populates_real_layout_metadata_from_one_route_authority(
 		_put(handle, "/measurement/instrument/sample_motor_stack/setup/z", 3.0)
 		_put(handle, "/measurement/instrument/detector_motor_stack/setup/z", 325.0)
 		_put(handle, "/measurement/instrument/sample_motor_stack/detector_distance", 325.0)
-		pitch = _put(handle, "/measurement/instrument/detector/pixel_size", 6.9)
+		pitch = _put(handle, pitch_path, 6.9)
 		pitch.attrs["units"] = pixel_unit
-		resolution = _put(
-			handle,
-			"/measurement/instrument/detection_system/objective/resolution",
-			2.0,
-		)
+		resolution = _put(handle, resolution_path, 2.0)
 		resolution.attrs["units"] = "um"
 		_put(handle, "/process/acquisition/scan_type", np.bytes_("Single"))
 		_put(handle, "/process/acquisition/rotation/num_angles", 4)
@@ -311,6 +323,24 @@ def test_aps_7bm_pre_only_crop_and_configured_timing_fallback(tmp_path):
 	assert "EPICS frame timestamps are missing" in record.warnings
 	assert "process acquisition timestamps are timezone-less; inferred America/Chicago" in record.warnings
 	assert any("trigger period uses configured rotation step/speed" in item for item in record.warnings)
+
+
+def test_aps_7bm_process_time_fallback_preserves_an_existing_bound(tmp_path):
+	path = tmp_path / "seven-bm-process-time.h5"
+	with h5py.File(path, "w") as handle:
+		_put(handle, "/process/acquisition/end_date", np.bytes_("June 18, 2026 19:01:00"))
+		values = scan_importers.empty_scan_values()
+		values["scan_start"] = scan_importers.parse_datetime("2026-06-19T00:00:00Z")
+		warnings = []
+
+		scan_importers._set_process_timing(handle, values, warnings)
+
+	assert values["scan_start"].isoformat() == "2026-06-19T00:00:00+00:00"
+	assert values["scan_stop"].isoformat() == "2026-06-19T00:01:00+00:00"
+	assert values["scan_duration_s"] == 60.0
+	assert warnings == [
+		"process acquisition timestamps are timezone-less; inferred America/Chicago"
+	]
 
 
 class _Request:

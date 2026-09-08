@@ -596,14 +596,20 @@ def _set_process_timing(
 		warnings.append(
 			"process acquisition timestamps are timezone-less; inferred America/Chicago"
 		)
-	values["scan_start"] = start
-	values["scan_stop"] = stop
-	if start is None or stop is None:
+	if start is not None:
+		values["scan_start"] = start
+	if stop is not None:
+		values["scan_stop"] = stop
+	canonical_start = values["scan_start"]
+	canonical_stop = values["scan_stop"]
+	if not isinstance(canonical_start, datetime) or not isinstance(canonical_stop, datetime):
 		return
-	if stop < start:
+	if canonical_stop < canonical_start:
 		warnings.append("process acquisition end time precedes its start time")
 	else:
-		values["scan_duration_s"] = float((stop - start).total_seconds())
+		values["scan_duration_s"] = float(
+			(canonical_stop - canonical_start).total_seconds()
+		)
 
 
 def _set_configured_trigger_period(
