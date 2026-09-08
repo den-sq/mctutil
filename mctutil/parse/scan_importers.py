@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -44,6 +45,18 @@ _FRAME_LOCATION_PATHS = (
 	"/measurement/defaults/HDF5FrameLocation",
 	"/measurement/instrument/detector/HDF5FrameLocation",
 )
+_EPICS_TIMESTAMP_PATHS = (
+	("/defaults/NDArrayEpicsTSSec", "/defaults/NDArrayEpicsTSnSec"),
+	(
+		"/measurement/defaults/NDArrayEpicsTSSec",
+		"/measurement/defaults/NDArrayEpicsTSnSec",
+	),
+	(
+		"/measurement/instrument/detector/NDArrayEpicsTSSec",
+		"/measurement/instrument/detector/NDArrayEpicsTSnSec",
+	),
+)
+_EPICS_EPOCH = datetime(1990, 1, 1, tzinfo=timezone.utc)
 
 
 def _apply_h5_mapping(handle, mapping, values: dict[str, object | None]) -> None:
@@ -76,21 +89,27 @@ def _set_image_values(data, values: dict[str, object | None]) -> None:
 	values["image_width_px"] = int(data.shape[-1])
 	values["stored_dtype"] = str(data.dtype)
 	values["stored_bit_depth"] = int(data.dtype.itemsize * 8)
+	values["projection_frame_size_mb"] = float(
+		data.shape[-2] * data.shape[-1] * data.dtype.itemsize / 1_000_000
+	)
 
 
 def _valid_angles(
 	handle,
-	projection_count: int,
+	projection_count: int | None,
 	warnings: list[str],
 ) -> np.ndarray:
 	dataset = _dataset(handle, "/exchange/theta")
 	if dataset is None:
 		warnings.append("missing /exchange/theta")
 		return np.asarray([], dtype=float)
+	if projection_count is None:
+		warnings.append("theta could not be aligned without frame locations")
+		return np.asarray([], dtype=float)
 	theta = np.asarray(dataset[()]).reshape(-1).astype(float, copy=False)
 	if theta.size != projection_count:
 		warnings.append(
-			f"theta length {theta.size} does not match stored projection count {projection_count}"
+			f"theta length {theta.size} does not match routed projection count {projection_count}"
 		)
 		theta = theta[:projection_count]
 	return theta[np.isfinite(theta)]
@@ -99,14 +118,16 @@ def _valid_angles(
 def _set_angle_values(theta: np.ndarray, values: dict[str, object | None], warnings: list[str]) -> None:
 	if not theta.size:
 		return
-	values["rotation_start_deg"] = float(theta[0])
+	if values["rotation_start_deg"] is None:
+		values["rotation_start_deg"] = float(theta[0])
 	values["rotation_stop_actual_deg"] = float(theta[-1])
 	values["angular_range_deg"] = float(theta[-1] - theta[0])
 	if theta.size < 2:
 		return
 	differences = np.diff(theta)
 	step = float(np.median(differences))
-	values["angular_step_deg"] = step
+	if values["angular_step_deg"] is None:
+		values["angular_step_deg"] = step
 	if not (np.all(differences > 0) or np.all(differences < 0)):
 		warnings.append("theta is not monotonic")
 
@@ -281,27 +302,128 @@ def _find_frame_location(handle):
 	return matches[0] if len(matches) == 1 else (None, None)
 
 
-def _seven_bm_projection_routes(
-	handle,
-	projection_count: int,
-	warnings: list[str],
-) -> np.ndarray | None:
+def _seven_bm_routes(handle, warnings: list[str]) -> np.ndarray | None:
 	dataset, path = _find_frame_location(handle)
 	if dataset is None:
-		warnings.append("HDF5FrameLocation is missing; detector integrity was not checked")
+		warnings.append("HDF5FrameLocation is missing; acquired frame roles could not be determined")
 		return None
 	routes = np.asarray(
 		["/" + decode_scalar(value).lstrip("/") for value in np.asarray(dataset[()]).reshape(-1)]
 	)
-	projection_routes = routes == "/exchange/data"
-	routed_count = int(np.count_nonzero(projection_routes))
-	if routed_count != projection_count:
+	for dataset_path in (
+		"/exchange/data",
+		"/exchange/data_white",
+		"/exchange/data_dark",
+		"/exchange/data_gains",
+	):
+		target = _dataset(handle, dataset_path)
+		if target is None:
+			continue
+		routed_count = int(np.count_nonzero(routes == dataset_path))
+		stored_count = _reference_count(target)
+		if routed_count != stored_count:
+			warnings.append(
+				f"{path} routes {routed_count} frames to {dataset_path} but the dataset "
+				f"stores {stored_count}"
+			)
+	return routes
+
+
+def _configured_reference_counts(
+	handle,
+	prefix: str,
+) -> tuple[int | None, int | None]:
+	mode_value = _representative_value(handle, f"/process/acquisition/{prefix}_fields/mode")
+	number = parse_int(
+		_representative_value(handle, f"/process/acquisition/{prefix}_fields/number")
+	)
+	if mode_value is None or number is None:
+		return None, None
+	mode = decode_scalar(mode_value).casefold()
+	if mode == "both":
+		return number, number
+	if mode == "start":
+		return number, 0
+	if mode == "end":
+		return 0, number
+	if mode in {"none", "off"}:
+		return 0, 0
+	return None, None
+
+
+def _warn_configured_reference_mismatches(
+	handle,
+	pre_count: int,
+	post_count: int,
+	dark_count: int,
+	warnings: list[str],
+) -> None:
+	expected_pre, expected_post = _configured_reference_counts(handle, "flat")
+	if (
+		expected_pre is not None
+		and expected_post is not None
+		and (pre_count != expected_pre or post_count != expected_post)
+	):
 		warnings.append(
-			f"{path} routes {routed_count} frames to /exchange/data but the dataset "
-			f"stores {projection_count}"
+			f"configured flat fields expect {expected_pre} pre/{expected_post} post frames "
+			f"but routes contain {pre_count} pre/{post_count} post"
 		)
-		return None
-	return projection_routes
+	expected_dark_pre, expected_dark_post = _configured_reference_counts(handle, "dark")
+	if expected_dark_pre is not None and expected_dark_post is not None:
+		expected_dark = expected_dark_pre + expected_dark_post
+		if dark_count != expected_dark:
+			warnings.append(
+				f"configured dark fields expect {expected_dark} frames but routes contain "
+				f"{dark_count}"
+			)
+
+
+def _seven_bm_reference_values(
+	handle,
+	path: Path,
+	routes: np.ndarray | None,
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	if routes is None:
+		return
+	projection_positions = np.flatnonzero(routes == "/exchange/data")
+	white_positions = np.flatnonzero(routes == "/exchange/data_white")
+	dark_count = int(np.count_nonzero(routes == "/exchange/data_dark"))
+	white_count = int(white_positions.size)
+	values["flat_frame_count"] = white_count
+	values["dark_frame_count"] = dark_count
+	if white_count:
+		white_source = (f"{path}:/exchange/data_white",)
+		values["flat_reference_files"] = white_source
+	if dark_count:
+		values["dark_reference_files"] = (f"{path}:/exchange/data_dark",)
+
+	if projection_positions.size:
+		pre_count = int(np.count_nonzero(white_positions < projection_positions[0]))
+		post_count = int(np.count_nonzero(white_positions > projection_positions[-1]))
+		values["flat_frame_count_pre"] = pre_count
+		values["flat_frame_count_post"] = post_count
+		if post_count:
+			values["post_reference_files"] = (f"{path}:/exchange/data_white",)
+		unclassified = white_count - pre_count - post_count
+		if unclassified:
+			warnings.append(
+				f"{unclassified} routed flat frames occur between projection frames"
+			)
+	else:
+		pre_count = post_count = 0
+		values["flat_frame_count_pre"] = pre_count
+		values["flat_frame_count_post"] = post_count
+		if white_count:
+			warnings.append("routed flat frames could not be classified without projections")
+	_warn_configured_reference_mismatches(
+		handle,
+		pre_count,
+		post_count,
+		dark_count,
+		warnings,
+	)
 
 
 def _dataset_unit(dataset) -> str | None:
@@ -332,13 +454,226 @@ def _length_mm(handle, paths: tuple[str, ...], label: str, warnings: list[str]) 
 	return None
 
 
-def _seven_bm_integrity(
+def _seven_bm_notes(handle) -> str | None:
+	parts = []
+	for index in range(1, 4):
+		value = _representative_value(handle, f"/measurement/sample/description_{index}")
+		if value is None:
+			continue
+		text = decode_scalar(value)
+		if text and text.casefold() not in {"none", "null", "nan"}:
+			parts.append(text)
+	return "; ".join(parts) or None
+
+
+def _seven_bm_roi(
 	handle,
-	projection_routes: np.ndarray | None,
+	data,
 	values: dict[str, object | None],
 	warnings: list[str],
 ) -> None:
-	if projection_routes is None:
+	paths = {
+		"offset_x": "/measurement/instrument/detector/roi/min_x",
+		"offset_y": "/measurement/instrument/detector/roi/min_y",
+		"size_x": "/measurement/instrument/detector/roi/size_x",
+		"size_y": "/measurement/instrument/detector/roi/size_y",
+		"max_x": "/measurement/instrument/detector/max_size_x",
+		"max_y": "/measurement/instrument/detector/max_size_y",
+	}
+	roi = {
+		name: parse_int(_representative_value(handle, locator))
+		for name, locator in paths.items()
+	}
+	values["crop_offset_x_px"] = roi["offset_x"]
+	values["crop_offset_y_px"] = roi["offset_y"]
+	if all(value is not None for value in roi.values()):
+		values["crop_enabled"] = bool(
+			roi["offset_x"] != 0
+			or roi["offset_y"] != 0
+			or roi["size_x"] != roi["max_x"]
+			or roi["size_y"] != roi["max_y"]
+		)
+	if roi["size_x"] is not None and roi["size_x"] != int(data.shape[-1]):
+		warnings.append(
+			f"detector ROI width {roi['size_x']} does not match stored image width "
+			f"{data.shape[-1]}"
+		)
+	if roi["size_y"] is not None and roi["size_y"] != int(data.shape[-2]):
+		warnings.append(
+			f"detector ROI height {roi['size_y']} does not match stored image height "
+			f"{data.shape[-2]}"
+		)
+
+
+def _seven_bm_epics_times(
+	handle,
+	routes: np.ndarray | None,
+	warnings: list[str],
+) -> np.ndarray | None:
+	seconds_dataset = nanoseconds_dataset = None
+	seconds_path = nanoseconds_path = None
+	for candidate_seconds, candidate_nanoseconds in _EPICS_TIMESTAMP_PATHS:
+		candidate_seconds_dataset = _dataset(handle, candidate_seconds)
+		candidate_nanoseconds_dataset = _dataset(handle, candidate_nanoseconds)
+		if candidate_seconds_dataset is not None or candidate_nanoseconds_dataset is not None:
+			seconds_dataset = candidate_seconds_dataset
+			nanoseconds_dataset = candidate_nanoseconds_dataset
+			seconds_path = candidate_seconds
+			nanoseconds_path = candidate_nanoseconds
+			break
+	if seconds_dataset is None and nanoseconds_dataset is None:
+		warnings.append("EPICS frame timestamps are missing")
+		return None
+	if seconds_dataset is None or nanoseconds_dataset is None:
+		warnings.append(
+			f"EPICS frame timestamps require both {seconds_path} and {nanoseconds_path}"
+		)
+		return None
+	if routes is None:
+		warnings.append("EPICS frame timestamps could not be aligned without frame locations")
+		return None
+	seconds = np.asarray(seconds_dataset[()]).reshape(-1).astype(float, copy=False)
+	nanoseconds = np.asarray(nanoseconds_dataset[()]).reshape(-1).astype(float, copy=False)
+	if seconds.size != routes.size or nanoseconds.size != routes.size:
+		warnings.append(
+			"EPICS frame timestamp lengths do not match frame locations "
+			f"({seconds.size} seconds, {nanoseconds.size} nanoseconds, {routes.size} routes)"
+		)
+		return None
+	if (
+		not np.all(np.isfinite(seconds))
+		or not np.all(np.isfinite(nanoseconds))
+		or np.any(nanoseconds < 0)
+		or np.any(nanoseconds >= 1_000_000_000)
+	):
+		warnings.append("EPICS frame timestamps contain invalid values")
+		return None
+	return seconds + nanoseconds * 1e-9
+
+
+def _seven_bm_process_time(handle, path: str) -> datetime | None:
+	value = _representative_value(handle, path)
+	if value is None:
+		return None
+	try:
+		local = datetime.strptime(decode_scalar(value), "%B %d, %Y %H:%M:%S")
+	except ValueError:
+		return None
+	return local.replace(tzinfo=ZoneInfo("America/Chicago")).astimezone(timezone.utc)
+
+
+def _set_epics_timing(
+	times: np.ndarray,
+	routes: np.ndarray,
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	if times[-1] < times[0]:
+		warnings.append("EPICS acquisition timestamps run backward")
+	else:
+		values["scan_start"] = _EPICS_EPOCH + timedelta(seconds=float(times[0]))
+		values["scan_stop"] = _EPICS_EPOCH + timedelta(seconds=float(times[-1]))
+		values["scan_duration_s"] = float(times[-1] - times[0])
+	projection_times = times[routes == "/exchange/data"]
+	if projection_times.size < 2:
+		return
+	differences = np.diff(projection_times)
+	positive = differences[differences > 0]
+	if positive.size != differences.size:
+		warnings.append("routed projection timestamps repeat or run backward")
+	if positive.size:
+		values["trigger_period_us"] = float(np.median(positive) * 1_000_000)
+
+
+def _set_process_timing(
+	handle,
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	start = _seven_bm_process_time(handle, "/process/acquisition/start_date")
+	stop = _seven_bm_process_time(handle, "/process/acquisition/end_date")
+	if start is not None or stop is not None:
+		warnings.append(
+			"process acquisition timestamps are timezone-less; inferred America/Chicago"
+		)
+	values["scan_start"] = start
+	values["scan_stop"] = stop
+	if start is None or stop is None:
+		return
+	if stop < start:
+		warnings.append("process acquisition end time precedes its start time")
+	else:
+		values["scan_duration_s"] = float((stop - start).total_seconds())
+
+
+def _set_configured_trigger_period(
+	handle,
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	step = parse_float(
+		_representative_value(handle, "/process/acquisition/rotation/step")
+	)
+	speed = parse_float(
+		_representative_value(handle, "/process/acquisition/rotation/speed")
+	)
+	if step is not None and speed not in {None, 0.0}:
+		values["trigger_period_us"] = abs(step / speed) * 1_000_000
+		warnings.append(
+			"trigger period uses configured rotation step/speed because aligned routed "
+			"projection timestamps were unavailable"
+		)
+
+
+def _set_trigger_overhead(
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	exposure = values["exposure_us"]
+	period = values["trigger_period_us"]
+	if type(exposure) is not float or type(period) is not float:
+		return
+	if period >= exposure:
+		values["trigger_overhead_us"] = period - exposure
+	else:
+		warnings.append("trigger period is shorter than projection exposure")
+
+
+def _seven_bm_timing(
+	handle,
+	routes: np.ndarray | None,
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	times = _seven_bm_epics_times(handle, routes, warnings)
+	if times is not None and times.size and routes is not None:
+		_set_epics_timing(times, routes, values, warnings)
+
+	if values["scan_start"] is None or values["scan_stop"] is None:
+		_set_process_timing(handle, values, warnings)
+
+	if values["trigger_period_us"] is None:
+		_set_configured_trigger_period(handle, values, warnings)
+	_set_trigger_overhead(values, warnings)
+
+
+def _seven_bm_configured_values(values: dict[str, object | None]) -> None:
+	start = values["rotation_start_deg"]
+	step = values["angular_step_deg"]
+	planned = values["projection_count_planned"]
+	if type(start) is float and type(step) is float and type(planned) is int:
+		values["rotation_stop_planned_deg"] = start + step * max(0, planned - 1)
+	if isinstance(values["scan_method"], str) and values["scan_method"].casefold() == "single":
+		values["fov_count"] = 1
+
+
+def _seven_bm_integrity(
+	handle,
+	routes: np.ndarray | None,
+	values: dict[str, object | None],
+	warnings: list[str],
+) -> None:
+	if routes is None:
 		return
 	for path in (
 		"/defaults/NDArrayUniqueId",
@@ -349,17 +684,24 @@ def _seven_bm_integrity(
 		if dataset is None:
 			continue
 		identifiers = np.asarray(dataset[()]).reshape(-1)
-		if identifiers.size != projection_routes.size:
+		if identifiers.size != routes.size:
 			warnings.append("detector unique-ID length does not match frame locations")
 			return
+		projection_routes = routes == "/exchange/data"
 		positions = np.flatnonzero(projection_routes)
 		projection_ids = identifiers[projection_routes].astype(np.int64, copy=False)
 		id_steps = np.diff(projection_ids)
 		route_steps = np.diff(positions)
 		values["dropped_frames"] = int(np.sum(np.maximum(id_steps - route_steps, 0)))
+		if values["dropped_frames"]:
+			warnings.append(
+				f"detector unique IDs indicate {values['dropped_frames']} dropped projection "
+				"frame(s)"
+			)
 		if np.any(id_steps <= 0):
 			warnings.append("detector unique IDs repeat or run backward")
 		return
+	warnings.append("NDArrayUniqueId is missing; detector integrity was not checked")
 
 
 def _aps_7bm_record(path: Path) -> ScanRecord:
@@ -371,22 +713,28 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 		if data is None or len(data.shape) != 3:
 			raise ValueError(f"{path}: missing three-dimensional /exchange/data")
 		_apply_h5_mapping(handle, SEVEN_BM_SCAN_MAPPING, values)
-		projection_count = int(data.shape[0])
-		projection_routes = _seven_bm_projection_routes(handle, projection_count, warnings)
+		routes = _seven_bm_routes(handle, warnings)
+		projection_count = (
+			int(np.count_nonzero(routes == "/exchange/data")) if routes is not None else None
+		)
 		values.update(
 			{
-				"facility_name": "APS 7-BM",
-				"acquisition_system_id": "APS 7-BM",
+				"facility_name": values["facility_name"] or "Advanced Photon Source",
+				"acquisition_system_id": values["acquisition_system_id"] or "7-BM",
 				"scan_id": path.stem,
 				"projection_data_file": str(path),
 				"source_metadata_file": str(path),
 				"projection_count_acquired": projection_count,
+				"notes": _seven_bm_notes(handle),
 			}
 		)
 		_set_image_values(data, values)
 		theta = _valid_angles(handle, projection_count, warnings)
 		_set_angle_values(theta, values, warnings)
-		_set_reference_values(handle, path, values)
+		_seven_bm_reference_values(handle, path, routes, values, warnings)
+		_seven_bm_roi(handle, data, values, warnings)
+		_seven_bm_timing(handle, routes, values, warnings)
+		_seven_bm_configured_values(values)
 		values["detector_pixel_pitch_mm"] = _length_mm(
 			handle,
 			(
@@ -399,6 +747,7 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 		values["effective_pixel_size_mm"] = _length_mm(
 			handle,
 			(
+				"/measurement/instrument/detection_system/objective/resolution",
 				"/measurement/instrument/objective/resolution",
 				"/measurement/instrument/detector/resolution",
 				"/measurement/instrument/detector/actual_pixel_size",
@@ -406,7 +755,13 @@ def _aps_7bm_record(path: Path) -> ScanRecord:
 			"sample-plane resolution",
 			warnings,
 		)
-		_seven_bm_integrity(handle, projection_routes, values, warnings)
+		_seven_bm_integrity(handle, routes, values, warnings)
+		planned = values["projection_count_planned"]
+		if type(planned) is int and type(projection_count) is int and planned != projection_count:
+			warnings.append(
+				f"planned projection count {planned} does not match routed acquisition count "
+				f"{projection_count}"
+			)
 	values["scan_file_size_gb"] = float(path.stat().st_size / 1e9)
 	_finish_scan(values, warnings)
 	return ScanRecord("aps-7bm", (str(path),), values, warnings)
