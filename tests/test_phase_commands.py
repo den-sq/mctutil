@@ -21,7 +21,7 @@ import sys
 from click.testing import CliRunner
 from mctutil.cli import main
 
-commands = ("harvest", "estimate-line-slope", "refine", "make-material-table")
+commands = ("harvest", "estimate-line-slope", "refine", "make-material-table", "export")
 result = CliRunner().invoke(main, ["phase", "--help"])
 assert result.exit_code == 0, result.output
 for command in commands:
@@ -38,37 +38,6 @@ for module in ("scipy", "xraylib", "mctutil.phase.phase_tomo", "mctutil.phase.ma
 	], capture_output=True, text=True)
 	assert check.returncode == 0, check.stdout + check.stderr
 	assert not output.exists()
-
-
-@pytest.fixture
-def phase_scan(tmp_path):
-	pytest.importorskip("scipy")
-	from mctutil.phase.phase_tomo import _fresnel_ops, forward_project, retrieve_phase, wavelength_m
-
-	# Exact Fresnel propagation of a circular, homogeneous object supplies real
-	# numerical inputs to the CLI without importing a plotting validation script.
-	nx, ny = 96, 4
-	pixel, energy, slope = 0.5e-6, 20.0, 2e-9
-	distances = [0.005, 0.012, 0.02]
-	angles = np.linspace(0, 180, 24, endpoint=False)
-	y, x = np.mgrid[:nx, :nx]
-	mu = 100.0 * ((x - nx / 2 + 0.5) ** 2 + (y - nx / 2 + 0.5) ** 2 < 25 ** 2)
-	B = np.broadcast_to(forward_project(mu, angles, pixel)[:, None, :], (len(angles), ny, nx)).copy()
-	phi = -(2 * np.pi / wavelength_m(energy)) * slope * B
-	fy = np.fft.fftfreq(ny, pixel)[:, None]
-	fx = np.fft.fftfreq(nx, pixel)[None, :]
-	propagators = [np.exp(-1j * np.pi * wavelength_m(energy) * z * (fx ** 2 + fy ** 2)) for z in distances]
-	_, waves = _fresnel_ops(B, phi, propagators)
-	projections = np.array([np.abs(wave) ** 2 for wave in waves])
-	initial = retrieve_phase(projections, energy, pixel, distances, method="ctf", slope=slope, pad=False)
-	data = tmp_path / "scan"
-	data.mkdir()
-	for name, array in {"projections": projections, "angles": angles, "B": initial["B"], "phi": initial["phi"]}.items():
-		np.save(data / f"{name}.npy", array)
-	return data, {
-		"projections": "projections.npy", "energy_kev": energy, "pixel_m": pixel,
-		"distances_m": distances, "pad": False,
-	}, slope, initial["B"].shape
 
 
 def test_phase_scan_commands_execute_and_preserve_provenance(phase_scan, tmp_path, monkeypatch):

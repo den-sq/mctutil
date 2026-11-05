@@ -37,13 +37,19 @@ def _numpy_json(value):
 	raise TypeError(f"cannot serialize {type(value).__name__} as phase result JSON")
 
 
+def json_text(value) -> str:
+	"""Serialize a phase record or export through the same NumPy boundary."""
+
+	return json.dumps(value, default=_numpy_json, allow_nan=False, indent=2) + "\n"
+
+
 def result_json(producer: str, parameters: dict, config_path: Path, result) -> str:
 	"""Serialize one result before opening its output, retaining input provenance."""
 
-	return json.dumps({
+	return json_text({
 		"schema_version": 1,
 		"producer": producer,
 		"parameters": parameters,
 		"config_path": str(config_path.resolve()),
 		"result": result,
-	}, default=_numpy_json, allow_nan=False, indent=2) + "\n"
+	})

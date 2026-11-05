@@ -197,6 +197,16 @@ Refinement writes an NPZ containing `B`, `phi`, `residuals` and scalar JSON
 `metadata` with the same provenance envelope. These are computation records;
 the experimental and prior-dependence qualifications above still apply.
 
+Use `mctutil phase export export.json pipeline.json` to turn a harvest or
+composition record into the versioned [calibration-to-pipeline contract](EXPORT.md).
+It carries one target table, its material-line fit and native geometry, and
+retains uncertainty at the calibration energy. Energy transfer does not
+propagate that uncertainty. Harvested exports remain experimental pending
+[#198](https://github.com/den-sq/mctutil/issues/198): the photon-statistics,
+detector-blur and registration-error campaign, and real data checked against an
+independently calibrated reference material. Import and export functionality
+complete neither scientific gate.
+
 Source: user-supplied `phase_tomo_package.zip`, SHA-256
 `a990e033adcfeca4bbd51eeeddbc43c3a860c36ae6f65e38a084e970ff3b8b94`.
 The numerical module has an identical Python AST to the archive source after
