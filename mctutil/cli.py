@@ -9,6 +9,7 @@ from mctutil.mem import main as mem_group
 from mctutil.mesh import main as mesh_group
 from mctutil.ng import main as ng_group
 from mctutil.parse import main as parse_group
+from mctutil.phase import main as phase_group
 from mctutil.serve import main as serve_group
 from mctutil.shared.log import log, LOG_MASK_QUIET, LOG_MASK_DEFAULT, LOG_MASK_VERBOSE, LOG_MASK_ALL
 from mctutil.sino import main as sino_group
@@ -58,4 +59,5 @@ main.add_command(mesh_group, "mesh")
 main.add_command(transport_group, "transport")
 main.add_command(mem_group, "mem")
 main.add_command(parse_group, "parse")
+main.add_command(phase_group, "phase")
 main.add_command(hpc_group, "hpc")
