@@ -10,7 +10,7 @@ from mctutil.cli import main
 def test_mctutil_root_help_lists_category_groups():
 	result = CliRunner().invoke(main, ["--help"])
 	assert result.exit_code == 0, result.output
-	for name in ["transform", "sino", "als832", "flats", "ng", "mesh", "transport", "mem", "parse", "hpc"]:
+	for name in ["transform", "sino", "als832", "flats", "ng", "mesh", "transport", "mem", "parse", "phase", "hpc"]:
 		assert name in result.output
 
 

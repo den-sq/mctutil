@@ -9,6 +9,7 @@ from types import ModuleType
 
 
 EXTRA_MODULES: dict[str, tuple[str, ...]] = {
+	"phase": ("scipy", "xraylib"),
 	"google-sheets": (
 		"google.auth.exceptions",
 		"google.auth.transport.requests",

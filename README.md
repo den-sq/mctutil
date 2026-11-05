@@ -34,7 +34,7 @@ Notes:
   not published on conda-forge today: `cloud-volume`, `dicom2jpg`,
   `igneous-pipeline`, `neuroglancer-scripts`, and `task-queue`.
 - Optional-dependency extras are declared for the heavy, orthogonal stacks:
-  `[als832]`, `[flats]`, `[ng]`, `[serve]`, `[sino]`, `[mesh]`, `[aws]`, and
+  `[als832]`, `[flats]`, `[phase]`, `[ng]`, `[serve]`, `[sino]`, `[mesh]`, `[aws]`, and
   `[dragonfly]`, so e.g. `python -m pip install -e .[mesh]` pulls only the
   mesh dependencies. The extras are complementary to `environment.yml`, not
   a replacement: conda-only packages stay in the conda env (`tomopy` for the
@@ -60,6 +60,7 @@ mctutil transform trim --help
 mctutil transform normalize --help
 mctutil transform pipeline --help
 mctutil sino convert --help
+mctutil phase --help
 mctutil ng point-add --help
 mctutil serve ng --help
 mctutil mesh build --help
@@ -110,6 +111,9 @@ Each category has its own README with the full command breakdown; run
   hdf-convert / h5-convert / raw-convert, stack-split, …)
 - [`sino`](mctutil/sino/README.md) — sinogram conversion
   (`sino convert --mode full|preproc`)
+- [`phase`](mctutil/phase/README.md) — phase retrieval and material calibration
+  (`harvest`, `estimate-line-slope`, `refine`, `make-material-table`);
+  harvested tables remain experimental pending the noise/blur and real-reference campaign.
 - [`ng`](mctutil/ng/README.md) — Neuroglancer JSON, layer, and annotation
   helpers, plus `ng build`
 - [`serve`](mctutil/serve/README.md) — local data and visualization servers
