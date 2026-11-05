@@ -11,5 +11,6 @@ main = LazyGroup(
 		"estimate-line-slope": "mctutil.phase.commands:estimate_line_slope",
 		"refine": "mctutil.phase.commands:refine",
 		"make-material-table": "mctutil.phase.commands:make_material_table",
+		"export": "mctutil.phase.export:export",
 	},
 )

@@ -112,7 +112,7 @@ Each category has its own README with the full command breakdown; run
 - [`sino`](mctutil/sino/README.md) — sinogram conversion
   (`sino convert --mode full|preproc`)
 - [`phase`](mctutil/phase/README.md) — phase retrieval and material calibration
-  (`harvest`, `estimate-line-slope`, `refine`, `make-material-table`);
+  (`harvest`, `estimate-line-slope`, `refine`, `make-material-table`, `export`);
   harvested tables remain experimental pending the noise/blur and real-reference campaign.
 - [`ng`](mctutil/ng/README.md) — Neuroglancer JSON, layer, and annotation
   helpers, plus `ng build`
