@@ -65,6 +65,9 @@ mesh = [
   "cloud-volume>=12.13,<13",
   "igneous-pipeline>=4.36,<5",
   "task-queue>=2.14,<3",
+  # igneous reaches zfpy through cloud-volume[all_codecs]; numcodecs
+  # cannot import alongside 1.0.1.post0 (zarr-developers/numcodecs#892).
+  "zfpy>=1.0.0,<2,!=1.0.1.post0",
 ]
 aws = [
   "cloud-volume>=12.13,<13",
