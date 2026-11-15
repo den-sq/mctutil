@@ -24,6 +24,7 @@ MODULE_DISTRIBUTIONS = {
 	"skimage": "scikit-image",
 	"taskqueue": "task-queue",
 	"tifffile": "tifffile",
+	"xraylib": "xraylib",
 	"zarr": "zarr",
 }
 

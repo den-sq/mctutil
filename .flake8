@@ -3,3 +3,14 @@
 ignore = E123,E124,E126,E127,E128,E223,W191,W503
 max-line-length = 120
 max-complexity = 10
+
+# Keep the supplied phase reference algorithms and validation expressions as built.
+# New phase adapters retain the normal lint policy.
+per-file-ignores =
+    mctutil/phase/phase_tomo.py: C901,E226,E231,E302,E306,E701,E702,E741
+    mctutil/phase/materials.py: E226,E302,E305,E401
+    tests/phase/test_phase_tomo_unit.py: E226,E302,E702,E731,E741
+    tests/phase/validate_gn.py: E226,E231,E302,E702,E704,E731
+    tests/phase/validate_multimat_single.py: E226,E401,E702,E731,F401,F841
+    tests/phase/validate_phase_tomo.py: E225,E226,E231,E401,E702,E731,F841
+    examples/phase/harvest_table_demo.py: E226,E302,E702,E731
