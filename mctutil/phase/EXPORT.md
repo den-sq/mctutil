@@ -25,11 +25,18 @@ inputs only; magnification, effective distance and effective pixel size are
 derived by the consumer's Fresnel geometry facility.
 
 Optional `transfer_basis` is a two-element list of `[formula, density_g_cm3]`
-pairs, defaulting to `[["H2O", 1.0], ["Al", 2.7]]`. It applies only when the
-requested energy differs from calibration energy. The existing `transfer_table`
-owns transfer calculations and diagnostics. The existing `fit_material_line`
-then fits the target points with the producer's original weights and
-through-origin policy. At unchanged energy, the producer's fit is retained.
+pairs, defaulting to `[["H2O", 1.0], ["Al", 2.7]]`. It applies only to harvested
+tables when the requested energy differs from calibration energy. The existing
+`transfer_table` owns those transfer calculations and diagnostics. The existing
+`fit_material_line` then fits the target points with the harvest's original
+weights and through-origin policy.
+
+For composition tables at a changed energy, the existing `build_table`
+recomputes the target coefficients and fit from the stored formulas and
+densities using xraylib, preserving material order, weights, and the original
+through-origin policy. This is a direct evaluation at the target energy,
+including absorption edges; no two-basis transfer is applied. At unchanged
+energy, either producer's points and fit are retained.
 
 `envelope_m` is null, a scalar, or nested JSON arrays describing total spatial
 thickness T in metres, broadcastable to the eventual projection shape. This is
@@ -58,10 +65,10 @@ load additional arrays.
 | `calibration.provenance` | Harvest provenance, including resolved distances in metres, rows, air referencing and slope source/info; null for composition tables. |
 | `calibration.observations` | Available `fractions`, `air_point`, `slope_used` and `collinearity_residual` from the harvest. |
 | `calibration.uncertainty` | The source-energy budget below; never silently transported to target energy. |
-| `transfer` | Null at unchanged energy; otherwise basis plus the reference function's `weights`, `basis_condition`, `extreme_weights`. |
+| `transfer` | Basis plus the reference function's `weights`, `basis_condition`, `extreme_weights` for harvested energy transfers; null for composition tables or unchanged energy. |
 | `status` | Harvested tables remain `experimental`; composition tables are `model_derived`. |
 | `provenance` | Explicit origins of calibration μ/δ, target points, line fit and ε, as described below. |
-| `target_uncertainty` | `see_calibration_budget` at unchanged energy; `not_propagated` after transfer. |
+| `target_uncertainty` | `see_calibration_budget` at unchanged energy; `not_propagated` whenever energy changes, including composition recomputation. |
 
 There is exactly one operative material table and fit. The source main μ/δ
 arrays, source fit, and derived plateau artifact budget are not copied into
@@ -110,9 +117,10 @@ in metres, dimensionless residuals and explained fraction, and integer counts.
   the exported calibration.
 
 Null means unavailable or not requested, never zero uncertainty. Composition
-tables have no quantified uncertainty from the supplied producer. Transfer
-does not propagate any of these quantities: source fold samples, covariances
-and sensitivity remain at source energy even if target coefficients change.
+tables have no quantified uncertainty from the supplied producer. Neither
+transfer nor composition recomputation propagates these quantities: source
+fold samples, covariances and sensitivity remain at source energy even if
+target coefficients change.
 
 The `provenance` fields are explicit labels. `calibration_mu` is
 `measured_absorption` for harvest, while `calibration_delta` is
@@ -121,7 +129,9 @@ The `provenance` fields are explicit labels. `calibration_mu` is
 `calibration_mu_bias` is `fbp_discretization_bias_not_removed` for harvest
 and `not_applicable` for composition tables; no numerical bias estimate is
 invented.
-`target_points` is `calibration_points` or `energy_transfer_model`;
+`target_points` is `calibration_points` at unchanged energy,
+`energy_transfer_model` for harvested energy transfers, or
+`recomputed_from_composition` for composition tables rebuilt at a new energy;
 `line_fit` is `derived_from_target_points`; and `eps` is
 `prior_informed_not_independently_measured` for harvest or
 `derived_from_model_points` for composition tables. A small harvested fit
@@ -131,10 +141,12 @@ mid-frequency statistic where available.
 Harvest exports remain experimental pending mctutil #198's noise/reference
 validation gates. The Gauss–Newton-to-multimaterial composition remains
 unvalidated; this writer accepts neither refinement records nor claims of
-validation. Energy transfer assumes no constituent or basis absorption edge
-between energies and representability in the two chosen basis materials.
-The returned condition and extreme-weight flag are diagnostics, not proof of
-those assumptions. No new scientific certification is added by exporting.
+validation. Harvested energy transfer assumes no constituent or basis absorption
+edge between energies and representability in the two chosen basis materials.
+Consumers should reject or flag a harvested transfer when
+`transfer.extreme_weights` is true. The returned condition and extreme-weight
+flag are diagnostics, not proof of those assumptions. No new scientific
+certification is added by exporting.
 Harvest inputs must retain their provenance, prior flag and uncertainty fields;
 bare coefficient arrays cannot be turned into a labeled calibration by this
 writer. Explicit null uncertainty estimates remain acceptable.

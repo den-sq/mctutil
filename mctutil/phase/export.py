@@ -66,20 +66,26 @@ def _target_table(producer, parameters, result, mu, delta, source_energy, target
 	fit = result["line_fit" if producer == "harvest_material_table" else "fit"]
 	if np.asarray(fit["eps"]).shape != mu.shape:
 		raise ValueError("calibration line-fit eps must match the material table length")
-	transfer = None
-	if target_energy != source_energy:
-		require(("scipy", "xraylib"), "phase", purpose="Phase material energy transfer")
-		from mctutil.phase.phase_tomo import fit_material_line, transfer_table
-
-		mu, delta, info = transfer_table(mu, delta, source_energy, target_energy, basis=basis)
-		fit = fit_material_line(
-			mu, delta, weights=parameters.get("weights"),
-			through_origin=True if producer == "harvest_material_table" else parameters.get("through_origin", True),
-		)
-		transfer = {"basis": basis, **info}
 	names = result.get("names")
 	if names is not None and len(names) != len(mu):
 		raise ValueError("calibration names must match the material table length")
+	transfer = None
+	if target_energy != source_energy:
+		require(("scipy", "xraylib"), "phase", purpose="Phase material energy transfer")
+		if producer == "build_table":
+			from mctutil.phase.materials import build_table
+
+			rebuilt = build_table(
+				parameters["materials"], target_energy, weights=parameters.get("weights"),
+				through_origin=parameters.get("through_origin", True),
+			)
+			names, mu, delta, fit = rebuilt["names"], rebuilt["mu"], rebuilt["delta"], rebuilt["fit"]
+		else:
+			from mctutil.phase.phase_tomo import fit_material_line, transfer_table
+
+			mu, delta, info = transfer_table(mu, delta, source_energy, target_energy, basis=basis)
+			fit = fit_material_line(mu, delta, weights=parameters.get("weights"), through_origin=True)
+			transfer = {"basis": basis, **info}
 	return {"names": names, "mu": mu, "delta": delta, "line_fit": fit}, transfer
 
 
@@ -121,6 +127,10 @@ def material_table_export(record, *, effective_energy_kev, geometry, envelope_m=
 		raise ValueError("nonzero material-line alpha requires envelope_m (spatial thickness in metres)")
 	envelope = None if envelope_m is None else np.asarray(envelope_m, float)
 	harvested = producer == "harvest_material_table"
+	energy_changed = target_energy != source_energy
+	target_points = "calibration_points"
+	if energy_changed:
+		target_points = "energy_transfer_model" if harvested else "recomputed_from_composition"
 	return {
 		"schema": "mctutil.phase.material_table",
 		"schema_version": 1,
@@ -135,11 +145,11 @@ def material_table_export(record, *, effective_energy_kev, geometry, envelope_m=
 			"calibration_mu": "measured_absorption" if harvested else "xraylib_from_supplied_composition_density",
 			"calibration_mu_bias": "fbp_discretization_bias_not_removed" if harvested else "not_applicable",
 			"calibration_delta": "slope_prior_informed" if harvested else "xraylib_from_supplied_composition_density",
-			"target_points": "energy_transfer_model" if transfer else "calibration_points",
+			"target_points": target_points,
 			"line_fit": "derived_from_target_points",
 			"eps": "prior_informed_not_independently_measured" if harvested else "derived_from_model_points",
 		},
-		"target_uncertainty": "not_propagated" if transfer else "see_calibration_budget",
+		"target_uncertainty": "not_propagated" if energy_changed else "see_calibration_budget",
 	}
 
 
