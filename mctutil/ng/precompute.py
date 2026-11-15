@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import CancelledError, ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
-from multiprocessing import shared_memory
+from multiprocessing import get_context, shared_memory
 from pathlib import Path
 import re
 import sys
@@ -397,7 +397,9 @@ def _execute_slices(  # noqa: C901
 
 	pool_options = {}
 	if sys.version_info >= (3, 11):
-		pool_options["max_tasks_per_child"] = 500
+		# Preserve the start method formerly selected by max_tasks_per_child.
+		# Keep workers alive until shutdown: recycling can hang long writes (#210).
+		pool_options["mp_context"] = get_context("spawn")
 
 	shared_source = input_spec.mode == "memmap"
 	staging_memory = None
