@@ -32,8 +32,9 @@ Run `mctutil transform --help` to list commands and
 - **`stack-split`** — Split a multi-page TIFF stack into one TIFF per Z slice.
 - **`squeeze`** — Remove all length-one axes from each TIFF in a directory,
   in place: `mctutil transform squeeze /path/to/tiffs` turns `(500, 500, 1)`
-  into `(500, 500)`. Preserves pixel values, dtype, and filenames; rewrites
-  uncompressed without retaining original TIFF metadata. Includes `.tif`
+  into `(500, 500)`. Preserves the first image series' pixel values and dtype,
+  and the filename; rewrites uncompressed without retaining additional series
+  or original TIFF metadata. Includes `.tif`
   and `.tiff` (case-insensitive), without descending into subdirectories.
   Add `--dry-run` to preview the rewrites.
 - **`stitch`** — Stitch samples vertically, scanning for overlap.

@@ -19,9 +19,10 @@ from mctutil.shared.stack_apply import (
 def squeeze(directory: Path, dry_run: bool):
 	"""Remove every length-one axis from each TIFF in DIRECTORY, in place.
 
-	For example, (500, 500, 1) becomes (500, 500). Pixel values and dtype
-	are preserved. Files are rewritten uncompressed using the standard TIFF
-	writer; original TIFF metadata is not retained. Subdirectories are ignored.
+	For example, (500, 500, 1) becomes (500, 500). Uses the first image series
+	in each file, preserving its pixel values and dtype. Files are rewritten
+	uncompressed; additional series and original TIFF metadata are not retained.
+	Subdirectories are ignored.
 	"""
 	log.start()
 	try:
