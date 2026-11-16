@@ -23,6 +23,7 @@ main = LazyGroup(
 		"reslice": "mctutil.transform.reslice:reslice",
 		"denoise": "mctutil.transform.simple_noise:simple_denoise",
 		"stack-split": "mctutil.transform.stack_split:stack_split",
+		"squeeze": "mctutil.transform.squeeze:squeeze",
 		"stitch": "mctutil.transform.stitch:stitch",
 		"stitch-reconstructions": (
 			"mctutil.transform.stitch_reconstructions:stitch_reconstructions"

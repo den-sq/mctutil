@@ -30,6 +30,13 @@ Run `mctutil transform --help` to list commands and
 - **`flip`** — Flip a TIFF stack along the depth, row, or column axis.
 - **`reslice`** — Write XY, XZ, and YZ TIFF slices through a stack coordinate.
 - **`stack-split`** — Split a multi-page TIFF stack into one TIFF per Z slice.
+- **`squeeze`** — Remove all length-one axes from each TIFF in a directory,
+  in place: `mctutil transform squeeze /path/to/tiffs` turns `(500, 500, 1)`
+  into `(500, 500)`. Preserves the first image series' pixel values and dtype,
+  and the filename; rewrites uncompressed without retaining additional series
+  or original TIFF metadata. Includes `.tif`
+  and `.tiff` (case-insensitive), without descending into subdirectories.
+  Add `--dry-run` to preview the rewrites.
 - **`stitch`** — Stitch samples vertically, scanning for overlap.
 - **`stitch-reconstructions`** — Join two reconstructed TIFF directories at
   explicit half-open Z cuts (`A[:a_stop] + B[b_start:]`) without registration
