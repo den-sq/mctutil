@@ -21,6 +21,7 @@ EXTRA_MODULES: dict[str, tuple[str, ...]] = {
 	"sigray": ("h5py",),
 	"flats": ("scipy", "tifffile"),
 	"transform": ("h5py", "tifffile", "zarr"),
+	"mosaic": ("h5py", "scipy", "tifffile"),
 	"ng": (
 		"cloudvolume",
 		"cloudfiles",
