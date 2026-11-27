@@ -53,12 +53,13 @@ def test_binned_attenuation_flat_corrects_then_mean_bins():
 	np.testing.assert_allclose(attenuation, -np.log(0.5), rtol=1e-6)
 
 
-def test_coarse_chunks_start_on_bin_boundaries_and_keep_every_full_bin():
-	starts = chunk_starts(256, 128, 3)
+@pytest.mark.parametrize("rows", [253, 254, 256])
+def test_coarse_chunks_cover_every_complete_bin_and_no_partial_tail(rows):
+	starts = chunk_starts(rows, 128, 3)
+	chunks = [(start, min(start + starts.step, starts.stop)) for start in starts]
 
-	assert all(start % 3 == 0 for start in starts)
-	binned = sum((min(start + starts.step, 256) - start) // 3 for start in starts)
-	assert binned == 256 // 3
+	assert all(start % 3 == 0 and (stop - start) % 3 == 0 and stop > start for start, stop in chunks)
+	assert sum((stop - start) // 3 for start, stop in chunks) == rows // 3
 
 
 def test_wrapped_returns_the_shortest_displacement_for_odd_and_even_sizes():

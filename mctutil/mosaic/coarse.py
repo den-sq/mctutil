@@ -22,8 +22,11 @@ def binned_attenuation(projections, dark, gain, binning: int) -> np.ndarray:
 
 
 def chunk_starts(rows: int, chunk_rows: int, binning: int) -> range:
-	"""Chunk starts on a multiple of the binning, so every bin keeps its physical rows."""
-	return range(0, rows, max(binning, chunk_rows - chunk_rows % binning))
+	"""Chunk starts on a multiple of the binning over the complete bins only.
+
+	Every bin keeps its physical rows; the trailing rows % binning rows form no bin.
+	"""
+	return range(0, rows - rows % binning, max(binning, chunk_rows - chunk_rows % binning))
 
 
 def coarse_volume(scan, center: float, binning: int, theta_step: int, chunk_rows: int, ncore):
@@ -38,7 +41,7 @@ def coarse_volume(scan, center: float, binning: int, theta_step: int, chunk_rows
 	pieces = []
 	starts = chunk_starts(data.shape[1], chunk_rows, binning)
 	for y0 in starts:
-		y1 = min(y0 + starts.step, data.shape[1])
+		y1 = min(y0 + starts.step, starts.stop)
 		block = data[::theta_step, y0:y1, :].astype(np.float32)
 		attenuation = binned_attenuation(block, dark[y0:y1], gain[y0:y1], binning)
 		recon = tomopy.recon(
