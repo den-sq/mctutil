@@ -24,7 +24,8 @@ def block_centres(n: int, block: int, step: int, radius: float, grid=None) -> li
 
 
 def windowed_block(volume, yc: int, xc: int, block: int) -> np.ndarray:
-	return volume[:, yc - block // 2:yc + block // 2, xc - block // 2:xc + block // 2]
+	y0, x0 = yc - block // 2, xc - block // 2
+	return volume[:, y0:y0 + block, x0:x0 + block]
 
 
 def block_offsets(fixed, moving, centres, block: int, search: int) -> list[tuple]:

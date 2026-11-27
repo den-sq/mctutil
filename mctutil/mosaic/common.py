@@ -76,7 +76,8 @@ def warp(image, matrix, shape=None) -> np.ndarray:
 
 
 def wrapped(index: int, size: int) -> int:
-	return index if index < size // 2 else index - size
+	"""Shortest signed displacement of a circular index; ties at size / 2 go negative."""
+	return index if index < (size + 1) // 2 else index - size
 
 
 def phase_correlation(fixed_spectrum, moving, shape) -> tuple[float, list[int]]:

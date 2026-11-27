@@ -21,6 +21,11 @@ def binned_attenuation(projections, dark, gain, binning: int) -> np.ndarray:
 	return attenuation.reshape(attenuation.shape[0], rows, binning, columns, binning).mean(axis=(2, 4))
 
 
+def chunk_starts(rows: int, chunk_rows: int, binning: int) -> range:
+	"""Chunk starts on a multiple of the binning, so every bin keeps its physical rows."""
+	return range(0, rows, max(binning, chunk_rows - chunk_rows % binning))
+
+
 def coarse_volume(scan, center: float, binning: int, theta_step: int, chunk_rows: int, ncore):
 	"""Gridrec of binned attenuation; no phase retrieval or stripe removal."""
 	tomopy = conda_module("tomopy", "TomoPy is required for coarse reconstruction")
@@ -31,8 +36,9 @@ def coarse_volume(scan, center: float, binning: int, theta_step: int, chunk_rows
 	gain = np.maximum(white - dark, 1.0)
 	coarse_center = (center + 0.5) / binning - 0.5
 	pieces = []
-	for y0 in range(0, data.shape[1], chunk_rows):
-		y1 = min(y0 + chunk_rows, data.shape[1])
+	starts = chunk_starts(data.shape[1], chunk_rows, binning)
+	for y0 in starts:
+		y1 = min(y0 + starts.step, data.shape[1])
 		block = data[::theta_step, y0:y1, :].astype(np.float32)
 		attenuation = binned_attenuation(block, dark[y0:y1], gain[y0:y1], binning)
 		recon = tomopy.recon(
@@ -53,7 +59,7 @@ def coarse_volume(scan, center: float, binning: int, theta_step: int, chunk_rows
 @click.option("--theta-step", type=click.IntRange(min=1), default=2, show_default=True,
 				help="Use every n-th projection.")
 @click.option("--chunk-rows", type=click.IntRange(min=1), default=128, show_default=True,
-				help="Detector rows reconstructed per chunk (a multiple of --bin keeps rows aligned).")
+				help="Detector rows reconstructed per chunk; rounded down to a multiple of --bin.")
 @click.option("--ncore", type=click.IntRange(min=1), help="TomoPy worker threads.")
 def coarse(scan, output, center, binning, theta_step, chunk_rows, ncore):
 	"""Write a binned (Z, N, N) float32 .npy reconstruction of SCAN for coarse registration."""

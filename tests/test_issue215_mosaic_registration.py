@@ -7,8 +7,8 @@ import pytest
 from click.testing import CliRunner
 
 from mctutil.mosaic import common
-from mctutil.mosaic.coarse import binned_attenuation
-from mctutil.mosaic.depth import depth_link, link_depth
+from mctutil.mosaic.coarse import binned_attenuation, chunk_starts
+from mctutil.mosaic.depth import depth_link, link_depth, windowed_block
 from mctutil.mosaic.fit import fit
 from mctutil.mosaic.layout import GroupRelation, fixed_map, layout
 from mctutil.mosaic.refine import StackCorrelator, refine_row
@@ -53,6 +53,35 @@ def test_binned_attenuation_flat_corrects_then_mean_bins():
 	np.testing.assert_allclose(attenuation, -np.log(0.5), rtol=1e-6)
 
 
+def test_coarse_chunks_start_on_bin_boundaries_and_keep_every_full_bin():
+	starts = chunk_starts(256, 128, 3)
+
+	assert all(start % 3 == 0 for start in starts)
+	binned = sum((min(start + starts.step, 256) - start) // 3 for start in starts)
+	assert binned == 256 // 3
+
+
+def test_wrapped_returns_the_shortest_displacement_for_odd_and_even_sizes():
+	assert [common.wrapped(k, 63) for k in (0, 31, 32, 62)] == [0, 31, -31, -1]
+	assert [common.wrapped(k, 64) for k in (0, 31, 32, 63)] == [0, 31, -32, -1]
+
+
+def test_register_pair_reports_the_largest_positive_shift_on_an_odd_grid():
+	base = smooth_noise((24, 63, 63), 2.0, 9)
+	moving = np.roll(base, -31, axis=1)
+
+	link = register_pair(prepare(base, 1), prepare(moving, 1), phi0=0.0, span=0.5, step=1.0, nulls=(90.0,), scale=1)
+
+	assert link["dy"] == 31
+
+
+def test_windowed_block_extracts_odd_widths_exactly():
+	volume = np.zeros((2, 40, 40), np.float32)
+
+	assert windowed_block(volume, 20, 20, 25).shape == (2, 25, 25)
+	assert windowed_block(volume, 20, 20, 24).shape == (2, 24, 24)
+
+
 def test_scan_pairs_cover_each_group_then_cross_pairs_with_the_earlier_group_fixed():
 	scans = [{"name": "b1", "group": "B"}, {"name": "b2", "group": "B"}, {"name": "a1", "group": "A"}]
 
@@ -82,6 +111,17 @@ def test_depth_link_recovers_the_row_offset_between_overlapping_stacks(tmp_path)
 
 	assert record["T_median"] == 20
 	assert record["n"] > 0
+
+
+def test_depth_link_accepts_odd_block_widths(tmp_path):
+	base = smooth_noise((80, 64, 64), 1.0, 10)
+	fixed = write_stack(tmp_path / "fixed", base[:60])
+	moving = write_stack(tmp_path / "moving", np.concatenate([smooth_noise((5, 64, 64), 1.0, 11), base[:60]]))
+
+	record = depth_link(common.RowStack(fixed), common.RowStack(moving), 5, 5, depth=16, search=4,
+						block=25, step=8, radius=16, min_peak=0.003)
+
+	assert record["T_median"] == 5
 
 
 def test_link_depth_appends_json_lines(tmp_path):
@@ -173,6 +213,20 @@ def test_tilt_points_measure_the_cross_group_depth_offset(tmp_path):
 	assert points
 	assert np.median([point["G_minus_Z"] for point in points]) == 30
 	assert {point["T"] for point in points} >= {30}
+
+
+def test_fit_rejects_inputs_without_usable_cross_group_points(tmp_path):
+	tilt_path, links_path, output = tmp_path / "tilt.json", tmp_path / "links.jsonl", tmp_path / "fit.json"
+	tilt_path.write_text(json.dumps({"phi": 0.0, "dy": [0, 0], "dx": [0, 0], "points": [
+		{"link": "f0", "moving": "r0", "row": 1, "T": 5, "Z": 1, "y": 1, "x": 1, "peak": 0.001}]}))
+	links_path.write_text(json.dumps({"fixed": "r1", "moving": "r0", "T_median": 10.0}) + "\n")
+
+	result = CliRunner().invoke(fit, [str(tilt_path), str(output), "--links", str(links_path),
+										"--reference", "r0,r1", "--fixed", "f0"])
+
+	assert result.exit_code != 0
+	assert "no cross-group tilt points" in result.output
+	assert not output.exists()
 
 
 def fit_document(**changes):

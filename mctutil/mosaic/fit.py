@@ -104,6 +104,9 @@ def fit(tilt, output, link_paths, reference_names, fixed_names, min_peak):
 	unknowns = Unknowns(reference_names.split(","), fixed_names.split(","))
 	links = read_links(link_paths)
 	points = [point for point in tilt_data["points"] if point["peak"] > min_peak]
+	if not points:
+		raise click.ClickException(
+			f"no cross-group tilt points exceed --min-peak {min_peak}; the depth relation is undetermined")
 	reference_rows, reference_values = link_equations(unknowns, links, "reference")
 	fixed_rows, fixed_values = link_equations(unknowns, links, "fixed")
 	point_rows, point_values = point_equations(unknowns, points)
