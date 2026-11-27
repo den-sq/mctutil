@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from click.testing import CliRunner
 
+from mctutil.mosaic.layout import GroupRelation, canvas_bounds, fixed_map
 from mctutil.mosaic.norm import norm_fit
 from mctutil.mosaic.profile import edge_excess, profile
 from mctutil.mosaic.spectra import block_spectra
@@ -120,6 +121,22 @@ def test_fov_weight_moves_with_the_scan_at_each_depth(tmp_path):
 
 	assert weight[32, 2] == pytest.approx(expected(32, 2), abs=0.02) and expected(32, 2) > 0.5
 	assert weight[32, 59] == pytest.approx(expected(32, 59), abs=0.02) and expected(32, 59) == 0
+
+
+def test_short_fixed_scan_in_the_middle_of_a_deep_canvas_is_sampled(tmp_path):
+	fit = {"phi": 0.0, "K": 500.0, "gy": 0.01, "gx": 0.0, "gz": 0.0, "dy": [0.0, 0.0], "dx": [0.2, 0.0]}
+	relation = GroupRelation(fit, 31.5)
+	oy, ox, height, width = canvas_bounds(relation, 28, (0.0, 100.0, 199.0))
+	scan = drifting_scan(tmp_path / "d", np.ones((200, 64, 64), np.float32), fixed_map(relation, 0.0, oy, ox))
+	document = {"canvas": [height, width], "nz": 1200, "slice_size": 64, "scans": [scan]}
+	options = {**OPTIONS, "fov_feather": (24.0, 28.0)}
+	sampler = samplers_for(document, options)[0]
+
+	values, weight = sampler.sample(550, (height, width))
+
+	inside = weight > 0.9
+	assert inside.sum() > 1000
+	np.testing.assert_allclose(values[inside], 1.0, atol=1e-6)
 
 
 def test_noise_maps_require_spectra(tmp_path):
@@ -271,6 +288,26 @@ def test_wiener_keeps_coverage_when_the_noise_is_uniform(tmp_path):
 	assert result.exit_code == 0, result.output
 	filtered = tifffile.imread(tmp_path / "out" / "00015.tif")
 	assert np.all(filtered[image[15] != 0] > 0)
+
+
+def test_wiener_filters_a_slab_whose_noise_skips_the_sampled_rows(tmp_path):
+	layout_path, stitched, image = wiener_inputs(tmp_path, 0.0)
+	noise = np.load(tmp_path / "noise.npy")
+	noise[10:20, 0] = 2.0
+	np.save(tmp_path / "noise.npy", noise)
+
+	slab = run_wiener(tmp_path, layout_path, stitched, "--g0", "10", "--g1", "20")
+	slab_output = tifffile.imread(tmp_path / "out" / "00015.tif")
+	slab_identity = json.loads((tmp_path / "out_wiener_params.json").read_text()).get("identity")
+	noise[:, 0] = 2.0
+	np.save(tmp_path / "noise.npy", noise)
+	(tmp_path / "out" / "00015.tif").unlink()
+	full = run_wiener(tmp_path, layout_path, stitched, "--g0", "10", "--g1", "20")
+
+	assert slab.exit_code == 0 and full.exit_code == 0, slab.output
+	assert not slab_identity
+	assert np.array_equal(slab_output, tifffile.imread(tmp_path / "out" / "00015.tif"))
+	assert not np.array_equal(slab_output, to_u16(image[15], 0.5, 1.0, image[15] != 0))
 
 
 def test_wiener_is_the_identity_at_zero_noise(tmp_path):

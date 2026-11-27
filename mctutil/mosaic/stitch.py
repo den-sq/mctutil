@@ -44,10 +44,10 @@ class ScanSampler:
 		self.drifts = abs(a[1, 0]) > 0 or abs(a[2, 0]) > 0
 		yy, xx = grid
 		self.zpl = (a[0, 1] * yy + a[0, 2] * xx).astype(np.float32)
-		inside = self._place(0) > 0
 		if self.drifts:
-			inside |= self._place(max(depth - 1, 0)) > 0
-		self._bounds(inside)
+			self._swept_bounds(depth)
+		else:
+			self._bounds(self._place(0) > 0)
 		self.rows, self.warped_rows = OrderedDict(), OrderedDict()
 
 	def _place(self, g: int) -> np.ndarray:
@@ -66,6 +66,37 @@ class ScanSampler:
 		self.lp_in = None if self.fixed else self._inner_ramp(radius, options["lp_inner"])
 		self.placed = g if self.drifts else 0
 		return self.disk
+
+	def _depth_interval(self, depth: int) -> tuple[float, float] | None:
+		"""Canvas depths at which some canvas pixel maps into the scan's rows, clipped to the canvas."""
+		a = self.A
+		ends = sorted(((edge - a[0, 3] - z) / a[0, 0]) for edge, z in
+						((0.0, float(self.zpl.max())), (self.nrow - 1.0, float(self.zpl.min()))))
+		low, high = max(ends[0], 0.0), min(ends[1], depth - 1.0)
+		return (low, high) if low <= high else None
+
+	def _swept_bounds(self, depth: int) -> None:
+		"""Bounding box of the FOV disk swept over the scan's depth interval, then clipped to the canvas.
+
+		The disk's canvas image at depth g is an ellipse centred at M^-1 (c - t(g)), with half-extents
+		R_OUT * |row of M^-1|; the drift t(g) is linear, so the endpoints bound the sweep.
+		"""
+		a = self.A
+		height, width = self.grid[0].shape
+		interval = self._depth_interval(depth)
+		if interval is None:
+			self._bounds(np.zeros((height, width), bool))
+			return
+		inverse = np.linalg.inv(a[1:, 1:3])
+		half = self.options["fov_feather"][1] * np.sqrt((inverse ** 2).sum(axis=1))
+		centres = [inverse @ (self.centre - a[1:, 0] * g - a[1:, 3]) for g in interval]
+		low = np.floor(np.min(centres, axis=0) - half).astype(int)
+		high = np.ceil(np.max(centres, axis=0) + half).astype(int) + 1
+		y0, x0 = max(low[0], 0), max(low[1], 0)
+		y1, x1 = min(high[0], height), min(high[1], width)
+		box = np.zeros((height, width), bool)
+		box[y0:y1, x0:x1] = y1 > y0 and x1 > x0
+		self._bounds(box)
 
 	def _bounds(self, inside) -> None:
 		ys, xs = np.nonzero(inside)

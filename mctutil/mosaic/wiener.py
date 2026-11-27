@@ -103,17 +103,25 @@ class GainBank:
 								for f in (0.05, 0.1, 0.2, 0.3)}}
 
 
-def noise_levels(noise, depth: int, scale: float, count: int) -> tuple[np.ndarray, float] | None:
-	"""Log-spaced total-noise levels between the 0.5 and 99.5 percentiles, and the low percentile.
-
-	A single level when the range collapses; None when no sampled pixel has positive noise.
-	"""
+def positive_noise(noise, rows, scale: float) -> np.ndarray:
 	samples = []
-	for g in range(0, depth, 37):
+	for g in rows:
 		maps = noise[g].astype(np.float32) * scale
 		total = maps[0] + maps[1]
 		samples.append(total[total > 0])
-	samples = np.concatenate(samples)
+	return np.concatenate(samples) if samples else np.zeros(0, np.float32)
+
+
+def noise_levels(noise, depth: int, span, scale: float, count: int) -> tuple[np.ndarray, float] | None:
+	"""Log-spaced total-noise levels between the 0.5 and 99.5 percentiles, and the low percentile.
+
+	Levels come from every 37th canvas slice, so separate slab runs share them. If those slices
+	carry no noise (a map written for slabs only), every slice of the requested span is used
+	instead. A single level when the range collapses; None when the requested span has no noise.
+	"""
+	samples = positive_noise(noise, range(0, depth, 37), scale)
+	if samples.size == 0:
+		samples = positive_noise(noise, range(*span), scale)
 	if samples.size == 0:
 		return None
 	low, high = np.percentile(samples, 0.5), np.percentile(samples, 99.5)
@@ -261,11 +269,11 @@ def wiener(layout_path, source, noise_path, output, window, g0, g1, taps, nu_lev
 	shape, depth = tuple(document["canvas"]), document["nz"]
 	medians, f, fz = group_spectra(document["scans"])
 	noise = np.load(noise_path, mmap_mode="r")
-	levels = noise_levels(noise, depth, noise_scale, nu_levels)
-	output.mkdir(parents=True, exist_ok=True)
 	span = (g0, depth if g1 is None else g1)
+	levels = noise_levels(noise, depth, span, noise_scale, nu_levels)
+	output.mkdir(parents=True, exist_ok=True)
 	if levels is None:
-		# Zero noise everywhere: the Wiener gain is 1, so the output is the windowed source.
+		# No noise anywhere in the requested span: the Wiener gain is 1, so the output is the windowed source.
 		write_json(output.parent / f"{output.name}_wiener_params.json", {"identity": True})
 		write_identity(source, output, window, span)
 		return
