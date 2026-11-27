@@ -49,11 +49,15 @@ def require_tiff_paths(
 	return paths
 
 
-def natural_sort_key(path: Path) -> tuple[str | int, ...]:
-	"""Return a case-insensitive key where digit runs compare numerically."""
+def natural_sort_key(path: Path, *, include_suffix: bool = False) -> tuple[str | int, ...]:
+	"""Return a case-insensitive key where digit runs compare numerically.
+
+	Slice discovery compares stems; callers with a filename-ordering contract can
+	include the suffix explicitly.
+	"""
 	return tuple(
 		int(part) if part.isdigit() else part.lower()
-		for part in re.split(r"([0-9]+)", path.stem)
+		for part in re.split(r"([0-9]+)", path.name if include_suffix else path.stem)
 	)
 
 
