@@ -3,9 +3,19 @@
 Register overlapping tomography scans, write the stitch layout that maps a
 common canvas onto every scan, then stitch and denoise the canvas.
 
-Inputs are per-scan reconstructions stored as row stacks: one `NNNNN.tif`
-square slice per detector row, centred on the rotation axis. Scans fall into
-groups that share a lateral frame (same mount, vertical stage moves only). One
+Inputs are per-scan reconstructions stored as row stacks: one TIFF square slice
+per detector row, centred on the rotation axis. Input stacks use the shared
+slice discovery: immediate `.tif` and `.tiff` files (case-insensitive) in natural
+order, such as `slice_000.tif`, `slice_001.tif`, … or `slice_2.tif` before
+`slice_10.tif`. Row numbers are zero-based positions in that list, not numbers
+parsed from filenames. Names that have the same natural key, such as `slice_1.tif`
+and `slice_01.tiff`, are rejected as ambiguous. This also applies to stitched
+stacks read by `window`, `to-u16`, and `wiener`; provide the complete canvas stack
+when filtering a span with `--g0`/`--g1`. Stitch and Wiener outputs retain
+`NNNNN.tif` names, and `to-u16` retains its input filenames.
+
+Scans fall into groups that share a lateral frame (same mount, vertical stage
+moves only). One
 group is the *reference*: its frame becomes the canvas. A second, *fixed* group
 may be related to it by a rigid 3-D transform: a rotation `phi` about the axis,
 a lateral shift that drifts linearly with depth, and a depth tilt.

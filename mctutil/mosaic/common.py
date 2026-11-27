@@ -1,8 +1,8 @@
 """Shared filters, correlation, and row-stack access for the mosaic commands.
 
-Reconstructions are read as row stacks: one ``NNNNN.tif`` slice per detector
-row, square slices centred on the rotation axis. Rotations and shifts follow
-OpenCV's ``getRotationMatrix2D`` convention about the slice centre
+Reconstructions are read as row stacks: one TIFF slice per detector row in
+unambiguous natural order, square slices centred on the rotation axis. Rotations
+and shifts follow OpenCV's ``getRotationMatrix2D`` convention about the slice centre
 ``((n - 1) / 2, (n - 1) / 2)``.
 """
 
@@ -16,6 +16,7 @@ import click
 import numpy as np
 
 from mctutil.shared.deps import require
+from mctutil.shared.stack_apply import discover_slices
 
 
 def ndimage():
@@ -102,18 +103,30 @@ def subpixel_peak(surface: np.ndarray) -> tuple[float, list[float]]:
 	return float(surface[peak]), position
 
 
+def stack_paths(source: Path) -> tuple[Path, ...]:
+	"""Discover naturally ordered TIFF rows, reporting invalid stacks through Click."""
+	try:
+		return discover_slices(source)
+	except ValueError as exc:
+		raise click.ClickException(str(exc)) from exc
+
+
 class RowStack:
-	"""Read-only access to a directory of ``NNNNN.tif`` reconstruction rows."""
+	"""Read-only access by position in a naturally ordered TIFF stack."""
 
 	def __init__(self, path):
 		self.path = Path(path)
-		self.rows = sum(1 for item in self.path.glob("*.tif") if item.stem.isdigit())
-		if self.rows == 0:
-			raise click.ClickException(f"no NNNNN.tif rows in {self.path}")
+		self.paths = stack_paths(self.path)
 		self._first = None
 
+	@property
+	def rows(self) -> int:
+		return len(self.paths)
+
 	def read(self, row: int) -> np.ndarray:
-		return np.asarray(tifffile().imread(self.path / f"{row:05d}.tif"), np.float32)
+		if not 0 <= row < self.rows:
+			raise click.ClickException(f"row {row} is outside the stack of {self.rows} slices in {self.path}")
+		return np.asarray(tifffile().imread(self.paths[row]), np.float32)
 
 	@property
 	def size(self) -> int:

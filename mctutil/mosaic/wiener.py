@@ -19,7 +19,7 @@ from pathlib import Path
 import click
 import numpy as np
 
-from mctutil.mosaic.common import cv2, read_json, tifffile, write_json
+from mctutil.mosaic.common import RowStack, cv2, read_json, tifffile, write_json
 from mctutil.mosaic.spectra import noise_total
 from mctutil.mosaic.window import require_window, to_u16
 from mctutil.shared.deps import require
@@ -172,7 +172,8 @@ class Filter:
 	"""Streams canvas slices through the XY blend and the z FIR."""
 
 	def __init__(self, source: Path, noise, bank: GainBank, nu_low: float, options: dict):
-		self.source, self.noise, self.bank, self.nu_low = source, noise, bank, nu_low
+		self.stack = RowStack(source)
+		self.noise, self.bank, self.nu_low = noise, bank, nu_low
 		self.scale, self.depth, self.shape = options["noise_scale"], options["depth"], options["shape"]
 		self.workers = options["fft_workers"]
 		self.fft = require("scipy.fft", "mosaic")
@@ -183,7 +184,7 @@ class Filter:
 
 	def xy_blend(self, g: int) -> tuple[np.ndarray, np.ndarray]:
 		g = min(max(g, 0), self.depth - 1)
-		image = self.tiff.imread(self.source / f"{g:05d}.tif").astype(np.float32)
+		image = self.stack.read(g)
 		covered = image != 0
 		weights = self.weights(g)
 		if not covered.any():
@@ -223,11 +224,12 @@ class Filter:
 
 def write_identity(source: Path, target: Path, window, span) -> None:
 	tiff = tifffile()
+	stack = RowStack(source)
 	for g in range(*span):
 		output = target / f"{g:05d}.tif"
 		if output.exists():
 			continue
-		image = tiff.imread(source / f"{g:05d}.tif").astype(np.float32)
+		image = stack.read(g)
 		tiff.imwrite(output, to_u16(image, *window, image != 0))
 
 
