@@ -7,6 +7,7 @@ from mctutil.flats import main as flats_group
 from mctutil.hpc import main as hpc_group
 from mctutil.mem import main as mem_group
 from mctutil.mesh import main as mesh_group
+from mctutil.mosaic import main as mosaic_group
 from mctutil.ng import main as ng_group
 from mctutil.parse import main as parse_group
 from mctutil.phase import main as phase_group
@@ -61,3 +62,4 @@ main.add_command(mem_group, "mem")
 main.add_command(parse_group, "parse")
 main.add_command(phase_group, "phase")
 main.add_command(hpc_group, "hpc")
+main.add_command(mosaic_group, "mosaic")

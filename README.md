@@ -114,6 +114,8 @@ Each category has its own README with the full command breakdown; run
 - [`phase`](mctutil/phase/README.md) — phase retrieval and material calibration
   (`harvest`, `estimate-line-slope`, `refine`, `make-material-table`, `export`);
   harvested tables remain experimental pending the noise/blur and real-reference campaign.
+- [`mosaic`](mctutil/mosaic/README.md) — multi-scan registration and stitch layout
+  (`coarse`, `register`, `link-depth`, `refine`, `tilt-points`, `fit`, `layout`)
 - [`ng`](mctutil/ng/README.md) — Neuroglancer JSON, layer, and annotation
   helpers, plus `ng build`
 - [`serve`](mctutil/serve/README.md) — local data and visualization servers
