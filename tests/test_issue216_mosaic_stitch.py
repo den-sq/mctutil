@@ -321,6 +321,40 @@ def test_wiener_slab_with_complete_neighbour_maps_matches_a_full_map(tmp_path):
 		assert np.array_equal(image, tifffile.imread(tmp_path / "out" / f"{g:05d}.tif")), g
 
 
+@pytest.mark.parametrize("noise_scale", [0.75, 0.0], ids=["filtered", "identity"])
+@pytest.mark.parametrize("slab_span, span", [((7, 23), (10, 20)), ((3, 27), (6, 12))],
+						ids=["index-outside-file-count", "index-inside-file-count"])
+def test_wiener_stitched_slab_matches_full_canvas(tmp_path, noise_scale, slab_span, span):
+	layout_path, source, _image = wiener_inputs(tmp_path, 2.0)
+	document = json.loads(layout_path.read_text())
+	document["slice_size"] = 32
+	for scan in document["scans"]:
+		scan.update(reference_scan(scan["name"], source, 30, 0))
+	layout_path.write_text(json.dumps(document))
+	runner = CliRunner()
+	outputs = []
+	for label, rows in (("full", (0, 30)), ("slab", slab_span)):
+		canvas, noise = tmp_path / label, tmp_path / f"{label}_noise.npy"
+		result = runner.invoke(stitch, [str(layout_path), str(canvas), "--noise-out", str(noise),
+										"--g0", str(rows[0]), "--g1", str(rows[1]), "--fov-feather", "12", "14",
+										"--row-feather", "1", "--sigma-lp", "3"])
+		assert result.exit_code == 0, result.output
+		assert {path.name for path in canvas.iterdir()} == {f"{g:05d}.tif" for g in range(*rows)}
+		target = tmp_path / f"{label}_filtered"
+		result = runner.invoke(wiener, [str(layout_path), str(canvas), str(noise), str(target),
+										"--g0", str(span[0]), "--g1", str(span[1]), "--taps", "3",
+										"--window", "0.5", "1.0", "--noise-scale", str(noise_scale), "--fft-workers", "1"])
+		assert result.exit_code == 0, result.output
+		assert {path.name for path in target.iterdir()} == {f"{g:05d}.tif" for g in range(*span)}
+		outputs.append([tifffile.imread(target / f"{g:05d}.tif") for g in range(*span)])
+		if noise_scale == 0:
+			for g, actual in zip(range(*span), outputs[-1]):
+				image = tifffile.imread(canvas / f"{g:05d}.tif")
+				np.testing.assert_array_equal(actual, to_u16(image, 0.5, 1.0, image != 0))
+	for full, slab in zip(*outputs):
+		np.testing.assert_array_equal(slab, full)
+
+
 def test_window_options_require_high_above_low(tmp_path):
 	source = write_stack(tmp_path / "f32", np.ones((1, 4, 4), np.float32))
 

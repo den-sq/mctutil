@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import re
 import shutil
 import tempfile
 from uuid import uuid4
@@ -15,8 +14,9 @@ import click
 import numpy as np
 import tifffile
 
+from mctutil.shared.stack_apply import discover_slices
 
-TIFF_SUFFIXES = {".tif", ".tiff"}
+
 SUPPORTED_DTYPE_KINDS = {"b", "u", "i", "f"}
 MANIFEST_NAME = "stitch-reconstructions.json"
 
@@ -55,40 +55,6 @@ class StitchPlan:
 	workers: int
 	overwrite: bool
 	filename_width: int
-
-
-def natural_sort_key(path: Path) -> tuple[str | int, ...]:
-	"""Return a case-insensitive key where digit runs compare numerically."""
-	return tuple(
-		int(part) if part.isdigit() else part.lower()
-		for part in re.split(r"([0-9]+)", path.stem)
-	)
-
-
-def discover_slices(directory: Path) -> tuple[Path, ...]:
-	"""Discover immediate TIFF children in unambiguous natural order."""
-	directory = directory.resolve()
-	if not directory.is_dir():
-		raise ValueError(f"input is not a directory: {directory}")
-
-	paths = [
-		entry.resolve()
-		for entry in directory.iterdir()
-		if entry.is_file() and entry.suffix.lower() in TIFF_SUFFIXES
-	]
-	if not paths:
-		raise ValueError(f"no TIFF slices found in {directory}")
-
-	by_key: dict[tuple[str | int, ...], Path] = {}
-	for path in paths:
-		key = natural_sort_key(path)
-		if key in by_key:
-			raise ValueError(
-				"ambiguous natural ordering: "
-				f"{by_key[key].name!r} and {path.name!r} in {directory}"
-			)
-		by_key[key] = path
-	return tuple(sorted(paths, key=natural_sort_key))
 
 
 def _enum_name(value) -> str:

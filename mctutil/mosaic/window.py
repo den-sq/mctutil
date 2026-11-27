@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 import numpy as np
 
-from mctutil.mosaic.common import tifffile, write_json
+from mctutil.mosaic.common import stack_paths, tifffile, write_json
 from mctutil.shared.log import log
 
 
@@ -22,13 +22,6 @@ def to_u16(values, low: float, high: float, covered) -> np.ndarray:
 def require_window(bounds) -> None:
 	if not bounds[1] > bounds[0]:
 		raise click.BadParameter("HI must be greater than LO", param_hint="--window")
-
-
-def stack_paths(source: Path) -> list[Path]:
-	paths = sorted(path for path in source.glob("*.tif") if path.stem.isdigit())
-	if not paths:
-		raise click.ClickException(f"no NNNNN.tif slices in {source}")
-	return paths
 
 
 @click.command()

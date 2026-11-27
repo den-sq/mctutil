@@ -119,6 +119,28 @@ def test_ng_precompute_directory_input_uses_natural_order(tmp_path):
 	assert natural_sort_key(Path("slice_2.tif")) < natural_sort_key(Path("slice_10.tif"))
 
 
+def test_ng_precompute_directory_sorts_resolved_names_including_suffixes(tmp_path):
+	input_dir = tmp_path / "slices"
+	target_dir = tmp_path / "targets"
+	input_dir.mkdir()
+	target_dir.mkdir()
+	for alias, name, value in (
+		("plane_1.tif", "slice_10.TIF", 10),
+		("plane_2.tif", "slice_2.tiff", 2),
+		("plane_3.tif", "slice_2.tif", 1),
+	):
+		target = target_dir / name
+		tifffile.imwrite(target, np.full((2, 3), value, dtype=np.uint8))
+		(input_dir / alias).symlink_to(target)
+
+	spec = discover_input(input_dir)
+
+	assert spec.shape == (3, 2, 3)
+	assert spec.source == tuple(
+		str(target_dir / name) for name in ("slice_2.tif", "slice_2.tiff", "slice_10.TIF")
+	)
+
+
 def test_ng_precompute_segmentation_dtype_and_chunk_defaults(tmp_path, monkeypatch):
 	monkeypatch.setattr(precompute_module, "_require_cloudvolume", lambda: CloudVolume)
 	input_path = tmp_path / "labels_seg.tif"

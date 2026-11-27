@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
@@ -46,6 +47,40 @@ def require_tiff_paths(
 	if not paths:
 		raise ValueError(message or f"No TIFF files found in {input_dir}.")
 	return paths
+
+
+def natural_sort_key(path: Path, *, include_suffix: bool = False) -> tuple[str | int, ...]:
+	"""Return a case-insensitive key where digit runs compare numerically.
+
+	Slice discovery compares stems; callers with a filename-ordering contract can
+	include the suffix explicitly.
+	"""
+	return tuple(
+		int(part) if part.isdigit() else part.lower()
+		for part in re.split(r"([0-9]+)", path.name if include_suffix else path.stem)
+	)
+
+
+def discover_slices(directory: Path) -> tuple[Path, ...]:
+	"""Discover immediate TIFF children in unambiguous natural order."""
+	directory = directory.resolve()
+	if not directory.is_dir():
+		raise ValueError(f"input is not a directory: {directory}")
+
+	paths = tuple(entry.resolve() for entry in tiff_paths(directory))
+	if not paths:
+		raise ValueError(f"no TIFF slices found in {directory}")
+
+	by_key: dict[tuple[str | int, ...], Path] = {}
+	for path in paths:
+		key = natural_sort_key(path)
+		if key in by_key:
+			raise ValueError(
+				"ambiguous natural ordering: "
+				f"{by_key[key].name!r} and {path.name!r} in {directory}"
+			)
+		by_key[key] = path
+	return tuple(sorted(paths, key=natural_sort_key))
 
 
 def batched(values: Iterable[Any], size: int) -> tuple[tuple[Any, ...], ...]:

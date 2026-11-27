@@ -183,6 +183,7 @@ class Filter:
 
 	def xy_blend(self, g: int) -> tuple[np.ndarray, np.ndarray]:
 		g = min(max(g, 0), self.depth - 1)
+		# Stitch output names carry absolute canvas indices, including partial slabs.
 		image = self.tiff.imread(self.source / f"{g:05d}.tif").astype(np.float32)
 		covered = image != 0
 		weights = self.weights(g)

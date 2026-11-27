@@ -7,7 +7,6 @@ from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from multiprocessing import get_context, shared_memory
 from pathlib import Path
-import re
 import sys
 
 import click
@@ -23,6 +22,7 @@ from mctutil.shared.io_helpers import (
 )
 from mctutil.shared.log import log, LOG
 from mctutil.shared.resource_monitor import record_active_workers
+from mctutil.shared.stack_apply import natural_sort_key, TIFF_SUFFIXES
 from mctutil.ng.completeness import check_mip0_completeness
 from mctutil.ng.resource_planning import system_resources
 
@@ -79,14 +79,6 @@ def _require_cloudvolume():
 	).CloudVolume
 
 
-def natural_sort_key(path: Path) -> tuple:
-	"""Sort slice_2 before slice_10."""
-	return tuple(
-		int(part) if part.isdigit() else part.lower()
-		for part in re.split(r"([0-9]+)", path.name)
-	)
-
-
 def discover_input(path: Path) -> InputSpec:
 	"""Inspect a memmappable TIFF or a directory of TIFF planes."""
 	path = path.resolve()
@@ -119,9 +111,9 @@ def discover_input(path: Path) -> InputSpec:
 		(
 			entry.resolve()
 			for entry in path.iterdir()
-			if entry.is_file() and entry.suffix.lower() in {".tif", ".tiff"}
+			if entry.is_file() and entry.suffix.lower() in TIFF_SUFFIXES
 		),
-		key=natural_sort_key,
+		key=lambda entry: natural_sort_key(entry, include_suffix=True),
 	)
 	if not paths:
 		raise ValueError(f"no TIFF slices found in {path}")
