@@ -15,7 +15,6 @@ import numpy as np
 import tifffile
 
 from mctutil.shared.stack_apply import discover_slices
-from mctutil.shared.stack_apply import natural_sort_key  # noqa: F401 (compatibility re-export)
 
 
 SUPPORTED_DTYPE_KINDS = {"b", "u", "i", "f"}

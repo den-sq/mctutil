@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import click
 import numpy as np
@@ -15,7 +14,6 @@ from mctutil.shared import stack_apply
 
 profile_module = importlib.import_module("mctutil.mosaic.profile")
 window_module = importlib.import_module("mctutil.mosaic.window")
-wiener_module = importlib.import_module("mctutil.mosaic.wiener")
 stitch_module = importlib.import_module("mctutil.transform.stitch_reconstructions")
 
 pytest.importorskip("cv2")
@@ -44,22 +42,11 @@ def write_named_stack(path, names, volume):
 	return path
 
 
-def identity_filter(source, shape, depth):
-	# Unit XY gains isolate the input-row mapping while exercising the real FFT/blend path.
-	bank = SimpleNamespace(nu=np.array([1.0]), xy=[np.ones((shape[0], shape[1] // 2 + 1), np.float32)])
-	noise = np.zeros((depth, 2, 4, 4), np.float16)
-	noise[:, 0] = 1
-	options = {"noise_scale": 1.0, "depth": depth, "shape": shape, "fft_workers": 1}
-	return wiener_module.Filter(source, noise, bank, 1.0, options)
-
-
 def test_mosaic_consumers_share_the_canonical_listing_facilities():
 	assert stitch_module.discover_slices is stack_apply.discover_slices
-	assert stitch_module.natural_sort_key is stack_apply.natural_sort_key
 	assert common.discover_slices is stack_apply.discover_slices
 	assert profile_module.stack_paths is common.stack_paths
 	assert window_module.stack_paths is common.stack_paths
-	assert wiener_module.RowStack is common.RowStack
 
 
 @pytest.mark.parametrize("naming", NAMES)
@@ -117,41 +104,13 @@ def test_profile_window_and_conversion_match_numeric_names(tmp_path, volume, nam
 		np.testing.assert_array_equal(actual_image, expected_image)
 
 
-@pytest.mark.parametrize("naming", NAMES)
-def test_wiener_reads_ordinal_rows_and_keeps_numeric_output_names(tmp_path, volume, naming):
-	source = write_named_stack(tmp_path / naming, NAMES[naming], volume)
-	baseline = write_named_stack(tmp_path / "baseline", NAMES["numeric"], volume)
-	flow = identity_filter(source, volume.shape[1:], len(volume))
-	reference = identity_filter(baseline, volume.shape[1:], len(volume))
-	for requested in (-1, 0, 1, 2, 3):
-		row = min(max(requested, 0), len(volume) - 1)
-		values, covered = flow.xy_blend(requested)
-		expected, expected_coverage = reference.xy_blend(requested)
-		np.testing.assert_array_equal(covered, volume[row] != 0)
-		np.testing.assert_array_equal(covered, expected_coverage)
-		np.testing.assert_array_equal(values, expected)
-	target = tmp_path / "identity"
-	target.mkdir()
-	wiener_module.write_identity(source, target, (0, 5), (0, len(volume)))
-	assert {path.name for path in target.iterdir()} == set(NAMES["numeric"])
-	for row, name in enumerate(NAMES["numeric"]):
-		expected = window_module.to_u16(volume[row], 0, 5, volume[row] != 0)
-		np.testing.assert_array_equal(tifffile.imread(target / name), expected)
-
-
-@pytest.mark.parametrize("consumer", ["row_stack", "profile", "window", "to_u16", "filter", "identity"])
+@pytest.mark.parametrize("consumer", ["row_stack", "profile", "window", "to_u16"])
 def test_ambiguous_natural_keys_are_rejected_by_each_mosaic_input(tmp_path, volume, consumer):
 	source = write_named_stack(tmp_path / "ambiguous", ("slice_2.tif", "slice_02.TIFF"), volume[:2])
 	target = tmp_path / "out"
-	if consumer in {"row_stack", "filter", "identity"}:
+	if consumer == "row_stack":
 		with pytest.raises(click.ClickException, match="ambiguous natural ordering"):
-			if consumer == "row_stack":
-				common.RowStack(source)
-			elif consumer == "filter":
-				identity_filter(source, volume.shape[1:], 2).xy_blend(0)
-			else:
-				target.mkdir()
-				wiener_module.write_identity(source, target, (0, 5), (0, 2))
+			common.RowStack(source)
 	else:
 		command, arguments = {
 			"profile": (profile_module.profile, [str(source), str(target), "--r-lo", "2", "--r-ref", "8"]),

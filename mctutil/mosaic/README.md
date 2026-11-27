@@ -9,10 +9,14 @@ slice discovery: immediate `.tif` and `.tiff` files (case-insensitive) in natura
 order, such as `slice_000.tif`, `slice_001.tif`, … or `slice_2.tif` before
 `slice_10.tif`. Row numbers are zero-based positions in that list, not numbers
 parsed from filenames. Names that have the same natural key, such as `slice_1.tif`
-and `slice_01.tiff`, are rejected as ambiguous. This also applies to stitched
-stacks read by `window`, `to-u16`, and `wiener`; provide the complete canvas stack
-when filtering a span with `--g0`/`--g1`. Stitch and Wiener outputs retain
-`NNNNN.tif` names, and `to-u16` retains its input filenames.
+and `slice_01.tiff`, are rejected as ambiguous. This discovery also applies to
+the order-only readers `window` and `to-u16`; `to-u16` retains input filenames.
+
+Stitch and Wiener outputs use `NNNNN.tif` names carrying absolute canvas indices.
+Wiener reads these indices directly, so a canvas slab written by
+`stitch --g0/--g1` keeps its original row coordinates. Include the z FIR's
+`--taps` neighbour rows and their noise maps when stitching a slab for filtering;
+neighbours outside the full canvas are clamped to its first or last row.
 
 Scans fall into groups that share a lateral frame (same mount, vertical stage
 moves only). One
