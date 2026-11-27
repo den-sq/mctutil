@@ -19,6 +19,11 @@ def to_u16(values, low: float, high: float, covered) -> np.ndarray:
 	return scaled
 
 
+def require_window(bounds) -> None:
+	if not bounds[1] > bounds[0]:
+		raise click.BadParameter("HI must be greater than LO", param_hint="--window")
+
+
 def stack_paths(source: Path) -> list[Path]:
 	paths = sorted(path for path in source.glob("*.tif") if path.stem.isdigit())
 	if not paths:
@@ -52,6 +57,7 @@ def window(source, step, pixel_step, output):
 @click.option("--window", "bounds", type=(float, float), required=True, metavar="LO HI", help="Value window.")
 def to_u16_command(source, output, bounds):
 	"""Write a float32 slice stack as uint16 with a fixed window, keeping 0 for uncovered pixels (resumable)."""
+	require_window(bounds)
 	log.start()
 	tiff = tifffile()
 	output.mkdir(parents=True, exist_ok=True)

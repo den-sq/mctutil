@@ -58,7 +58,10 @@ def overlap_values(moving_images, reference_images, rows, erode: int) -> tuple[n
 		inside = opencv.erode(((a != 0) & (b != 0)).astype(np.uint8), np.ones((erode, erode), np.uint8)) > 0
 		moving_values.append(gaussian_filter(a, 3)[inside][::7])
 		reference_values.append(gaussian_filter(b, 3)[inside][::7])
-	return np.concatenate(moving_values), np.concatenate(reference_values)
+	moving_values, reference_values = np.concatenate(moving_values), np.concatenate(reference_values)
+	if moving_values.size < 2:
+		raise click.ClickException("the scans' joint coverage is empty after erosion; lower --erode")
+	return moving_values, reference_values
 
 
 def moment_match(moving, reference) -> tuple[float, float]:
@@ -92,6 +95,8 @@ def norm_fit(layout_path, reference_name, pairs, fov_feather, erode, output):
 		moving, reference = pair.split(":")
 		common = sorted(canvas_rows(scans[moving], document["canvas"], document["nz"])
 						& canvas_rows(scans[reference], document["canvas"], document["nz"]))
+		if not common:
+			raise click.ClickException(f"{moving} and {reference} share no canvas slices away from their row ends")
 		rows = common[::max(1, len(common) // 6)][:6]
 		values = overlap_values(renderer.render(scans[moving], rows), renderer.render(scans[reference], rows), rows, erode)
 		scale, offset = moment_match(*values)

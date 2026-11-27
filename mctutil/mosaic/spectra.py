@@ -51,7 +51,10 @@ def z_spectrum(volume: np.ndarray) -> np.ndarray:
 
 def block_spectra(full, noisy, box: int, centre) -> dict:
 	cy, cx = centre
-	rows, columns = slice(cy - box // 2, cy + box // 2), slice(cx - box // 2, cx + box // 2)
+	y0, x0 = cy - box // 2, cx - box // 2
+	if min(y0, x0) < 0 or y0 + box > full.shape[1] or x0 + box > full.shape[2]:
+		raise click.ClickException(f"a {box} px box at {centre} does not fit the {full.shape[1:]} slices")
+	rows, columns = slice(y0, y0 + box), slice(x0, x0 + box)
 	signal = np.asarray(full[:, rows, columns], np.float64)
 	noise = np.asarray(noisy[:, rows, columns], np.float64) - signal
 	ps, nps = xy_spectrum(signal, box), xy_spectrum(noise, box)

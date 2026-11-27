@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from mctutil.mosaic.layout import GroupRelation, canvas_bounds, fixed_map
 from mctutil.mosaic.norm import norm_fit
 from mctutil.mosaic.profile import edge_excess, profile
-from mctutil.mosaic.spectra import block_spectra
+from mctutil.mosaic.spectra import block_spectra, spectra
 from mctutil.mosaic.stitch import fuse, samplers_for, stitch
 from mctutil.mosaic.wiener import wiener
 from mctutil.mosaic.window import to_u16, to_u16_command, window
@@ -290,24 +290,60 @@ def test_wiener_keeps_coverage_when_the_noise_is_uniform(tmp_path):
 	assert np.all(filtered[image[15] != 0] > 0)
 
 
-def test_wiener_filters_a_slab_whose_noise_skips_the_sampled_rows(tmp_path):
-	layout_path, stitched, image = wiener_inputs(tmp_path, 0.0)
+@pytest.mark.parametrize("missing", [range(7, 10), range(20, 23)])
+def test_wiener_refuses_covered_neighbours_without_noise_maps(tmp_path, missing):
+	layout_path, stitched, _image = wiener_inputs(tmp_path, 2.0)
 	noise = np.load(tmp_path / "noise.npy")
-	noise[10:20, 0] = 2.0
+	noise[list(missing)] = 0
 	np.save(tmp_path / "noise.npy", noise)
 
+	result = run_wiener(tmp_path, layout_path, stitched, "--g0", "10", "--g1", "20")
+
+	assert result.exit_code != 0
+	assert "noise map is empty" in result.output
+
+
+def test_wiener_slab_with_complete_neighbour_maps_matches_a_full_map(tmp_path):
+	layout_path, stitched, _image = wiener_inputs(tmp_path, 0.0)
+	noise = np.load(tmp_path / "noise.npy")
+	noise[7:23, 0] = 2.0
+	np.save(tmp_path / "noise.npy", noise)
 	slab = run_wiener(tmp_path, layout_path, stitched, "--g0", "10", "--g1", "20")
-	slab_output = tifffile.imread(tmp_path / "out" / "00015.tif")
-	slab_identity = json.loads((tmp_path / "out_wiener_params.json").read_text()).get("identity")
+	slab_output = [tifffile.imread(tmp_path / "out" / f"{g:05d}.tif") for g in range(10, 20)]
 	noise[:, 0] = 2.0
 	np.save(tmp_path / "noise.npy", noise)
-	(tmp_path / "out" / "00015.tif").unlink()
+	for g in range(10, 20):
+		(tmp_path / "out" / f"{g:05d}.tif").unlink()
 	full = run_wiener(tmp_path, layout_path, stitched, "--g0", "10", "--g1", "20")
 
 	assert slab.exit_code == 0 and full.exit_code == 0, slab.output
-	assert not slab_identity
-	assert np.array_equal(slab_output, tifffile.imread(tmp_path / "out" / "00015.tif"))
-	assert not np.array_equal(slab_output, to_u16(image[15], 0.5, 1.0, image[15] != 0))
+	for g, image in zip(range(10, 20), slab_output):
+		assert np.array_equal(image, tifffile.imread(tmp_path / "out" / f"{g:05d}.tif")), g
+
+
+def test_window_options_require_high_above_low(tmp_path):
+	source = write_stack(tmp_path / "f32", np.ones((1, 4, 4), np.float32))
+
+	result = CliRunner().invoke(to_u16_command, [str(source), str(tmp_path / "u16"), "--window", "1", "1"])
+
+	assert result.exit_code != 0 and "HI must be greater than LO" in result.output
+
+
+def test_spectra_extracts_odd_boxes_and_rejects_boxes_outside_the_slice(tmp_path):
+	rng = np.random.default_rng(5)
+	full = rng.normal(size=(8, 40, 40))
+	np.save(tmp_path / "full.npy", full)
+	np.save(tmp_path / "noisy.npy", full + rng.normal(scale=0.1, size=full.shape))
+	runner = CliRunner()
+
+	odd = runner.invoke(spectra, [str(tmp_path / "full.npy"), str(tmp_path / "noisy.npy"), str(tmp_path / "s.json"),
+									"--box", "25"])
+	outside = runner.invoke(spectra, [str(tmp_path / "full.npy"), str(tmp_path / "noisy.npy"),
+										str(tmp_path / "t.json"), "--box", "48"])
+
+	assert odd.exit_code == 0, odd.output
+	assert len(json.loads((tmp_path / "s.json").read_text())["freq"]) == 12
+	assert outside.exit_code != 0 and "does not fit" in outside.output
 
 
 def test_wiener_is_the_identity_at_zero_noise(tmp_path):
@@ -318,6 +354,19 @@ def test_wiener_is_the_identity_at_zero_noise(tmp_path):
 	assert result.exit_code == 0, result.output
 	expected = to_u16(image[15], 0.5, 1.0, image[15] != 0)
 	assert np.array_equal(tifffile.imread(tmp_path / "out" / "00015.tif"), expected)
+
+
+def test_norm_fit_rejects_scans_without_shared_slices(tmp_path):
+	volume = np.ones((40, 48, 48), np.float32)
+	reference = reference_scan("ref", write_stack(tmp_path / "ref", volume), 40, 0)
+	moving = reference_scan("mov", write_stack(tmp_path / "mov", volume), 40, -100)
+	layout_path = tmp_path / "layout.json"
+	layout_path.write_text(json.dumps({"canvas": [48, 48], "nz": 140, "slice_size": 48, "scans": [reference, moving]}))
+
+	result = CliRunner().invoke(norm_fit, [str(layout_path), "--reference", "ref", "--pair", "mov:ref",
+											"--fov-feather", "20", "23"])
+
+	assert result.exit_code != 0 and "share no canvas slices" in result.output
 
 
 def test_norm_fit_matches_a_scaled_overlapping_scan(tmp_path):

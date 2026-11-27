@@ -21,7 +21,7 @@ import numpy as np
 
 from mctutil.mosaic.common import cv2, read_json, tifffile, write_json
 from mctutil.mosaic.spectra import noise_total
-from mctutil.mosaic.window import to_u16
+from mctutil.mosaic.window import require_window, to_u16
 from mctutil.shared.deps import require
 from mctutil.shared.log import log
 
@@ -186,8 +186,12 @@ class Filter:
 		image = self.tiff.imread(self.source / f"{g:05d}.tif").astype(np.float32)
 		covered = image != 0
 		weights = self.weights(g)
-		if not covered.any() or not weights:
+		if not covered.any():
 			return np.zeros(self.shape, np.float32), covered
+		if not weights:
+			raise click.ClickException(
+				f"slice {g} is covered but its noise map is empty; the z filter reads slices g0 - taps to "
+				"g1 + taps, so stitch --noise-out must cover them")
 		mean = image[covered].mean()
 		image = np.where(covered, image, mean)
 		spectrum = self.fft.rfft2(image, workers=self.workers)
@@ -264,6 +268,7 @@ def run_filter(flow: Filter, target: Path, window, span, taps: int) -> None:
 @click.option("--noise-scale", type=float, default=1.0, show_default=True, help="Multiply the noise maps.")
 def wiener(layout_path, source, noise_path, output, window, g0, g1, taps, nu_levels, fft_workers, noise_scale):
 	"""Wiener-filter the stitched float32 SOURCE of LAYOUT with NOISE maps into uint16 OUTPUT (resumable)."""
+	require_window(window)
 	log.start()
 	document = read_json(layout_path)
 	shape, depth = tuple(document["canvas"]), document["nz"]
