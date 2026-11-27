@@ -9,6 +9,9 @@ Weights are an FOV-disk feather times a feather over the scan's first and last r
 Fusion is frequency-split: out = sum(w HP) / sum(w) + sum(u LP) / sum(u), with LP the
 weight-normalised Gaussian of each scan and u = w * lowpass_weight. Scans with an ``off``
 field (written by ``mosaic layout``) form the fixed group; the rest are the reference group.
+
+A map's lateral terms A[1:, 0] move the scan's FOV across the canvas with depth, so the
+FOV disk, radial correction and handover ramps are evaluated at each slice's depth.
 """
 
 from __future__ import annotations
@@ -20,34 +23,49 @@ import click
 import numpy as np
 
 from mctutil.mosaic.common import RowStack, cv2, read_json, tifffile
+from mctutil.mosaic.spectra import noise_total
 from mctutil.shared.log import log
 
 
 class ScanSampler:
 	"""One layout scan resampled onto the canvas grid."""
 
-	def __init__(self, scan: dict, grid, centre: float, options: dict):
-		yy, xx = grid
+	def __init__(self, scan: dict, grid, centre: float, depth: int, options: dict):
 		self.scan, self.stack = scan, RowStack(scan["dir"])
+		self.grid, self.centre, self.options = grid, centre, options
 		self.fixed = "off" in scan
 		self.nrow = scan["nrow"]
 		self.a, self.b = scan.get("a", 1.0), scan.get("b", 0.0)
 		self.lowpass_weight = scan.get("lowpass_weight", 1.0)
-		self.noise = scan.get("noise", 0.0)
+		self.noise = noise_total(scan) if options.get("noise") else 0.0
 		self.row_feather = options["row_feather"]
 		a = self.A = np.array(scan["A"], np.float64)
 		self.planar = abs(a[0, 1]) < 1e-9 and abs(a[0, 2]) < 1e-9
-		sy = (a[1, 1] * yy + a[1, 2] * xx + a[1, 3]).astype(np.float32)
-		sx = (a[2, 1] * yy + a[2, 2] * xx + a[2, 3]).astype(np.float32)
-		radius = np.hypot(sy - centre, sx - centre)
+		self.drifts = abs(a[1, 0]) > 0 or abs(a[2, 0]) > 0
+		yy, xx = grid
+		self.zpl = (a[0, 1] * yy + a[0, 2] * xx).astype(np.float32)
+		inside = self._place(0) > 0
+		if self.drifts:
+			inside |= self._place(max(depth - 1, 0)) > 0
+		self._bounds(inside)
+		self.rows, self.warped_rows = OrderedDict(), OrderedDict()
+
+	def _place(self, g: int) -> np.ndarray:
+		"""Set the FOV disk, radial correction and handover ramps at canvas depth g; return the disk."""
+		if getattr(self, "placed", None) == (g if self.drifts else 0):
+			return self.disk
+		a, (yy, xx), options = self.A, self.grid, self.options
+		lateral = (a[1, 0] * g, a[2, 0] * g) if self.drifts else (0.0, 0.0)
+		sy = (lateral[0] + a[1, 1] * yy + a[1, 2] * xx + a[1, 3]).astype(np.float32)
+		sx = (lateral[1] + a[2, 1] * yy + a[2, 2] * xx + a[2, 3]).astype(np.float32)
+		radius = np.hypot(sy - self.centre, sx - self.centre)
 		inner, outer = options["fov_feather"]
 		self.disk = np.clip((outer - radius) / (outer - inner), 0, 1).astype(np.float32)
-		self.zpl = (a[0, 1] * yy + a[0, 2] * xx).astype(np.float32)
-		self._bounds(self.disk > 0)
 		self.rc = self._radial_correction(radius, options["flat_cupping"])
 		self.hp_in = self._inner_ramp(radius, options["hp_inner"]) if self.fixed else None
 		self.lp_in = None if self.fixed else self._inner_ramp(radius, options["lp_inner"])
-		self.rows, self.warped_rows = OrderedDict(), OrderedDict()
+		self.placed = g if self.drifts else 0
+		return self.disk
 
 	def _bounds(self, inside) -> None:
 		ys, xs = np.nonzero(inside)
@@ -100,10 +118,11 @@ class ScanSampler:
 				self.warped_rows.popitem(last=False)
 		return self.warped_rows[z]
 
-	def _planar_values(self, z: int, shape):
+	def _planar_values(self, g: int, z: int, shape):
 		opencv, a = cv2(), self.A
 		height, width = shape
-		matrix = np.array([[a[2, 2], a[2, 1], a[2, 3]], [a[1, 2], a[1, 1], a[1, 3]]], np.float64)
+		matrix = np.array([[a[2, 2], a[2, 1], a[2, 0] * g + a[2, 3]],
+							[a[1, 2], a[1, 1], a[1, 0] * g + a[1, 3]]], np.float64)
 		values = opencv.warpAffine(self.row(z), matrix, (width, height), flags=opencv.INTER_LINEAR | opencv.WARP_INVERSE_MAP)
 		return values, np.full(shape, float(z), np.float32)
 
@@ -127,11 +146,12 @@ class ScanSampler:
 		z0, z1 = int(np.floor(zc + self.zlo)), int(np.ceil(zc + self.zhi))
 		if z1 < 0 or z0 > self.nrow - 1:
 			return None
+		self._place(g)
 		if self.planar and abs(zc - round(zc)) < 1e-6:
 			z = int(round(zc))
 			if not 0 <= z < self.nrow:
 				return None
-			values, zz = self._planar_values(z, shape)
+			values, zz = self._planar_values(g, z, shape)
 		else:
 			values, zz = self._tilted_values(zc, shape)
 		fz = np.clip((np.minimum(zz, self.nrow - 1 - zz) + 1) / self.row_feather, 0, 1)
@@ -229,7 +249,7 @@ def canvas_grid(document: dict) -> np.ndarray:
 
 def samplers_for(document: dict, options: dict) -> list[ScanSampler]:
 	grid, centre = canvas_grid(document), slice_centre(document)
-	return [ScanSampler(scan, grid, centre, options) for scan in document["scans"]]
+	return [ScanSampler(scan, grid, centre, document["nz"], options) for scan in document["scans"]]
 
 
 @click.command()
@@ -249,14 +269,15 @@ def samplers_for(document: dict, options: dict) -> list[ScanSampler]:
 @click.option("--flat-cupping", is_flag=True,
 				help="Subtract each scan's whole mean radial profile p(r) - p(0) instead of its edge excess.")
 @click.option("--noise-out", type=click.Path(dir_okay=False, path_type=Path),
-				help="Write per-slice HP noise maps (reference, fixed) at every 8th px, float16 .npy memmap.")
+				help="Write per-slice HP noise maps (reference, fixed) at every 8th px, float16 .npy memmap. "
+					"Each scan's noise is a^2 * sum(nps) of its snr spectra.")
 def stitch(layout_path, output, fov_feather, g0, g1, sigma_lp, row_feather, hp_inner, lp_inner, flat_cupping,
 			noise_out):
 	"""Write the stitched float32 canvas slices g0..g1 of LAYOUT to OUTPUT (resumable)."""
 	log.start()
 	document = read_json(layout_path)
 	options = {"fov_feather": fov_feather, "row_feather": row_feather, "hp_inner": hp_inner, "lp_inner": lp_inner,
-				"flat_cupping": flat_cupping, "sigma_lp": sigma_lp}
+				"flat_cupping": flat_cupping, "sigma_lp": sigma_lp, "noise": noise_out is not None}
 	samplers = samplers_for(document, options)
 	shape = tuple(document["canvas"])
 	output.mkdir(parents=True, exist_ok=True)
@@ -264,7 +285,8 @@ def stitch(layout_path, output, fov_feather, g0, g1, sigma_lp, row_feather, hp_i
 	tiff = tifffile()
 	for g in range(g0, document["nz"] if g1 is None else g1):
 		target = output / f"{g:05d}.tif"
-		if target.exists():
+		# A slice written without --noise-out has no noise yet; covered slices always have positive noise.
+		if target.exists() and (noise is None or noise[g].any()):
 			continue
 		fusion = fuse(samplers, g, shape, options)
 		values, _ = fusion.result()

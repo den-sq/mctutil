@@ -35,7 +35,9 @@ Stitching splits each scan into high and low bands at `--sigma-lp`. A fixed-grou
 scan is one with an `off` field (written by `mosaic layout`): `--hp-inner` moves
 its high-band handover inside the reference FOV edge and `--lp-inner` does the
 same for the reference low band. Noise maps carry the reference and fixed-group
-parts separately, and the Wiener filter mixes the two groups' spectra by them.
+parts separately, each scan contributing a^2 * sum(nps) of its `snr` spectra, and
+the Wiener filter mixes the two groups' spectra by them. A map whose lateral terms
+`A[1:, 0]` are nonzero moves the scan's FOV with depth; the stitcher follows it.
 In every uint16 output, 0 means no scan covers the pixel.
 
 Conventions: a depth link's T means *moving row = fixed row + T*; in-plane
@@ -49,7 +51,7 @@ transforms follow OpenCV's `getRotationMatrix2D` sign about the slice centre
   "canvas": [H, W], "nz": NZ, "offset_yx": [oy, ox], "slice_size": n, "fov_radius": R,
   "fit": {...},
   "scans": [{"name", "dir", "nrow", "A": [[...4], [...4], [...4]], "lowpass_weight", "group"?, "off"?,
-             "a"?, "b"?, "radcorr"?, "snr"?, "noise"?}]
+             "a"?, "b"?, "radcorr"?, "snr"?}]
 }
 ```
 

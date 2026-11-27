@@ -13,8 +13,18 @@ from pathlib import Path
 import click
 import numpy as np
 
-from mctutil.mosaic.common import write_json
+from mctutil.mosaic.common import read_json, write_json
 from mctutil.shared.log import log
+
+
+def noise_total(scan: dict) -> float:
+	"""A scan's noise power in stitched units: a^2 * sum(nps) of its ``snr`` spectra."""
+	if not scan.get("snr"):
+		raise click.ClickException(f"scan {scan.get('name')} has no snr spectra (mosaic spectra)")
+	total = float((scan.get("a", 1.0) ** 2 * np.array(read_json(scan["snr"])["nps"])).sum())
+	if not total > 0:
+		raise click.ClickException(f"scan {scan.get('name')} has no positive spectral noise")
+	return total
 
 
 def radial(power: np.ndarray) -> np.ndarray:

@@ -34,14 +34,14 @@ class SingleScanRenderer:
 	"""Renders canvas slices of one scan through the stitcher with unit intensity map."""
 
 	def __init__(self, document: dict, options: dict):
-		self.shape = tuple(document["canvas"])
+		self.shape, self.depth = tuple(document["canvas"]), document["nz"]
 		self.grid, self.centre = canvas_grid(document), slice_centre(document)
 		self.options = options
 		self.cache = {}
 
 	def render(self, scan: dict, rows) -> dict:
 		if scan["name"] not in self.cache:
-			sampler = ScanSampler(dict(scan, a=1.0, b=0.0), self.grid, self.centre, self.options)
+			sampler = ScanSampler(dict(scan, a=1.0, b=0.0), self.grid, self.centre, self.depth, self.options)
 			self.cache[scan["name"]] = (sampler, {})
 		sampler, images = self.cache[scan["name"]]
 		for g in rows:

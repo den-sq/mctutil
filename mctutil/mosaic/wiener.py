@@ -20,6 +20,7 @@ import click
 import numpy as np
 
 from mctutil.mosaic.common import cv2, read_json, tifffile, write_json
+from mctutil.mosaic.spectra import noise_total
 from mctutil.mosaic.window import to_u16
 from mctutil.shared.deps import require
 from mctutil.shared.log import log
@@ -27,10 +28,10 @@ from mctutil.shared.log import log
 
 def scan_spectrum(scan: dict) -> dict:
 	data = read_json(scan["snr"])
-	gain = scan["a"] ** 2
+	gain = scan.get("a", 1.0) ** 2
 	nps, ps = gain * np.array(data["nps"]), gain * np.array(data["ps"])
 	pz_noise, pz_full = gain * np.array(data["pz_noise"]), gain * np.array(data["pz_full"])
-	total = nps.sum()
+	total = noise_total(scan)
 	return {"f": np.array(data["freq"]), "fz": np.array(data["fz"]), "n": nps / total, "S": np.clip(ps - nps, 0, None),
 			"nz": pz_noise / total, "Sz": np.clip(pz_full - pz_noise, 0, None), "s": total}
 
@@ -102,15 +103,22 @@ class GainBank:
 								for f in (0.05, 0.1, 0.2, 0.3)}}
 
 
-def noise_levels(noise, depth: int, scale: float, count: int) -> tuple[np.ndarray, float]:
-	"""Log-spaced total-noise levels between the 0.5 and 99.5 percentiles, and the low percentile."""
+def noise_levels(noise, depth: int, scale: float, count: int) -> tuple[np.ndarray, float] | None:
+	"""Log-spaced total-noise levels between the 0.5 and 99.5 percentiles, and the low percentile.
+
+	A single level when the range collapses; None when no sampled pixel has positive noise.
+	"""
 	samples = []
 	for g in range(0, depth, 37):
 		maps = noise[g].astype(np.float32) * scale
 		total = maps[0] + maps[1]
 		samples.append(total[total > 0])
 	samples = np.concatenate(samples)
+	if samples.size == 0:
+		return None
 	low, high = np.percentile(samples, 0.5), np.percentile(samples, 99.5)
+	if not high > low:
+		return np.array([low]), low
 	return np.exp(np.linspace(np.log(low), np.log(high), count)), low
 
 
@@ -132,13 +140,16 @@ def grid_weights(noise_slice, scale: float, nu, nu_low: float, r_count: int, sha
 	beta = np.where(covered > 0, maps[1], opencv.GaussianBlur(maps[1] * covered, (0, 0), 3) / density)
 	total = np.maximum(alpha + beta, nu_low * 1e-3)
 	r = beta / total
-	u = np.clip((np.log(np.maximum(total, nu[0])) - np.log(nu[0])) / (np.log(nu[-1]) - np.log(nu[0])) * (len(nu) - 1),
-				0, len(nu) - 1 - 1e-6)
+	if len(nu) > 1:
+		u = np.clip((np.log(np.maximum(total, nu[0])) - np.log(nu[0])) / (np.log(nu[-1]) - np.log(nu[0])) * (len(nu) - 1),
+					0, len(nu) - 1 - 1e-6)
+	else:
+		u = np.zeros_like(total)
 	v = np.clip(r * (r_count - 1), 0, r_count - 1 - 1e-6)
 	iu, iv = u.astype(np.int32), v.astype(np.int32)
 	fu, fv = u - iu, v - iv
 	low = {}
-	for du, wu in ((0, 1 - fu), (1, fu)):
+	for du, wu in ((0, 1 - fu), (1, fu))[:2 if len(nu) > 1 else 1]:
 		for dv, wv in ((0, 1 - fv), (1, fv)):
 			index = (iu + du) * r_count + (iv + dv)
 			weight = wu * wv
@@ -198,6 +209,16 @@ class Filter:
 		return result / np.maximum(total, 1e-6), covered
 
 
+def write_identity(source: Path, target: Path, window, span) -> None:
+	tiff = tifffile()
+	for g in range(*span):
+		output = target / f"{g:05d}.tif"
+		if output.exists():
+			continue
+		image = tiff.imread(source / f"{g:05d}.tif").astype(np.float32)
+		tiff.imwrite(output, to_u16(image, *window, image != 0))
+
+
 def run_filter(flow: Filter, target: Path, window, span, taps: int) -> None:
 	low, high = window
 	buffer = collections.OrderedDict()
@@ -240,9 +261,16 @@ def wiener(layout_path, source, noise_path, output, window, g0, g1, taps, nu_lev
 	shape, depth = tuple(document["canvas"]), document["nz"]
 	medians, f, fz = group_spectra(document["scans"])
 	noise = np.load(noise_path, mmap_mode="r")
-	nu, nu_low = noise_levels(noise, depth, noise_scale, nu_levels)
-	bank = GainBank(medians, f, fz, nu, shape, taps)
+	levels = noise_levels(noise, depth, noise_scale, nu_levels)
 	output.mkdir(parents=True, exist_ok=True)
+	span = (g0, depth if g1 is None else g1)
+	if levels is None:
+		# Zero noise everywhere: the Wiener gain is 1, so the output is the windowed source.
+		write_json(output.parent / f"{output.name}_wiener_params.json", {"identity": True})
+		write_identity(source, output, window, span)
+		return
+	nu, nu_low = levels
+	bank = GainBank(medians, f, fz, nu, shape, taps)
 	write_json(output.parent / f"{output.name}_wiener_params.json", bank.summary(taps))
 	options = {"noise_scale": noise_scale, "depth": depth, "shape": shape, "fft_workers": fft_workers}
-	run_filter(Filter(source, noise, bank, nu_low, options), output, window, (g0, depth if g1 is None else g1), taps)
+	run_filter(Filter(source, noise, bank, nu_low, options), output, window, span, taps)

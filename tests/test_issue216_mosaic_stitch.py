@@ -83,10 +83,76 @@ def test_tilted_scan_interpolates_between_its_bracketing_rows(tmp_path):
 	np.testing.assert_allclose(values[covered], (10 + tilt * y)[covered], atol=1e-4)
 
 
+def nps_file(path, total):
+	path.write_text(json.dumps({"nps": [total / 4] * 4}))
+	return str(path)
+
+
+def drifting_scan(path, values, a):
+	return {"name": "d", "dir": str(write_stack(path, values)), "nrow": len(values), "lowpass_weight": 1.0,
+			"off": 0.0, "A": a}
+
+
+def test_planar_sampling_follows_lateral_drift_with_depth(tmp_path):
+	columns = np.repeat(np.arange(64, dtype=np.float32)[None, None, :], 64, axis=1).repeat(30, axis=0)
+	scan = drifting_scan(tmp_path / "d", columns, [[1, 0, 0, 0], [0, 1, 0, 0], [0.2, 0, 1, 0]])
+	document = {"canvas": [64, 64], "nz": 30, "slice_size": 64, "scans": [scan]}
+	options = {**OPTIONS, "fov_feather": (24.0, 28.0)}
+
+	values, covered = fuse(samplers_for(document, options), 20, (64, 64), options).result()
+
+	assert covered[32, 32]
+	assert values[32, 32] == pytest.approx(36.0, abs=1e-3)
+
+
+def test_fov_weight_moves_with_the_scan_at_each_depth(tmp_path):
+	scan = drifting_scan(tmp_path / "d", np.ones((40, 64, 64), np.float32),
+							[[1, -0.01, 0, 0], [0, 1, 0, 0], [0.2, -0.002, 1, 0]])
+	document = {"canvas": [64, 64], "nz": 40, "slice_size": 64, "scans": [scan]}
+	options = {**OPTIONS, "fov_feather": (24.0, 28.0)}
+	sampler = samplers_for(document, options)[0]
+
+	_, weight = sampler.sample(20, (64, 64))
+
+	def expected(y, x):
+		sy, sx = y, 0.2 * 20 - 0.002 * y + x
+		return np.clip((28 - np.hypot(sy - 31.5, sx - 31.5)) / 4, 0, 1)
+
+	assert weight[32, 2] == pytest.approx(expected(32, 2), abs=0.02) and expected(32, 2) > 0.5
+	assert weight[32, 59] == pytest.approx(expected(32, 59), abs=0.02) and expected(32, 59) == 0
+
+
+def test_noise_maps_require_spectra(tmp_path):
+	scan = reference_scan("s", write_stack(tmp_path / "s", np.ones((4, 48, 48), np.float32)), 4, 0)
+	layout_path = tmp_path / "layout.json"
+	layout_path.write_text(json.dumps({"canvas": [48, 48], "nz": 4, "slice_size": 48, "scans": [scan]}))
+
+	result = CliRunner().invoke(stitch, [str(layout_path), str(tmp_path / "out"), "--fov-feather", "20", "23",
+											"--noise-out", str(tmp_path / "noise.npy")])
+
+	assert result.exit_code != 0
+	assert "no snr spectra" in result.output
+
+
+def test_rerun_with_noise_out_fills_maps_for_existing_slices(tmp_path):
+	volume = np.ones((6, 48, 48), np.float32)
+	scan = reference_scan("s", write_stack(tmp_path / "s", volume), 6, 0, snr=nps_file(tmp_path / "s.json", 4.0))
+	layout_path = tmp_path / "layout.json"
+	layout_path.write_text(json.dumps({"canvas": [48, 48], "nz": 6, "slice_size": 48, "scans": [scan]}))
+	arguments = [str(layout_path), str(tmp_path / "out"), "--fov-feather", "20", "23", "--row-feather", "1"]
+	runner = CliRunner()
+
+	first = runner.invoke(stitch, arguments)
+	second = runner.invoke(stitch, arguments + ["--noise-out", str(tmp_path / "noise.npy")])
+
+	assert first.exit_code == 0 and second.exit_code == 0, second.output
+	assert np.load(tmp_path / "noise.npy")[3, 0, 3, 3] == pytest.approx(4.0, rel=1e-3)
+
+
 def test_overlapping_scans_fuse_to_the_shared_content_and_write_noise_maps(tmp_path):
 	volume = ndimage.gaussian_filter(np.random.default_rng(1).normal(size=(40, 48, 48)), 1.5).astype(np.float32)
-	first = reference_scan("a", write_stack(tmp_path / "a", volume[:25]), 25, 0, noise=4.0)
-	second = reference_scan("b", write_stack(tmp_path / "b", volume[15:]), 25, 15, noise=4.0)
+	first = reference_scan("a", write_stack(tmp_path / "a", volume[:25]), 25, 0, snr=nps_file(tmp_path / "a.json", 4.0))
+	second = reference_scan("b", write_stack(tmp_path / "b", volume[15:]), 25, 15, snr=nps_file(tmp_path / "b.json", 4.0))
 	layout_path = tmp_path / "layout.json"
 	layout_path.write_text(json.dumps({"canvas": [48, 48], "nz": 40, "slice_size": 48, "scans": [first, second]}))
 	output, noise = tmp_path / "stitched", tmp_path / "noise.npy"
@@ -173,6 +239,48 @@ def test_wiener_preserves_a_uniform_canvas(tmp_path):
 	filtered = tifffile.imread(tmp_path / "out" / "00015.tif").astype(np.int64)
 	assert np.abs(filtered - int(expected)).max() <= 1
 	assert (tmp_path / "out_wiener_params.json").exists()
+
+
+def wiener_inputs(tmp_path, noise_values):
+	rng = np.random.default_rng(4)
+	image = np.zeros((30, 32, 32), np.float32)
+	image[:, 4:28, 4:28] = 0.75 + 0.05 * rng.normal(size=(30, 24, 24))
+	stitched = write_stack(tmp_path / "f32", image)
+	scans = [
+		{"name": "r", "a": 1.0, "snr": spectra_file(tmp_path / "r.json", 50)},
+		{"name": "f", "a": 1.0, "off": 0.0, "snr": spectra_file(tmp_path / "f.json", 20)},
+	]
+	layout_path = tmp_path / "layout.json"
+	layout_path.write_text(json.dumps({"canvas": [32, 32], "nz": 30, "scans": scans}))
+	noise = np.zeros((30, 2, 4, 4), np.float16)
+	noise[:, 0, :, :] = noise_values
+	np.save(tmp_path / "noise.npy", noise)
+	return layout_path, stitched, image
+
+
+def run_wiener(tmp_path, layout_path, stitched, *extra):
+	return CliRunner().invoke(wiener, [str(layout_path), str(stitched), str(tmp_path / "noise.npy"),
+										str(tmp_path / "out"), "--window", "0.5", "1.0", "--taps", "3", *extra])
+
+
+def test_wiener_keeps_coverage_when_the_noise_is_uniform(tmp_path):
+	layout_path, stitched, image = wiener_inputs(tmp_path, 2.0)
+
+	result = run_wiener(tmp_path, layout_path, stitched)
+
+	assert result.exit_code == 0, result.output
+	filtered = tifffile.imread(tmp_path / "out" / "00015.tif")
+	assert np.all(filtered[image[15] != 0] > 0)
+
+
+def test_wiener_is_the_identity_at_zero_noise(tmp_path):
+	layout_path, stitched, image = wiener_inputs(tmp_path, 2.0)
+
+	result = run_wiener(tmp_path, layout_path, stitched, "--noise-scale", "0")
+
+	assert result.exit_code == 0, result.output
+	expected = to_u16(image[15], 0.5, 1.0, image[15] != 0)
+	assert np.array_equal(tifffile.imread(tmp_path / "out" / "00015.tif"), expected)
 
 
 def test_norm_fit_matches_a_scaled_overlapping_scan(tmp_path):
